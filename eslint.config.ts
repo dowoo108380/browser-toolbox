@@ -73,6 +73,14 @@ export default defineConfig(
     rules: {
       'no-restricted-syntax': ['error', ...htmlInjection, ...classInheritance],
       eqeqeq: 'error',
+      // 런타임 검증은 zod/mini 방식 하나만 쓴다(결정 0006).
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: 'zod', message: 'zod/mini를 쓴다(결정 0006).' }],
+          patterns: [{ group: ['zod/*', '!zod/mini'], message: 'zod/mini를 쓴다(결정 0006).' }],
+        },
+      ],
       // 타입 단언은 신뢰 경계에서만 쓰고, 그 줄에서 이유를 적어 이 규칙을 끈다(quality 054).
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
       '@typescript-eslint/consistent-type-imports': 'error',
