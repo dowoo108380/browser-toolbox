@@ -1,0 +1,142 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createScope } from './scope.ts';
+
+// 자원 범위(결정 0014). 실행 틀이 기능마다 하나 만들어 시작 함수에 넘긴다.
+
+function setup() {
+  const errors: unknown[] = [];
+  const scope = createScope(window, (error) => errors.push(error));
+  return { scope, errors };
+}
+
+describe('자원 범위', () => {
+  it('닫으면 맡긴 정리를 반대 순서로 한 번씩 부른다', () => {
+    const { scope } = setup();
+    const order: string[] = [];
+    scope.defer(() => order.push('a'));
+    scope.defer(() => order.push('b'));
+    scope.close();
+    scope.close();
+    expect(order).toEqual(['b', 'a']);
+  });
+
+  it('먼저 정리한 자원은 닫을 때 다시 정리하지 않는다', () => {
+    const { scope } = setup();
+    const cleanup = vi.fn();
+    const release = scope.defer(cleanup);
+    release();
+    release();
+    scope.close();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('닫힌 범위에 맡기면 곧바로 정리한다(시작 도중에 실패한 뒤 만든 자원도 남지 않는다)', () => {
+    const { scope } = setup();
+    scope.close();
+    const cleanup = vi.fn();
+    scope.defer(cleanup);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('정리 하나가 실패해도 나머지 정리는 하고 실패를 알린다', () => {
+    const { scope, errors } = setup();
+    const cleanup = vi.fn();
+    scope.defer(cleanup);
+    scope.defer(() => {
+      throw new Error('정리 실패');
+    });
+    scope.close();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('감싼 콜백의 예외와 거절된 Promise를 알리고, 닫힌 뒤에는 부르지 않는다', async () => {
+    const { scope, errors } = setup();
+    const thrown = scope.guard(() => {
+      throw new Error('콜백 실패');
+    });
+    const rejected = scope.guard(() => Promise.reject(new Error('비동기 실패')));
+    expect(() => {
+      thrown();
+    }).not.toThrow();
+    rejected();
+    await vi.waitFor(() => {
+      expect(errors).toHaveLength(2);
+    });
+    const later = vi.fn();
+    const guarded = scope.guard(later);
+    scope.close();
+    guarded();
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it('안쪽 범위는 바깥이 닫히면 함께 닫히고, 먼저 닫으면 바깥에서 빠진다', () => {
+    const { scope } = setup();
+    const first = scope.child();
+    const second = scope.child();
+    const firstCleanup = vi.fn();
+    const secondCleanup = vi.fn();
+    first.defer(firstCleanup);
+    second.defer(secondCleanup);
+    first.close();
+    expect(firstCleanup).toHaveBeenCalledTimes(1);
+    scope.close();
+    expect(firstCleanup).toHaveBeenCalledTimes(1);
+    expect(secondCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('안쪽 콜백의 예외도 바깥과 같이 알린다', () => {
+    const { scope, errors } = setup();
+    scope.child().guard(() => {
+      throw new Error('안쪽 실패');
+    })();
+    expect(errors).toHaveLength(1);
+  });
+
+  it('이벤트 듣기는 닫으면 그친다(capture로 건 것도)', () => {
+    const { scope } = setup();
+    const target = new EventTarget();
+    const plain = vi.fn();
+    const captured = vi.fn();
+    scope.listen(target, 'ping', plain);
+    scope.listen(target, 'ping', captured, { capture: true });
+    target.dispatchEvent(new Event('ping'));
+    scope.close();
+    target.dispatchEvent(new Event('ping'));
+    expect(plain).toHaveBeenCalledTimes(1);
+    expect(captured).toHaveBeenCalledTimes(1);
+  });
+
+  it('화면 그리기 예약은 한 번 부르고, 닫으면 취소된다', async () => {
+    const { scope } = setup();
+    const fired = vi.fn();
+    scope.animationFrame(fired);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(fired).toHaveBeenCalledTimes(1);
+    const cancelled = vi.fn();
+    scope.animationFrame(cancelled);
+    scope.close();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(cancelled).not.toHaveBeenCalled();
+  });
+
+  it('관찰은 닫으면 끊긴다', async () => {
+    const { scope } = setup();
+    const records = vi.fn();
+    const observer = scope.mutationObserver(records);
+    const target = document.createElement('div');
+    document.body.append(target);
+    observer.observe(target, { childList: true });
+    target.append(document.createElement('span'));
+    await vi.waitFor(() => {
+      expect(records).toHaveBeenCalledTimes(1);
+    });
+    scope.close();
+    target.append(document.createElement('span'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(records).toHaveBeenCalledTimes(1);
+    target.remove();
+  });
+});

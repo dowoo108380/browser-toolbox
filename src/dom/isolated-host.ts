@@ -8,7 +8,7 @@ export const pageElementAttribute = 'data-browser-toolbox';
 // 물러남 이벤트를 받은 살아 있는 실행 틀이 자기 요소에 그 이벤트의 토큰을 적는다(결정 0008).
 export const claimAttribute = 'data-browser-toolbox-claim';
 
-export interface IsolatedHost {
+interface IsolatedHost {
   readonly host: HTMLElement;
   readonly root: ShadowRoot;
   readonly remove: () => void;

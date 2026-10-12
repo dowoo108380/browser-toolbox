@@ -1,8 +1,8 @@
 import { retireEventName } from '../contracts/index.ts';
-import { claimOwnedHosts } from '../dom/index.ts';
+import { type Scope, claimOwnedHosts, createScope } from '../dom/index.ts';
 import type { AppError, ErrorKind, Result } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
-import type { Dispose, PageContext, PagePart } from './part.ts';
+import type { PageContext, PagePart } from './part.ts';
 
 // 콘텐츠 스크립트 실행 틀(아키텍처 2·3장). 설정을 구독해 기능을 시작하고 정리한다.
 
@@ -28,8 +28,9 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   let retired = false;
   let unsubscribe: () => void = () => undefined;
 
-  // 기능마다 마지막으로 적용한 설정(JSON)과 정리 함수.
-  const running = new Map<string, { readonly key: string; readonly dispose: Dispose | null }>();
+  // 기능마다 마지막으로 적용한 설정(JSON)과 그때 만든 자원 범위. 실패해 멈춘 기능은 범위가 null이고,
+  // 그 기능의 설정이 바뀔 때까지 다시 시작하지 않는다(quality 010).
+  const running = new Map<string, { readonly key: string; readonly scope: Scope | null }>();
 
   const report = (featureId: string | null, kind: ErrorKind) => {
     void deps.report(featureId, kind).then((result) => {
@@ -38,19 +39,19 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     });
   };
 
-  // 기능 하나의 실패는 그 기능만 멈춘다(quality 010).
-  const guarded = (featureId: string, action: () => void) => {
-    try {
-      action();
-    } catch {
-      report(featureId, 'unexpected');
-    }
+  // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
+  // 다른 기능과 실행 틀은 그대로 돈다.
+  const fail = (featureId: string, scope: Scope) => {
+    report(featureId, 'unexpected');
+    const entry = running.get(featureId);
+    if (entry?.scope === scope) running.set(featureId, { key: entry.key, scope: null });
+    scope.close();
   };
 
   const stop = (featureId: string) => {
-    const dispose = running.get(featureId)?.dispose;
+    const scope = running.get(featureId)?.scope;
     running.delete(featureId);
-    if (dispose) guarded(featureId, dispose);
+    scope?.close();
   };
 
   const stopAll = () => {
@@ -63,11 +64,17 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       const key = JSON.stringify(snapshot.features.get(part.featureId) ?? null);
       if (running.get(part.featureId)?.key === key) continue;
       stop(part.featureId);
-      let dispose: Dispose | null = null;
-      guarded(part.featureId, () => {
-        dispose = part.start(snapshot, deps.context);
+      const scope: Scope = createScope(deps.context.window, () => {
+        fail(part.featureId, scope);
       });
-      running.set(part.featureId, { key, dispose });
+      // 시작 도중 콜백이 실패해도 fail이 이 범위를 찾을 수 있게 먼저 둔다.
+      running.set(part.featureId, { key, scope });
+      try {
+        part.start(snapshot, { ...deps.context, scope });
+      } catch {
+        // 시작 도중의 예외: 그때까지 범위에 맡긴 자원을 치우고 기록한다.
+        fail(part.featureId, scope);
+      }
     }
   };
 

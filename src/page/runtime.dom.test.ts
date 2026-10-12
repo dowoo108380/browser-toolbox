@@ -58,24 +58,36 @@ function setup(parts: readonly PagePart[], connected = true) {
   };
 }
 
-// 켜짐이면 시작 횟수와 정리 횟수를 센다.
+function isEnabled(value: Snapshot, featureId: string): boolean {
+  const settings = value.features.get(featureId);
+  return (
+    typeof settings === 'object' &&
+    settings !== null &&
+    'enabled' in settings &&
+    settings.enabled === true
+  );
+}
+
+// 켜짐이면 시작 횟수와 정리 횟수를 세고, 문서의 ping 이벤트를 받은 횟수도 센다.
 function countingPart(featureId: string) {
-  const counts = { started: 0, disposed: 0 };
+  const counts = { started: 0, disposed: 0, pings: 0 };
   const part: PagePart = {
     featureId,
-    start: (value) => {
-      const settings = value.features.get(featureId);
-      if (typeof settings !== 'object' || settings === null || !('enabled' in settings))
-        return null;
-      if (settings.enabled !== true) return null;
+    start: (value, { scope }) => {
+      if (!isEnabled(value, featureId)) return;
       counts.started += 1;
-      return () => {
+      scope.defer(() => {
         counts.disposed += 1;
-      };
+      });
+      scope.listen(document, 'test-ping', () => {
+        counts.pings += 1;
+      });
     },
   };
   return { part, counts };
 }
+
+const ping = () => document.dispatchEvent(new Event('test-ping'));
 
 describe('콘텐츠 스크립트 실행 틀', () => {
   it('COM-1.4 같은 프레임에 두 번 실려도 실행 틀은 하나다', () => {
@@ -90,11 +102,11 @@ describe('콘텐츠 스크립트 실행 틀', () => {
     const runtime = setup([a.part, b.part]);
     runtime.apply(snapshot({ a: { enabled: true } }));
     runtime.apply(snapshot({ a: { enabled: true }, b: { enabled: true } }));
-    expect(a.counts).toEqual({ started: 1, disposed: 0 });
-    expect(b.counts).toEqual({ started: 1, disposed: 0 });
+    expect(a.counts).toMatchObject({ started: 1, disposed: 0 });
+    expect(b.counts).toMatchObject({ started: 1, disposed: 0 });
     runtime.apply(snapshot({ a: { enabled: false }, b: { enabled: true } }));
-    expect(a.counts).toEqual({ started: 1, disposed: 1 });
-    expect(b.counts).toEqual({ started: 1, disposed: 0 });
+    expect(a.counts).toMatchObject({ started: 1, disposed: 1 });
+    expect(b.counts).toMatchObject({ started: 1, disposed: 0 });
   });
 
   it('quality 010 한 기능의 시작이 실패해도 다른 기능은 시작하고 실패를 기록한다', () => {
@@ -176,9 +188,9 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
   // 켜지면 화면 요소 하나를 만드는 기능.
   const hostPart: PagePart = {
     featureId: 'host',
-    start: () => {
+    start: (_value, { scope }) => {
       const host = createIsolatedHost(document, { name: 'test', css: '', parent: document.body });
-      return host.remove;
+      scope.defer(host.remove);
     },
   };
 
@@ -212,5 +224,140 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
     runtime.apply(snapshot({ host: { enabled: true } }));
     document.dispatchEvent(new CustomEvent(retireEventName, { detail: 'page-token' }));
     expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
+  });
+});
+
+describe('결정 0014 기능의 자원 범위와 실패 격리', () => {
+  // 켜지면 화면 요소, 이벤트 듣기, 관찰을 만들고, 정한 곳에서 실패하는 기능.
+  function failingPart(failAt: 'start' | 'ping' | 'mutation' | 'async') {
+    const counts = { started: 0, pings: 0, others: 0 };
+    const target = document.createElement('div');
+    document.body.append(target);
+    const part: PagePart = {
+      featureId: 'failing',
+      start: (value, { scope }) => {
+        if (!isEnabled(value, 'failing')) return;
+        counts.started += 1;
+        const host = createIsolatedHost(document, { name: 'test', css: '', parent: document.body });
+        scope.defer(host.remove);
+        scope.listen(document, 'test-other', () => {
+          counts.others += 1;
+        });
+        scope.listen(document, 'test-ping', () => {
+          counts.pings += 1;
+          if (failAt === 'ping' && counts.pings === 2) throw new Error('콜백 고장');
+        });
+        scope
+          .mutationObserver(() => {
+            if (failAt === 'mutation') throw new Error('관찰 고장');
+          })
+          .observe(target, { childList: true });
+        scope.listen(document, 'test-async', async () => {
+          await Promise.resolve();
+          if (failAt === 'async') throw new Error('비동기 고장');
+        });
+        if (failAt === 'start') throw new Error('시작 고장');
+      },
+    };
+    return { part, counts, target };
+  }
+
+  // 실패한 기능이 페이지에 남긴 것이 없고 더는 이벤트를 받지 않으며, 다른 기능은 그대로 도는지 본다.
+  function expectIsolated(
+    failing: ReturnType<typeof failingPart>,
+    good: ReturnType<typeof countingPart>,
+    runtime: ReturnType<typeof setup>,
+  ) {
+    expect(document.querySelectorAll(hostTagName)).toHaveLength(0);
+    const { pings, others } = failing.counts;
+    ping();
+    document.dispatchEvent(new Event('test-other'));
+    expect(failing.counts.pings).toBe(pings);
+    expect(failing.counts.others).toBe(others);
+    expect(runtime.reports).toEqual([{ featureId: 'failing', kind: 'unexpected' }]);
+    expect(good.counts.disposed).toBe(0);
+    const before = good.counts.pings;
+    ping();
+    expect(good.counts.pings).toBe(before + 1);
+    failing.target.remove();
+  }
+
+  const both = snapshot({ failing: { enabled: true }, good: { enabled: true } });
+
+  it('quality 083 시작 도중에 실패해도 그때까지 만든 자원을 치우고 기록하며, 다른 기능은 계속 돈다', () => {
+    const failing = failingPart('start');
+    const good = countingPart('good');
+    const runtime = setup([failing.part, good.part]);
+    runtime.apply(both);
+    expectIsolated(failing, good, runtime);
+  });
+
+  it('quality 010 이벤트 콜백의 예외는 그 기능만 멈추고 정리한 뒤 기록하며, 페이지로 새지 않는다', () => {
+    const failing = failingPart('ping');
+    const good = countingPart('good');
+    const runtime = setup([failing.part, good.part]);
+    runtime.apply(both);
+    ping();
+    expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
+    expect(() => ping()).not.toThrow();
+    expectIsolated(failing, good, runtime);
+  });
+
+  it('quality 010 관찰 콜백의 예외도 그 기능만 멈추고 정리한 뒤 기록한다', async () => {
+    const failing = failingPart('mutation');
+    const good = countingPart('good');
+    const runtime = setup([failing.part, good.part]);
+    runtime.apply(both);
+    failing.target.append(document.createElement('span'));
+    await vi.waitFor(() => {
+      expect(runtime.reports).toHaveLength(1);
+    });
+    expectIsolated(failing, good, runtime);
+  });
+
+  it('quality 010 비동기 콜백이 거절되어도 그 기능만 멈추고 정리한 뒤 기록한다', async () => {
+    const failing = failingPart('async');
+    const good = countingPart('good');
+    const runtime = setup([failing.part, good.part]);
+    runtime.apply(both);
+    document.dispatchEvent(new Event('test-async'));
+    await vi.waitFor(() => {
+      expect(runtime.reports).toHaveLength(1);
+    });
+    expectIsolated(failing, good, runtime);
+  });
+
+  it('실패한 기능은 설정이 그대로면 다시 시작하지 않고, 설정이 바뀌면 다시 시작한다', () => {
+    const failing = failingPart('ping');
+    const runtime = setup([failing.part]);
+    runtime.apply(both);
+    ping();
+    ping();
+    runtime.apply(both);
+    expect(failing.counts.started).toBe(1);
+    runtime.apply(snapshot({ failing: { enabled: false } }));
+    runtime.apply(both);
+    expect(failing.counts.started).toBe(2);
+    expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
+    failing.target.remove();
+  });
+
+  it('정리 하나가 실패해도 나머지 정리는 하고 기록한다', () => {
+    const cleanup = vi.fn();
+    const part: PagePart = {
+      featureId: 'cleanup',
+      start: (value, { scope }) => {
+        if (!isEnabled(value, 'cleanup')) return;
+        scope.defer(cleanup);
+        scope.defer(() => {
+          throw new Error('정리 고장');
+        });
+      },
+    };
+    const runtime = setup([part]);
+    runtime.apply(snapshot({ cleanup: { enabled: true } }));
+    runtime.apply(snapshot({ cleanup: { enabled: false } }));
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(runtime.reports).toEqual([{ featureId: 'cleanup', kind: 'unexpected' }]);
   });
 });

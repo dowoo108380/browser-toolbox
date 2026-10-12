@@ -1,4 +1,4 @@
-import { type IsolatedHost, createIsolatedHost } from '../../dom/index.ts';
+import { type Scope, createIsolatedHost } from '../../dom/index.ts';
 import { definePagePart } from '../../page/index.ts';
 import { formatRate } from './core/rate.ts';
 import { mediaSpeed } from './feature.ts';
@@ -27,16 +27,16 @@ const css = `
 `;
 
 interface Indicator {
-  readonly host: IsolatedHost;
+  // 이 영상의 표시창에 속한 자원(화면 요소, 배속 바뀜 듣기, 크기 관찰). 영상이 사라지면 닫는다(quality 083).
+  readonly scope: Scope;
   readonly label: HTMLElement;
-  readonly onRateChange: () => void;
 }
 
-export const page = definePagePart(mediaSpeed, (_settings, { window, document }) => {
+export const page = definePagePart(mediaSpeed, (_settings, { window, document, scope }) => {
   const indicators = new Map<HTMLVideoElement, Indicator>();
-  let frame: number | null = null;
+  let cancelFrame: (() => void) | null = null;
 
-  const place = (video: HTMLVideoElement, indicator: Indicator) => {
+  const place = (video: HTMLVideoElement, label: HTMLElement) => {
     const rect = video.getBoundingClientRect();
     const visible =
       video.isConnected &&
@@ -46,49 +46,51 @@ export const page = definePagePart(mediaSpeed, (_settings, { window, document })
       rect.right > 0 &&
       rect.top < window.innerHeight &&
       rect.left < window.innerWidth;
-    indicator.label.hidden = !visible;
-    indicator.label.style.left = `${String(rect.left + offset)}px`;
-    indicator.label.style.top = `${String(rect.top + offset)}px`;
+    label.hidden = !visible;
+    label.style.left = `${String(rect.left + offset)}px`;
+    label.style.top = `${String(rect.top + offset)}px`;
   };
 
   const placeAll = () => {
-    frame = null;
-    for (const [video, indicator] of indicators) place(video, indicator);
+    cancelFrame = null;
+    for (const [video, indicator] of indicators) place(video, indicator.label);
   };
 
   // 스크롤과 크기 변경은 한 프레임에 한 번만 다시 놓는다.
   const schedule = () => {
-    frame ??= window.requestAnimationFrame(placeAll);
+    cancelFrame ??= scope.animationFrame(placeAll);
   };
+
+  const resizeObserver = scope.resizeObserver(schedule);
 
   const attach = (video: HTMLVideoElement) => {
     if (indicators.has(video)) return;
+    const own = scope.child();
     const host = createIsolatedHost(document, {
       name: 'media-speed-indicator',
       css,
       parent: document.documentElement,
     });
+    own.defer(host.remove);
     const label = document.createElement('div');
     label.className = 'indicator';
     host.root.append(label);
-    const onRateChange = () => {
+    indicators.set(video, { scope: own, label });
+    own.defer(() => indicators.delete(video));
+    const showRate = () => {
       label.textContent = formatRate(video.playbackRate);
     };
-    onRateChange();
-    video.addEventListener('ratechange', onRateChange);
-    const indicator = { host, label, onRateChange };
-    indicators.set(video, indicator);
+    showRate();
+    own.listen(video, 'ratechange', showRate);
     resizeObserver.observe(video);
-    place(video, indicator);
+    own.defer(() => {
+      resizeObserver.unobserve(video);
+    });
+    place(video, label);
   };
 
   const detach = (video: HTMLVideoElement) => {
-    const indicator = indicators.get(video);
-    if (indicator === undefined) return;
-    video.removeEventListener('ratechange', indicator.onRateChange);
-    resizeObserver.unobserve(video);
-    indicator.host.remove();
-    indicators.delete(video);
+    indicators.get(video)?.scope.close();
   };
 
   const videosIn = (node: Node): HTMLVideoElement[] => {
@@ -97,9 +99,8 @@ export const page = definePagePart(mediaSpeed, (_settings, { window, document })
     return [];
   };
 
-  const resizeObserver = new ResizeObserver(schedule);
   // 바뀐 부분만 본다. 문서 전체를 되풀이해 훑지 않는다(quality 078).
-  const mutationObserver = new MutationObserver((records) => {
+  const mutationObserver = scope.mutationObserver((records) => {
     for (const record of records) {
       for (const node of record.removedNodes) {
         for (const video of videosIn(node)) if (!video.isConnected) detach(video);
@@ -112,15 +113,6 @@ export const page = definePagePart(mediaSpeed, (_settings, { window, document })
 
   for (const video of document.querySelectorAll('video')) attach(video);
   mutationObserver.observe(document, { childList: true, subtree: true });
-  window.addEventListener('scroll', schedule, { capture: true, passive: true });
-  window.addEventListener('resize', schedule, { passive: true });
-
-  return () => {
-    mutationObserver.disconnect();
-    resizeObserver.disconnect();
-    window.removeEventListener('scroll', schedule, { capture: true });
-    window.removeEventListener('resize', schedule);
-    if (frame !== null) window.cancelAnimationFrame(frame);
-    for (const video of [...indicators.keys()]) detach(video);
-  };
+  scope.listen(window, 'scroll', schedule, { capture: true, passive: true });
+  scope.listen(window, 'resize', schedule, { passive: true });
 });
