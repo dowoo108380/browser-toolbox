@@ -78,6 +78,29 @@ export function nextRevision(previous: number, now: number): number {
   return Math.max(previous + 1, Math.trunc(now));
 }
 
+// 쓰기 직전의 최종 값(revision을 정한 값) 전체를 읽는 쪽과 같은 기준으로 검사한다. 틀린 값을 쓰면 다음 읽기에서
+// 설정 전체의 손상이 되어 모든 설정을 잃으므로, 틀리면 쓰지 않는다(결정 0011 "쓰기", quality 066).
+// 예: revision이 Number.MAX_SAFE_INTEGER인 값에서 다음 revision은 안전한 정수가 아니다.
+export function checkFinal(
+  value: StoredSettings,
+  format: SettingsFormat,
+  specs: readonly FeatureSettingsSpec[],
+): Result<StoredSettings, AppError> {
+  const classified = classify(value, format);
+  if (
+    classified.kind === 'current' &&
+    checkFeatureItems(value.features, specs).corrupt.length === 0
+  ) {
+    return ok(value);
+  }
+  return err(
+    appError(
+      'unexpected',
+      '저장할 설정이 형식에 맞지 않아 저장하지 않았다. 저장된 설정은 바뀌지 않았다.',
+    ),
+  );
+}
+
 export const settingsSizeLimit = 262_144;
 
 // 설정을 JSON으로 쓴 UTF-8 바이트 수. 문자열 길이(UTF-16 코드 단위)가 아니다(결정 0011 "크기 한도").

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { oldStored, specs, stored, twoVersionFormat } from '../../tests/support/settings.ts';
 import { settingsFormat } from './format.ts';
-import { checkSize, nextRevision, normalize, settingsSize, settingsSizeLimit } from './write.ts';
+import {
+  checkFinal,
+  checkSize,
+  nextRevision,
+  normalize,
+  settingsSize,
+  settingsSizeLimit,
+} from './write.ts';
 
 describe('쓰기 전에 지금 형식의 값을 만든다', () => {
   it('설정이 없으면 기본 설정에서 시작한다', () => {
@@ -75,6 +82,24 @@ describe('세대 번호(결정 0011)', () => {
 
   it('시계가 뒤로 가도 바꾸기 전 값보다 크다', () => {
     expect(nextRevision(now, now - 60_000)).toBe(now + 1);
+  });
+});
+
+describe('최종 값 검증(결정 0011 "쓰기")', () => {
+  it('지금 형식이고 아는 기능의 항목이 맞으면 통과한다. 모르는 기능의 항목은 보지 않는다', () => {
+    const value = stored(5, { other: { enabled: true }, 'future-feature': { anything: 1 } });
+    expect(checkFinal(value, settingsFormat, specs)).toEqual({ ok: true, value });
+  });
+
+  it('revision이 Number.MAX_SAFE_INTEGER에서 더 올라간 값은 쓰지 않는다', () => {
+    const next = stored(nextRevision(Number.MAX_SAFE_INTEGER, 1_790_000_000_000));
+    const result = checkFinal(next, settingsFormat, specs);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('unexpected');
+  });
+
+  it('아는 기능의 항목이 틀리면 쓰지 않는다', () => {
+    expect(checkFinal(stored(5, { other: { enabled: 1 } }), settingsFormat, specs).ok).toBe(false);
   });
 });
 
