@@ -1,0 +1,180 @@
+{
+  "forbidden": [
+    {
+      "name": "no-circular",
+      "comment": "순환 의존이 없다(quality 042).",
+      "severity": "error",
+      "from": {},
+      "to": { "circular": true }
+    },
+    {
+      "name": "layer-shared",
+      "comment": "shared는 아무 층도 쓰지 않는다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/shared/" },
+      "to": { "path": "^src/", "pathNot": "^src/shared/" }
+    },
+    {
+      "name": "layer-contracts",
+      "comment": "contracts는 shared만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/contracts/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared|contracts)/" }
+    },
+    {
+      "name": "layer-platform",
+      "comment": "platform은 shared, contracts만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/platform/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared|contracts|platform)/" }
+    },
+    {
+      "name": "layer-storage",
+      "comment": "storage는 shared, contracts, platform만 쓴다. 읽기 도우미가 저장소를 읽고 서비스 워커에 준비를 부탁하기 때문이다(결정 0004 고친 기록).",
+      "severity": "error",
+      "from": { "path": "^src/storage/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared|contracts|platform|storage)/" }
+    },
+    {
+      "name": "layer-dom",
+      "comment": "dom은 shared만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/dom/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared|dom)/" }
+    },
+    {
+      "name": "layer-sites",
+      "comment": "사이트 모듈은 shared, dom과 자기 폴더만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/sites/([^/]+)/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared/|dom/|sites/$1/)" }
+    },
+    {
+      "name": "layer-page",
+      "comment": "page는 shared, contracts, platform, storage, dom만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/page/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared|contracts|platform|storage|dom|page)/" }
+    },
+    {
+      "name": "layer-background",
+      "comment": "background는 shared, contracts, platform, storage만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/background/" },
+      "to": {
+        "path": "^src/",
+        "pathNot": "^src/(shared|contracts|platform|storage|background)/"
+      }
+    },
+    {
+      "name": "layer-ui",
+      "comment": "ui는 shared, contracts, platform, storage만 쓴다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/ui/" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared|contracts|platform|storage|ui)/" }
+    },
+    {
+      "name": "feature-isolation",
+      "comment": "기능은 다른 기능, 기능 목록, 진입점을 쓰지 않는다(quality 038).",
+      "severity": "error",
+      "from": { "path": "^src/features/([^/]+)/" },
+      "to": { "path": "^src/(entries/|features/)", "pathNot": "^src/features/$1/" }
+    },
+    {
+      "name": "feature-core-pure",
+      "comment": "기능의 core는 shared와 자기 core만 쓴다. Chrome과 DOM 없이 테스트한다(quality 015, 043).",
+      "severity": "error",
+      "from": { "path": "^src/features/([^/]+)/core/", "pathNot": "\\.test\\.ts$" },
+      "to": { "path": "^src/", "pathNot": "^src/(shared/|features/$1/core/)" }
+    },
+    {
+      "name": "public-interface-layers",
+      "comment": "다른 층은 그 층의 index.ts만 가져온다(quality 036, 결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/([^/]+)/", "pathNot": "\\.test\\.tsx?$" },
+      "to": {
+        "path": "^src/(shared|contracts|platform|storage|dom|page|background|ui)/",
+        "pathNot": ["^src/$1/", "^src/[^/]+/index\\.ts$"]
+      }
+    },
+    {
+      "name": "public-interface-tests",
+      "comment": "테스트는 자기 모듈의 안쪽과 platform의 가짜(fake.ts)를 가져올 수 있다. 다른 모듈은 index.ts만 쓴다.",
+      "severity": "error",
+      "from": { "path": "^src/([^/]+)/.+\\.test\\.tsx?$" },
+      "to": {
+        "path": "^src/(shared|contracts|platform|storage|dom|page|background|ui)/",
+        "pathNot": ["^src/$1/", "^src/[^/]+/index\\.ts$", "^src/platform/fake\\.ts$"]
+      }
+    },
+    {
+      "name": "public-interface-sites",
+      "comment": "사이트 모듈 밖에서는 그 사이트의 index.ts만 가져온다(quality 046).",
+      "severity": "error",
+      "from": { "path": "^src/", "pathNot": "^src/sites/" },
+      "to": { "path": "^src/sites/[^/]+/", "pathNot": "^src/sites/[^/]+/index\\.ts$" }
+    },
+    {
+      "name": "public-interface-features",
+      "comment": "기능 폴더는 자리 파일만 밖에 내보내고, 그것을 가져오는 곳은 기능 목록과 진입점뿐이다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/", "pathNot": ["^src/features/", "^src/entries/"] },
+      "to": { "path": "^src/features/" }
+    },
+    {
+      "name": "feature-list-definitions",
+      "comment": "기능 목록은 각 기능의 feature.ts만 가져온다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/features/list\\.ts$" },
+      "to": { "path": "^src/features/[^/]+/", "pathNot": "^src/features/[^/]+/feature\\.ts$" }
+    },
+    {
+      "name": "entries-slot-files",
+      "comment": "진입점은 기능의 자리 파일(feature.ts, page.ts, background.ts, ui.tsx)만 가져온다(결정 0004).",
+      "severity": "error",
+      "from": { "path": "^src/entries/" },
+      "to": {
+        "path": "^src/features/[^/]+/",
+        "pathNot": "^src/features/[^/]+/(feature\\.ts|page\\.ts|background\\.ts|ui\\.tsx)$"
+      }
+    },
+    {
+      "name": "fake-only-in-tests",
+      "comment": "platform의 가짜는 테스트에서만 가져온다(결정 0004).",
+      "severity": "error",
+      "from": { "pathNot": "(\\.test\\.tsx?$|^tests/)" },
+      "to": { "path": "^src/platform/fake\\.ts$" }
+    },
+    {
+      "name": "preact-only-in-extension-pages",
+      "comment": "Preact는 확장 화면에만 쓴다. 웹 페이지에 실리는 스크립트에 넣지 않는다(결정 0007).",
+      "severity": "error",
+      "from": {
+        "path": "^src/",
+        "pathNot": "^src/(ui/|entries/popup\\.tsx$|features/[^/]+/ui\\.tsx$)"
+      },
+      "to": { "path": "node_modules/preact/" }
+    },
+    {
+      "name": "no-node-in-src",
+      "comment": "확장 코드는 Node 모듈을 쓰지 않는다.",
+      "severity": "error",
+      "from": { "path": "^src/", "pathNot": "\\.test\\.tsx?$" },
+      "to": { "dependencyTypes": ["core"] }
+    },
+    {
+      "name": "no-tests-in-src",
+      "comment": "확장 코드는 테스트 자료를 가져오지 않는다.",
+      "severity": "error",
+      "from": { "path": "^src/", "pathNot": "\\.test\\.tsx?$" },
+      "to": { "path": "^tests/" }
+    }
+  ],
+  "options": {
+    "doNotFollow": { "path": "node_modules" },
+    "exclude": { "path": "^(dist|coverage|test-results|playwright-report|artifacts)/" },
+    "tsConfig": { "fileName": "tsconfig.node.json" },
+    "tsPreCompilationDeps": true,
+    "enhancedResolveOptions": { "extensions": [".ts", ".tsx", ".js"] }
+  }
+}

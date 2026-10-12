@@ -1,0 +1,17 @@
+# 단일 패키지 저장소다. 이 파일은 pnpm 설정을 두려고 있다.
+
+# package.json에 범위가 아닌 정확한 버전을 적는다. 등록부에서 확인한 버전과 같게 하기 위해서다.
+savePrefix: ''
+
+# 나온 지 하루(1440분)가 안 된 판은 설치하지 않는다. pnpm 12의 기본값과 같지만,
+# 명시하면 너무 새 판을 요청했을 때 조용히 예외를 더하지 않고 멈춘다.
+minimumReleaseAge: 1440
+
+# 설치 스크립트를 실행해도 되는 의존성. 목록에 없는 것은 실행하지 않는다.
+allowBuilds:
+  # 빌드에 쓰는 실행 파일을 설치한다.
+  esbuild: true
+
+# 스크립트를 운영체제와 상관없이 같은 셸 문법으로 돌린다(예: PLAYWRIGHT_BROWSERS_PATH=0 명령).
+# PLAYWRIGHT_BROWSERS_PATH=0은 Playwright의 Chromium을 사용자 전역이 아닌 node_modules 안에 둔다.
+shellEmulator: true

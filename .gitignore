@@ -4,3 +4,13 @@ CLAUDE.md
 
 # 로컬 전용 프로젝트 문서
 docs/
+
+# 설치한 것과 만들어지는 것
+node_modules/
+dist/
+coverage/
+reports/
+test-results/
+playwright-report/
+.stryker-tmp/
+artifacts/

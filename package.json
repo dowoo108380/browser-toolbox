@@ -1,0 +1,59 @@
+{
+  "name": "browser-toolbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "웹을 쓰는 동안 늘 켜 두는 Chrome 확장",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "verify": "pnpm check && pnpm build && pnpm test:e2e && pnpm package",
+    "check": "pnpm generate --check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm structure && pnpm unused && pnpm test",
+    "generate": "node scripts/generate.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "lint": "eslint --flag unstable_native_nodejs_ts_config --max-warnings 0 .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "structure": "depcruise --config .dependency-cruiser.json src scripts tests",
+    "unused": "knip",
+    "test": "PLAYWRIGHT_BROWSERS_PATH=0 vitest run --coverage",
+    "build": "node scripts/build.ts",
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test",
+    "package": "node scripts/package.ts",
+    "mutation": "stryker run",
+    "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install --no-shell chromium"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.21.0",
+      "onFail": "download"
+    },
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.8.1",
+      "onFail": "download"
+    }
+  },
+  "dependencies": {
+    "preact": "11.0.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.0",
+    "@stryker-mutator/core": "10.0.0",
+    "@types/node": "24.19.2",
+    "@vitest/browser-playwright": "5.0.3",
+    "@vitest/coverage-v8": "5.0.3",
+    "chrome-types": "0.1.454",
+    "dependency-cruiser": "18.5.0",
+    "esbuild": "0.28.2",
+    "eslint": "10.12.0",
+    "knip": "6.41.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>영상이 최상위와 iframe에 하나씩 있는 페이지</title>
+    <style>
+      video {
+        display: block;
+        width: 320px;
+        height: 180px;
+        background: #222;
+      }
+      iframe {
+        width: 400px;
+        height: 240px;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="top-video"></video>
+    <!-- 포트가 다른 출처의 iframe(tests/server.ts가 두 포트를 연다). -->
+    <iframe id="frame" title="영상 iframe" src="http://127.0.0.1:4174/video-only.html"></iframe>
+  </body>
+</html>

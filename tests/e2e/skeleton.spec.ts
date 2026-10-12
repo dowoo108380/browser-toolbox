@@ -1,0 +1,67 @@
+import {
+  expect,
+  fixtureOrigin,
+  hostCount,
+  indicatorTexts,
+  openPopup,
+  test,
+} from './support/extension.ts';
+
+// 걸어 다니는 뼈대(아키텍처 12장): 팝업에서 켜면 모든 프레임의 영상 위에 실제 배속이 뜨고, 끄면 사라진다.
+
+test('099 확장이 올라가고 서비스 워커가 기본 설정을 쓰며 팝업이 오류 없이 열린다', async ({
+  context,
+  extensionId,
+}) => {
+  const worker = context.serviceWorkers()[0];
+  expect(worker).toBeDefined();
+  await expect
+    .poll(() => worker?.evaluate(() => chrome.storage.local.get('settings')))
+    .toMatchObject({ settings: { version: 1, features: {}, sites: {} } });
+
+  const errors: string[] = [];
+  const popup = await context.newPage();
+  popup.on('pageerror', (error) => errors.push(error.message));
+  popup.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await expect(popup.getByRole('switch', { name: '미디어 배속' })).not.toBeChecked();
+  // COM-1.1 처음 설치하면 꺼져 있다.
+  await expect(popup.getByText('꺼짐')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('MED-3 팝업에서 켜면 최상위와 iframe의 영상에 실제 배속이 뜨고, 끄면 남는 것이 없다', async ({
+  context,
+  extensionId,
+}) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureOrigin}/video.html`);
+  const frame = page.frameLocator('#frame');
+  await expect(frame.locator('video')).toBeVisible();
+  const childFrame = page.frames().find((candidate) => candidate.url().includes('video-only'));
+  if (childFrame === undefined) throw new Error('iframe을 찾지 못했다.');
+
+  const popup = await openPopup(context, extensionId);
+  const toggle = popup.getByRole('switch', { name: '미디어 배속' });
+  await toggle.check();
+  await expect(toggle).toBeChecked();
+
+  // COM-1.2 새로 고침 없이 열린 탭의 모든 프레임에서 작용한다.
+  await expect.poll(() => hostCount(page)).toBe(1);
+  await expect.poll(() => hostCount(childFrame)).toBe(1);
+  await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×']);
+
+  // MED-3.1 배속을 바꾸면 표시창의 값이 실제 배속으로 바뀐다.
+  await childFrame.evaluate(() => {
+    const video = document.querySelector('video');
+    if (video) video.playbackRate = 1.75;
+  });
+  await expect.poll(() => indicatorTexts(page)).toEqual(['1.75×', '1×']);
+
+  // COM-1.3 끄면 열린 탭에서 확장이 더한 요소가 남지 않는다.
+  await toggle.uncheck();
+  await expect.poll(() => hostCount(page)).toBe(0);
+  await expect.poll(() => hostCount(childFrame)).toBe(0);
+});

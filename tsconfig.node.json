@@ -1,0 +1,10 @@
+{
+  // Node에서 도는 코드: 빌드 스크립트, 확장 전체 테스트, 도구 설정 파일.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // 확장 전체 테스트가 page.evaluate로 넘기는 함수는 브라우저와 확장 안에서 돌므로 DOM과 chrome 타입도 둔다.
+    // 테스트 자료(tests/support)는 확장 코드의 타입을 가져온다.
+    "types": ["node", "chrome-types"]
+  },
+  "include": ["scripts", "tests", "*.config.ts"]
+}
