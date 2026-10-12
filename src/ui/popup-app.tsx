@@ -23,38 +23,43 @@ const strings = {
     '더 새 버전의 확장이 저장한 설정이라 이 버전에서는 기능을 쓸 수 없다. 새 버전을 다시 설치한다.',
 };
 
+// 알림. 실패할 때마다 새 객체를 둔다. 같은 문구라도 다시 그려야 스위치가 저장된 값으로 돌아가기 때문이다.
+interface Notice {
+  readonly message: string;
+}
+
 export function PopupApp({ features, subscribe, update }: PopupProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(
     () =>
       subscribe({
         apply: setSnapshot,
         corrupt: () => {
-          setNotice(strings.corrupt);
+          setNotice({ message: strings.corrupt });
         },
         newer: () => {
           setSnapshot(null);
-          setNotice(strings.newer);
+          setNotice({ message: strings.newer });
         },
         problem: (error) => {
-          setNotice(error.message);
+          setNotice({ message: error.message });
         },
       }),
     [subscribe],
   );
 
-  // 화면은 저장된 값을 보인다. 저장에 실패하면 알리고 값은 그대로 둔다(COM-3 기대 동작 3).
+  // 화면은 저장된 값을 보인다. 저장에 실패하면 알리고 스위치를 저장된 값으로 되돌린다(COM-3 기대 동작 3).
   const toggle = async (featureId: string, enabled: boolean) => {
     const result = await update(featureId, { enabled });
-    setNotice(result.ok ? null : result.error.message);
+    setNotice(result.ok ? null : { message: result.error.message });
   };
 
   return (
     <main>
       {snapshot === null ? (
-        <p>{notice ?? strings.loading}</p>
+        <p>{notice?.message ?? strings.loading}</p>
       ) : (
         <ul class="features">
           {features.map((feature) => {
@@ -80,7 +85,7 @@ export function PopupApp({ features, subscribe, update }: PopupProps) {
           })}
         </ul>
       )}
-      {snapshot !== null && notice !== null && <p role="status">{notice}</p>}
+      {snapshot !== null && notice !== null && <p role="status">{notice.message}</p>}
     </main>
   );
 }

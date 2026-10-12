@@ -13,13 +13,13 @@ export default defineConfig({
           name: 'unit',
           environment: 'node',
           include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
-          exclude: ['src/**/*.dom.test.ts'],
+          exclude: ['src/**/*.dom.test.{ts,tsx}'],
         },
       },
       {
         test: {
           name: 'dom',
-          include: ['src/**/*.dom.test.ts'],
+          include: ['src/**/*.dom.test.{ts,tsx}'],
           browser: {
             enabled: true,
             headless: true,

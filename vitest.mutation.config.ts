@@ -5,6 +5,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    exclude: ['src/**/*.dom.test.ts'],
+    exclude: ['src/**/*.dom.test.{ts,tsx}'],
   },
 });
