@@ -1,4 +1,5 @@
 import { retireEventName } from '../contracts/index.ts';
+import { claimOwnedHosts } from '../dom/index.ts';
 import type { AppError, ErrorKind, Result } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import type { Dispose, PageContext, PagePart } from './part.ts';
@@ -16,6 +17,9 @@ interface PageRuntimeDeps {
 // 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4).
 // 격리된 쪽의 전역은 같은 확장의 콘텐츠 스크립트끼리만 함께 본다.
 const runtimeMarker = Symbol.for('browser-toolbox.page-runtime');
+
+// 물러남 이벤트를 받았는데 아직 연결되어 있을 때 다시 확인하는 때(ms). 끝없이 확인하지 않는다(quality 069).
+const retireRecheckDelaysMs = [200, 1000, 5000];
 
 export function startPageRuntime(deps: PageRuntimeDeps): void {
   if (Reflect.get(globalThis, runtimeMarker) === true) return;
@@ -67,9 +71,27 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     }
   };
 
-  const onRetireEvent = () => {
-    // 웹 페이지도 이 이벤트를 보낼 수 있다. 연결이 실제로 끊겼을 때만 따른다(결정 0008).
-    if (!deps.isConnected()) retire();
+  // 웹 페이지도 이 이벤트를 보낼 수 있다. 연결이 실제로 끊겼을 때만 따른다(결정 0008).
+  // 연결되어 있으면 새 판이 보낸 것일 수 있으므로 자기 요소에 이벤트의 토큰을 적는다. 새 판은 토큰이 없는
+  // 요소(코드가 더 돌지 않는 옛 세계의 것)를 지운다. 흉내 낸 이벤트로는 토큰만 바뀐다.
+  // 새 판의 이벤트가 이 세계의 연결이 끊기기 전에 닿기도 하므로(05단계에서 확인), 정한 때에 몇 번 더 확인한다.
+  const recheckTimers = new Set<number>();
+  const onRetireEvent = (event: Event) => {
+    if (!deps.isConnected()) {
+      retire();
+      return;
+    }
+    if (event instanceof CustomEvent && typeof event.detail === 'string') {
+      claimOwnedHosts(event.detail);
+    }
+    if (recheckTimers.size > 0) return;
+    for (const delay of retireRecheckDelaysMs) {
+      const timer = deps.context.window.setTimeout(() => {
+        recheckTimers.delete(timer);
+        if (!deps.isConnected()) retire();
+      }, delay);
+      recheckTimers.add(timer);
+    }
   };
   deps.context.document.addEventListener(retireEventName, onRetireEvent);
 
@@ -89,6 +111,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     if (retired) return;
     retired = true;
     deps.context.document.removeEventListener(retireEventName, onRetireEvent);
+    for (const timer of recheckTimers) deps.context.window.clearTimeout(timer);
+    recheckTimers.clear();
     unsubscribe();
     stopAll();
     Reflect.deleteProperty(globalThis, runtimeMarker);

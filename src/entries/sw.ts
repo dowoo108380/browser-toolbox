@@ -1,11 +1,12 @@
 import { startBackground } from '../background/index.ts';
 import { retireEventName } from '../contracts/index.ts';
+import { claimAttribute, pageElementAttribute } from '../dom/index.ts';
 import { features } from '../features/list.ts';
 import {
   chromeLocalStore,
-  dispatchEventInAllFrames,
   listenInstalled,
   listenRequests,
+  retireInAllFrames,
 } from '../platform/index.ts';
 import { settingsFormat } from '../storage/index.ts';
 
@@ -17,5 +18,10 @@ startBackground({
   now: () => Date.now(),
   listenRequests,
   onInstalled: listenInstalled,
-  retireOldScripts: () => dispatchEventInAllFrames(retireEventName),
+  retireOldScripts: () =>
+    retireInAllFrames({
+      eventName: retireEventName,
+      elementAttribute: pageElementAttribute,
+      claimAttribute,
+    }),
 });

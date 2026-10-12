@@ -1,1 +1,8 @@
-export { type IsolatedHost, createIsolatedHost, hostTagName } from './isolated-host.ts';
+export {
+  type IsolatedHost,
+  claimAttribute,
+  claimOwnedHosts,
+  createIsolatedHost,
+  hostTagName,
+  pageElementAttribute,
+} from './isolated-host.ts';

@@ -1,12 +1,24 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { retireEventName } from '../contracts/index.ts';
+import {
+  claimAttribute,
+  createIsolatedHost,
+  hostTagName,
+  pageElementAttribute,
+} from '../dom/index.ts';
+import { retireInFrame } from '../platform/index.ts';
 import { type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import type { PagePart } from './part.ts';
 import { startPageRuntime } from './runtime.ts';
 
+// 테스트가 만든 실행 틀. 테스트가 끝나면 모두 물러나게 해 다음 테스트에 남지 않게 한다(quality 104).
+const started: { isConnected: () => boolean }[] = [];
+
 afterEach(() => {
-  // 테스트마다 새 실행 틀에서 시작한다(quality 104).
+  for (const deps of started.splice(0)) deps.isConnected = () => false;
+  document.dispatchEvent(new Event(retireEventName));
+  for (const element of document.querySelectorAll(`[${pageElementAttribute}]`)) element.remove();
   Reflect.deleteProperty(globalThis, Symbol.for('browser-toolbox.page-runtime'));
 });
 
@@ -36,6 +48,7 @@ function setup(parts: readonly PagePart[], connected = true) {
     isConnected: () => connected,
   };
   startPageRuntime(deps);
+  started.push(deps);
   return {
     deps,
     reports,
@@ -107,6 +120,48 @@ describe('콘텐츠 스크립트 실행 틀', () => {
     expect(runtime.unsubscribed()).toBe(0);
   });
 
+  it('결정 0008 이벤트가 연결이 끊기기 전에 닿아도, 정한 때에 다시 확인해 물러난다', () => {
+    vi.useFakeTimers();
+    try {
+      let connected = true;
+      const a = countingPart('a');
+      const runtime = setup([a.part], true);
+      runtime.deps.isConnected = () => connected;
+      runtime.apply(snapshot({ a: { enabled: true } }));
+      document.dispatchEvent(new Event(retireEventName));
+      expect(a.counts.disposed).toBe(0);
+      connected = false;
+      vi.advanceTimersByTime(200);
+      expect(a.counts.disposed).toBe(1);
+      expect(runtime.unsubscribed()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('결정 0008 흉내 낸 이벤트가 거듭 와도 다시 확인은 정한 횟수뿐이고 물러나지 않는다', () => {
+    vi.useFakeTimers();
+    try {
+      let checks = 0;
+      const a = countingPart('a');
+      const runtime = setup([a.part], true);
+      runtime.deps.isConnected = () => {
+        checks += 1;
+        return true;
+      };
+      runtime.apply(snapshot({ a: { enabled: true } }));
+      for (let index = 0; index < 50; index += 1)
+        document.dispatchEvent(new Event(retireEventName));
+      vi.advanceTimersByTime(10_000);
+      // 이벤트마다 한 번, 그리고 다시 확인 세 번.
+      expect(checks).toBe(53);
+      expect(a.counts.disposed).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('COM-7.2 연결이 끊겼으면 물러남 이벤트에 모든 기능을 정리하고 구독을 그만둔다', () => {
     const a = countingPart('a');
     const runtime = setup([a.part], false);
@@ -114,5 +169,48 @@ describe('콘텐츠 스크립트 실행 틀', () => {
     document.dispatchEvent(new Event(retireEventName));
     expect(a.counts.disposed).toBe(1);
     expect(runtime.unsubscribed()).toBe(1);
+  });
+});
+
+describe('결정 0008 새 판의 정리(retireInFrame)', () => {
+  // 켜지면 화면 요소 하나를 만드는 기능.
+  const hostPart: PagePart = {
+    featureId: 'host',
+    start: () => {
+      const host = createIsolatedHost(document, { name: 'test', css: '', parent: document.body });
+      return host.remove;
+    },
+  };
+
+  function staleElement(): Element {
+    // 다시 로드 뒤 코드가 더 돌지 않는 옛 세계가 남긴 요소를 흉내 낸다.
+    const element = document.createElement(hostTagName);
+    element.setAttribute(pageElementAttribute, 'old');
+    document.body.append(element);
+    return element;
+  }
+
+  it('COM-7.2 살아 있는 실행 틀의 요소는 남기고, 옛 세계가 남긴 요소는 지운다', () => {
+    const runtime = setup([hostPart], true);
+    runtime.apply(snapshot({ host: { enabled: true } }));
+    const stale = staleElement();
+    retireInFrame(retireEventName, pageElementAttribute, claimAttribute);
+    expect(stale.isConnected).toBe(false);
+    expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
+  });
+
+  it('COM-7.2 연결이 끊긴 실행 틀은 물러나며 자기 요소를 지운다', () => {
+    const runtime = setup([hostPart], false);
+    runtime.apply(snapshot({ host: { enabled: true } }));
+    retireInFrame(retireEventName, pageElementAttribute, claimAttribute);
+    expect(document.querySelectorAll(hostTagName)).toHaveLength(0);
+    expect(runtime.unsubscribed()).toBe(1);
+  });
+
+  it('흉내 낸 이벤트(토큰을 아는 웹 페이지)로는 살아 있는 실행 틀의 요소가 지워지지 않는다', () => {
+    const runtime = setup([hostPart], true);
+    runtime.apply(snapshot({ host: { enabled: true } }));
+    document.dispatchEvent(new CustomEvent(retireEventName, { detail: 'page-token' }));
+    expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
   });
 });

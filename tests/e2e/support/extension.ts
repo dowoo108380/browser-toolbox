@@ -9,17 +9,33 @@ import {
 
 // 빌드한 확장을 올린 Chromium(R-01). 테스트마다 새 프로필에서 시작한다(quality 104).
 
-const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist');
-
 export const fixtureOrigin = 'http://127.0.0.1:4173';
 
-export const test = base.extend<{ context: BrowserContext; extensionId: string }>({
+export const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist');
+
+export const test = base.extend<{
+  // 참이면 브라우저 수준 CDP에 붙을 수 있게 띄운다(확장 다시 불러오기, R-04).
+  browserDebugging: boolean;
+  profileDirectory: string;
+  context: BrowserContext;
+  extensionId: string;
+}>({
+  browserDebugging: [false, { option: true }],
   // eslint-disable-next-line no-empty-pattern -- Playwright는 첫 인자가 구조 분해 패턴이어야 의존하는 fixture를 안다.
-  context: async ({}, use, testInfo) => {
-    const context = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
+  profileDirectory: async ({}, use, testInfo) => {
+    await use(testInfo.outputPath('profile'));
+  },
+  context: async ({ browserDebugging, profileDirectory }, use) => {
+    const context = await chromium.launchPersistentContext(profileDirectory, {
       // 이 채널이어야 headless에서도 확장이 돈다(Playwright 문서).
       channel: 'chromium',
-      args: [`--disable-extensions-except=${distPath}`, `--load-extension=${distPath}`],
+      args: [
+        `--disable-extensions-except=${distPath}`,
+        `--load-extension=${distPath}`,
+        ...(browserDebugging
+          ? ['--remote-debugging-port=0', '--enable-unsafe-extension-debugging']
+          : []),
+      ],
     });
     await use(context);
     await context.close();

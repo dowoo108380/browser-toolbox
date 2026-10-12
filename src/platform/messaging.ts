@@ -85,7 +85,11 @@ export function listenRequests(
 
 // 옛 스크립트가 확장과 연결이 끊겼는지(결정 0008).
 export function isExtensionConnected(): boolean {
-  // chrome-types는 id를 늘 문자열로 적지만, 연결이 끊긴 옛 스크립트에서는 undefined다(R-04).
-  const id: unknown = Reflect.get(chrome.runtime, 'id');
-  return typeof id === 'string';
+  // chrome-types는 늘 있다고 적지만, 연결이 끊긴 옛 스크립트에서는 chrome.runtime.id가 없어지고(R-04)
+  // chrome.runtime 자체가 없어지기도 한다(05단계 확인). 그래서 하나씩 확인한다.
+  const chromeObject: unknown = Reflect.get(globalThis, 'chrome');
+  if (typeof chromeObject !== 'object' || chromeObject === null) return false;
+  const runtime: unknown = Reflect.get(chromeObject, 'runtime');
+  if (typeof runtime !== 'object' || runtime === null) return false;
+  return typeof Reflect.get(runtime, 'id') === 'string';
 }
