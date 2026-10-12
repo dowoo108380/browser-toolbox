@@ -72,6 +72,15 @@ describe('설정 바꾸기', () => {
     expect(problems).toEqual([{ featureId: 'sample', kind: 'unexpected' }]);
   });
 
+  it('COM-3.8 같은 형식에서 모르는 기능의 항목은 다른 기능을 바꿔도 그대로 남고 손상으로 기록하지 않는다', async () => {
+    const { settings, store, problems } = setup(stored(5, { 'future-feature': { mode: 3 } }));
+    expect((await settings.updateFeature('other', { enabled: true })).ok).toBe(true);
+    expect(store.peek(settingsKey)).toEqual(
+      stored(t, { 'future-feature': { mode: 3 }, other: { enabled: true } }),
+    );
+    expect(problems).toEqual([]);
+  });
+
   it('COM-3.3 저장이 실패하면 실패를 알리고 저장된 설정은 그대로다', async () => {
     const fake = createFakeLocalStore({ [settingsKey]: stored(5) });
     const failing: LocalStore = { ...fake, set: () => Promise.reject(new Error('quota')) };
