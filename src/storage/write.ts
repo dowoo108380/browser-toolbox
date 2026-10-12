@@ -73,7 +73,9 @@ export function normalize(
   return ok({ value, repairs });
 }
 
-// 앞의 어떤 값보다 크게 정한다. 바꾸기 전 값을 읽을 수 없으면 previous는 0이다(결정 0011 "세대 번호").
+// 바꾸기 전 값보다 크게 정한다. 바꾸기 전 값을 읽을 수 없으면 previous는 0이다.
+// now는 설정을 읽은 시각보다 큰 시각이어야 한다(서비스 워커가 기다려 맞춘다). 그래야 처음 쓰거나 고쳐 쓴 값도
+// 앞에 쓴 어떤 값보다 크다(결정 0011 "세대 번호").
 export function nextRevision(previous: number, now: number): number {
   return Math.max(previous + 1, Math.trunc(now));
 }

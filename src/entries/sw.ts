@@ -16,6 +16,10 @@ startBackground({
   format: settingsFormat,
   store: chromeLocalStore(),
   now: () => Date.now(),
+  sleep: (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    }),
   listenRequests,
   onInstalled: listenInstalled,
   retireOldScripts: () =>

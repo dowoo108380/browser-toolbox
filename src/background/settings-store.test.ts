@@ -1,35 +1,73 @@
 import { describe, expect, it } from 'vitest';
 import { specs, stored } from '../../tests/support/settings.ts';
 import { createFakeLocalStore } from '../platform/fake.ts';
-import type { LocalStore } from '../platform/index.ts';
-import { settingsFormat, settingsKey } from '../storage/index.ts';
+import { appError, err, ok } from '../shared/index.ts';
+import {
+  type SettingsReaderHandlers,
+  type Snapshot,
+  settingsFormat,
+  settingsKey,
+  startSettingsReader,
+} from '../storage/index.ts';
 import type { Problem } from './problems.ts';
 import { createSettingsStore } from './settings-store.ts';
 
 const t = 1_790_000_000_000;
 
-function setup(initial?: unknown) {
-  const store = createFakeLocalStore(initial === undefined ? {} : { [settingsKey]: initial });
+function revisionOf(value: unknown): number {
+  if (typeof value === 'object' && value !== null && 'revision' in value) {
+    if (typeof value.revision === 'number') return value.revision;
+  }
+  throw new Error('revision이 없는 값이다.');
+}
+
+// 가짜 시계. 기다릴 때만 흐른다. 그래서 연달아 쓰는 일이 모두 같은 밀리초에 일어나는 가장 나쁜 경우가 된다.
+function fakeClock(start = t) {
+  const clock = {
+    time: start,
+    now: () => clock.time,
+    sleep: (ms: number) => {
+      clock.time += ms;
+      return Promise.resolve();
+    },
+  };
+  return clock;
+}
+
+// failWrites가 참이면 저장이 늘 실패한다(COM-3.3).
+function setup(initial?: unknown, failWrites = false) {
+  const fake = createFakeLocalStore(initial === undefined ? {} : { [settingsKey]: initial });
   const problems: Problem[] = [];
+  const clock = fakeClock();
+  // 쓴 값을 차례로 모은다.
+  const written: unknown[] = [];
   const settings = createSettingsStore({
-    store,
-    now: () => t,
+    store: {
+      ...fake,
+      set: async (values) => {
+        if (failWrites) throw new Error('quota');
+        written.push(structuredClone(values[settingsKey]));
+        await fake.set(values);
+      },
+    },
+    now: clock.now,
+    sleep: clock.sleep,
     format: settingsFormat,
     features: specs,
     record: (problem) => problems.push(problem),
   });
-  return { settings, store, problems };
+  return { settings, store: fake, problems, clock, written };
 }
 
 describe('설정 바꾸기', () => {
-  it('바꾼 필드만 바꾸고 revision을 지금 시각으로 정한다', async () => {
+  it('바꾼 필드만 바꾸고 revision을 읽은 뒤의 시각으로 정한다', async () => {
     const { settings, store } = setup(
       stored(5, { sample: { enabled: true, step: 0.5, label: 'a' } }),
     );
     const result = await settings.updateFeature('sample', { label: 'b' });
-    expect(result).toEqual({ ok: true, value: { revision: t } });
+    expect(result).toEqual({ ok: true, value: { revision: t + 1 } });
     expect(store.peek(settingsKey)).toEqual(
-      stored(t, { sample: { enabled: true, step: 0.5, label: 'b' } }),
+      stored(t + 1, { sample: { enabled: true, step: 0.5, label: 'b' } }),
     );
   });
 
@@ -37,7 +75,7 @@ describe('설정 바꾸기', () => {
     const { settings, store } = setup(stored(5));
     await settings.updateFeature('sample', { enabled: true });
     expect(store.peek(settingsKey)).toEqual(
-      stored(t, { sample: { enabled: true, step: 0.1, label: '' } }),
+      stored(t + 1, { sample: { enabled: true, step: 0.1, label: '' } }),
     );
   });
 
@@ -49,7 +87,7 @@ describe('설정 바꾸기', () => {
       settings.updateFeature('other', { enabled: true }),
     ]);
     expect(store.peek(settingsKey)).toEqual(
-      stored(t + 2, {
+      stored(t + 3, {
         sample: { enabled: true, step: 0.1, label: '두 번째' },
         other: { enabled: true },
       }),
@@ -68,7 +106,7 @@ describe('설정 바꾸기', () => {
   it('COM-3.4 손상 항목이 있어도 다른 기능을 바꿀 수 있고, 손상 항목은 기본값이 되며 기록된다', async () => {
     const { settings, store, problems } = setup(stored(5, { sample: { enabled: 'no' } }));
     expect((await settings.updateFeature('other', { enabled: true })).ok).toBe(true);
-    expect(store.peek(settingsKey)).toEqual(stored(t, { other: { enabled: true } }));
+    expect(store.peek(settingsKey)).toEqual(stored(t + 1, { other: { enabled: true } }));
     expect(problems).toEqual([{ featureId: 'sample', kind: 'unexpected' }]);
   });
 
@@ -76,25 +114,17 @@ describe('설정 바꾸기', () => {
     const { settings, store, problems } = setup(stored(5, { 'future-feature': { mode: 3 } }));
     expect((await settings.updateFeature('other', { enabled: true })).ok).toBe(true);
     expect(store.peek(settingsKey)).toEqual(
-      stored(t, { 'future-feature': { mode: 3 }, other: { enabled: true } }),
+      stored(t + 1, { 'future-feature': { mode: 3 }, other: { enabled: true } }),
     );
     expect(problems).toEqual([]);
   });
 
   it('COM-3.3 저장이 실패하면 실패를 알리고 저장된 설정은 그대로다', async () => {
-    const fake = createFakeLocalStore({ [settingsKey]: stored(5) });
-    const failing: LocalStore = { ...fake, set: () => Promise.reject(new Error('quota')) };
-    const settings = createSettingsStore({
-      store: failing,
-      now: () => t,
-      format: settingsFormat,
-      features: specs,
-      record: () => undefined,
-    });
+    const { settings, store } = setup(stored(5), true);
     const result = await settings.updateFeature('other', { enabled: true });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('platform');
-    expect(fake.peek(settingsKey)).toEqual(stored(5));
+    expect(store.peek(settingsKey)).toEqual(stored(5));
   });
 
   it('COM-3.8 더 새 형식이면 거절하고 저장된 값을 바꾸지 않는다', async () => {
@@ -108,10 +138,10 @@ describe('설정 바꾸기', () => {
 });
 
 describe('준비(ensureReady)', () => {
-  it('처음 설치면 기본 설정을 지금 시각의 revision으로 쓴다', async () => {
+  it('처음 설치면 기본 설정을 읽은 뒤의 시각을 revision으로 쓴다', async () => {
     const { settings, store, problems } = setup();
     expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
-    expect(store.peek(settingsKey)).toEqual(stored(t));
+    expect(store.peek(settingsKey)).toEqual(stored(t + 1));
     expect(problems).toEqual([]);
   });
 
@@ -119,7 +149,7 @@ describe('준비(ensureReady)', () => {
     const { settings, store, problems } = setup({ version: 'x' });
     await settings.ensureReady();
     await settings.ensureReady();
-    expect(store.peek(settingsKey)).toEqual(stored(t));
+    expect(store.peek(settingsKey)).toEqual(stored(t + 1));
     expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
   });
 
@@ -160,5 +190,96 @@ describe('최종 값 검증(결정 0011 "쓰기")', () => {
     expect(store.peek(settingsKey)).toEqual(value);
     // 손상 항목은 고쳐 쓴 뒤에만 기록한다. 쓰지 못했으므로 최종 값 실패만 남는다.
     expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
+  });
+});
+
+describe('세대 번호: 쓰는 쪽이 만든 값을 읽는 쪽에 넣는다(결정 0011, COM-3.10)', () => {
+  // 쓰는 쪽(이 모듈)이 실제로 쓴 값을 읽기 도우미에 원하는 순서로 전달한다.
+  function reader(first: unknown) {
+    let view = first;
+    let deliver: (value: unknown) => void = () => undefined;
+    const applied: Snapshot[] = [];
+    const handlers: SettingsReaderHandlers = {
+      apply: (snapshot) => applied.push(snapshot),
+      corrupt: () => undefined,
+      newer: () => undefined,
+      problem: () => undefined,
+    };
+    startSettingsReader(
+      {
+        store: {
+          get: () => Promise.resolve(view),
+          set: () => Promise.resolve(),
+          onChanged: (_key, listener) => {
+            deliver = listener;
+            return () => undefined;
+          },
+        },
+        // 준비 요청은 서비스 워커가 이미 고쳐 쓴 것처럼 바로 응답한다. 다시 읽으면 setView로 정한 값이다.
+        request: (definition) => {
+          const parsed = definition.value.safeParse(null);
+          return Promise.resolve(
+            parsed.success ? ok(parsed.data) : err(appError('unexpected', '응답 형식')),
+          );
+        },
+        format: settingsFormat,
+        specs,
+      },
+      handlers,
+    );
+    return {
+      // 저장소에 지금 있는 값(다시 읽으면 받는 값)을 정한다.
+      setView: (value: unknown) => {
+        view = value;
+      },
+      deliver: (value: unknown) => {
+        deliver(value);
+      },
+      last: () => applied.at(-1)?.features,
+    };
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('같은 밀리초에 연달아 써도 revision은 쓴 시각을 넘지 않는다', async () => {
+    const { settings, clock, written } = setup(stored(5));
+    for (const enabled of [true, false, true]) await settings.updateFeature('other', { enabled });
+    const revisions = written.map(revisionOf);
+    expect(revisions).toEqual([t + 1, t + 2, t + 3]);
+    expect(Math.max(...revisions)).toBeLessThanOrEqual(clock.now());
+  });
+
+  it('연달아 쓴 직후 같은 밀리초에 전체 손상을 고쳐 써도, 고쳐 쓴 값이 앞의 어떤 값보다 커서 늦게 온 옛 값을 버린다', async () => {
+    const { settings, store, written } = setup(stored(5));
+    await settings.updateFeature('other', { enabled: true });
+    await settings.updateFeature('other', { enabled: false });
+    await settings.updateFeature('sample', { label: '마지막' });
+    const [first, second, last] = written;
+    const page = reader(first);
+    await settle();
+    expect(page.last()?.get('other')).toEqual({ enabled: true });
+
+    // 기능이 도는 중에 설정 전체가 손상되고, 서비스 워커가 고쳐 쓴다.
+    const corrupt = { version: 1 };
+    store.replace(settingsKey, corrupt);
+    await settings.ensureReady();
+    const recovered = written.at(-1);
+    expect(recovered).toMatchObject({ features: {} });
+    expect(revisionOf(recovered)).toBeGreaterThan(
+      Math.max(...[first, second, last].map(revisionOf)),
+    );
+
+    // 손상 값을 받고 다시 읽으면 고쳐 쓴 값이다. 그 뒤 손상 전의 값이 늦게 온다.
+    page.setView(recovered);
+    page.deliver(corrupt);
+    await settle();
+    page.deliver(last);
+    page.deliver(second);
+    expect(page.last()).toEqual(new Map());
+
+    // 그 뒤의 정상 변경은 받아들인다.
+    await settings.updateFeature('other', { enabled: true });
+    page.deliver(written.at(-1));
+    expect(page.last()?.get('other')).toEqual({ enabled: true });
   });
 });

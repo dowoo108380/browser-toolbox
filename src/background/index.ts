@@ -16,6 +16,7 @@ export interface BackgroundDeps {
   readonly format: SettingsFormat;
   readonly store: LocalStore;
   readonly now: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
   // 서비스 워커가 처음 실행될 때 바로 걸어야 하는 Chrome 이벤트를 건다.
   readonly listenRequests: (
     handle: (message: unknown, sender: Sender) => Promise<unknown>,
@@ -34,6 +35,7 @@ export function startBackground(deps: BackgroundDeps): void {
   const settings = createSettingsStore({
     store: deps.store,
     now: deps.now,
+    sleep: deps.sleep,
     format: deps.format,
     features: deps.features,
     record,

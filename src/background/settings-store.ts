@@ -35,6 +35,7 @@ export interface SettingsStore {
 export function createSettingsStore(deps: {
   readonly store: LocalStore;
   readonly now: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
   readonly format: SettingsFormat;
   readonly features: readonly FeatureDefinition[];
   readonly record: (problem: Problem) => void;
@@ -50,12 +51,27 @@ export function createSettingsStore(deps: {
     }
   };
 
-  const read = async (): Promise<Result<unknown, AppError>> => {
+  // 설정을 읽고, 읽기를 마친 시각을 함께 돌려준다.
+  const read = async (): Promise<Result<{ raw: unknown; readAt: number }, AppError>> => {
     try {
-      return ok(await deps.store.get(settingsKey));
+      const raw = await deps.store.get(settingsKey);
+      return ok({ raw, readAt: deps.now() });
     } catch {
       return err(appError('platform', '설정을 읽지 못했다.'));
     }
+  };
+
+  // revision을 정할 시각. 설정을 읽은 시각과 같은 밀리초이면 다음 밀리초까지 기다린다. 그래서 revision은
+  // 그것을 정한 시각을 넘지 않고(같은 밀리초에 연달아 써도 시각보다 앞서지 않는다), 바꾸기 전 값을 모르는
+  // 쓰기(처음 쓰기, 전체 손상 복구)도 앞에 쓴 어떤 값보다 크다(결정 0011 "세대 번호").
+  // 시계가 뒤로 갔으면 기다리지 않는다. 그때는 nextRevision이 바꾸기 전 + 1을 쓴다.
+  const timeAfter = async (readAt: number): Promise<number> => {
+    let now = deps.now();
+    while (now === readAt) {
+      await deps.sleep(1);
+      now = deps.now();
+    }
+    return now;
   };
 
   // 최종 값 전체를 검사한 뒤 쓴다. 저장 실패는 예상할 수 있는 실패다. 저장된 설정은 바꾸기 전 그대로다(COM-3.3).
@@ -85,13 +101,14 @@ export function createSettingsStore(deps: {
   return {
     ensureReady: () =>
       enqueue(async () => {
-        const raw = await read();
-        if (!raw.ok) return raw;
-        const normalized = normalize(raw.value, deps.format, deps.features);
+        const loaded = await read();
+        if (!loaded.ok) return loaded;
+        const normalized = normalize(loaded.value.raw, deps.format, deps.features);
         if (!normalized.ok || normalized.value.repairs.length === 0) return ok(null);
         const { value, repairs } = normalized.value;
+        const now = await timeAfter(loaded.value.readAt);
         const written = await write(
-          { ...value, revision: nextRevision(value.revision, deps.now()) },
+          { ...value, revision: nextRevision(value.revision, now) },
           null,
         );
         // 고쳐 쓴 뒤에만 기록한다. 쓰지 못했으면 다음에 다시 고치고 그때 기록한다.
@@ -105,9 +122,9 @@ export function createSettingsStore(deps: {
         if (feature === undefined) {
           return err(appError('invalid-input', '모르는 기능의 설정이다.'));
         }
-        const raw = await read();
-        if (!raw.ok) return raw;
-        const normalized = normalize(raw.value, deps.format, deps.features);
+        const loaded = await read();
+        if (!loaded.ok) return loaded;
+        const normalized = normalize(loaded.value.raw, deps.format, deps.features);
         if (!normalized.ok) return normalized;
         const base = normalized.value.value;
         // 손상 항목은 normalize가 지웠으므로 남은 항목은 검증을 통과한 것이다. 없으면 기본값에서 시작한다.
@@ -121,9 +138,10 @@ export function createSettingsStore(deps: {
         if (!merged.success) {
           return err(appError('invalid-input', '설정 값이 맞지 않아 저장하지 않았다.'));
         }
+        const now = await timeAfter(loaded.value.readAt);
         const next: StoredSettings = {
           ...base,
-          revision: nextRevision(base.revision, deps.now()),
+          revision: nextRevision(base.revision, now),
           features: { ...base.features, [featureId]: merged.data },
         };
         const written = await write(next, base);
