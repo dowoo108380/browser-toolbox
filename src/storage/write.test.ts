@@ -41,6 +41,16 @@ describe('쓰기 전에 지금 형식의 값을 만든다', () => {
     });
   });
 
+  it('COM-3.7 그 버전의 구조로도 틀린 옛 값은 설정 전체의 손상이다', () => {
+    expect(normalize({ version: 1, rev: 'x' }, twoVersionFormat, specs)).toEqual({
+      ok: true,
+      value: {
+        value: { version: 2, revision: 0, features: {}, sites: {} },
+        repairs: [{ kind: 'corrupt' }],
+      },
+    });
+  });
+
   it('COM-3.4 손상 항목만 지우고, 모르는 기능의 항목은 그대로 둔다', () => {
     const raw = stored(4, {
       sample: { enabled: 'yes' },
@@ -134,6 +144,11 @@ describe('COM-3.9 크기 한도', () => {
     const big = withSize(settingsSizeLimit + 300);
     const smaller = withSize(settingsSizeLimit + 100);
     expect(checkSize(smaller, big).ok).toBe(true);
+  });
+
+  it('한도를 넘은 상태에서 크기가 같은 저장은 한다', () => {
+    const big = withSize(settingsSizeLimit + 300);
+    expect(checkSize(big, big).ok).toBe(true);
   });
 
   it('한글은 UTF-8 바이트로 센다', () => {
