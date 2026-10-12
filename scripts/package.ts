@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { packageBudgetBytes } from './budgets.ts';
 import { createZip } from './zip.ts';
 
 // dist/를 배포 ZIP 하나로 묶고 SHA-256 체크섬을 만든다(quality 117, 아키텍처 10장).
@@ -28,6 +29,12 @@ const zip = createZip(
     data: readFileSync(path.join(dist, file)),
   })),
 );
+// 배포 파일이 크기 예산을 넘으면 멈춘다(quality 111).
+if (zip.length > packageBudgetBytes) {
+  throw new Error(
+    `배포 ZIP이 크기 예산(${String(packageBudgetBytes)}바이트)을 넘었다: ${String(zip.length)}바이트.`,
+  );
+}
 const name = `browser-toolbox-${version}.zip`;
 mkdirSync(outdir, { recursive: true });
 writeFileSync(path.join(outdir, name), zip);
@@ -35,5 +42,7 @@ const digest = createHash('sha256').update(zip).digest('hex');
 // sha256sum -c로 확인할 수 있는 형식이다.
 writeFileSync(path.join(outdir, `${name}.sha256`), `${digest}  ${name}\n`);
 
-console.log(`패키징했다: artifacts/${name} (${String(zip.length)}바이트)`);
+console.log(
+  `패키징했다: artifacts/${name} (${String(zip.length)}바이트, 예산 ${String(packageBudgetBytes)})`,
+);
 console.log(`SHA-256: ${digest}`);

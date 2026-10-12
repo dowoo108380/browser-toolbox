@@ -1,7 +1,8 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { type BuildOptions, build } from 'esbuild';
 import { features } from '../src/features/list.ts';
+import { pageScriptBudgetBytes } from './budgets.ts';
 import { createManifest, minimumChromeVersion } from './manifest.ts';
 import { syncGenerated } from './registry.ts';
 
@@ -64,6 +65,17 @@ const builds: BuildOptions[] = [
 ];
 
 for (const options of builds) await build(options);
+
+// 웹 페이지에 실리는 묶음은 크기 예산을 넘으면 빌드를 멈춘다(quality 111).
+for (const file of ['content-common.js']) {
+  const size = statSync(path.join(outdir, file)).size;
+  if (size > pageScriptBudgetBytes) {
+    throw new Error(
+      `${file}이 크기 예산(${String(pageScriptBudgetBytes)}바이트)을 넘었다: ${String(size)}바이트.`,
+    );
+  }
+  console.log(`${file}: ${String(size)}바이트(예산 ${String(pageScriptBudgetBytes)})`);
+}
 
 for (const file of ['popup.html', 'popup.css']) {
   copyFileSync(path.join(root, 'src', 'entries', file), path.join(outdir, file));

@@ -17,8 +17,9 @@
     "unused": "knip",
     "test": "PLAYWRIGHT_BROWSERS_PATH=0 vitest run --coverage",
     "build": "node scripts/build.ts",
-    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test",
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test --project e2e",
     "package": "node scripts/package.ts",
+    "measure": "pnpm build && pnpm package && PLAYWRIGHT_BROWSERS_PATH=0 playwright test --project measure --workers 1",
     "mutation": "stryker run",
     "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install --no-shell chromium"
   },
