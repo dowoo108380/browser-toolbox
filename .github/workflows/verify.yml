@@ -1,0 +1,38 @@
+# push와 pull request마다 커밋 전 검사와 같은 명령 하나(pnpm verify)를 돌린다(quality 106).
+# 대상 환경이 Windows라 Windows에서 돈다(결정 0003). 액션은 바뀌지 않게 커밋 SHA로 고정한다.
+name: verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # package.json의 devEngines대로 pnpm과 Node를 설치하고 잠금 파일 그대로 의존성을 설치한다.
+      # 설치 뒤 postinstall이 Playwright의 Chromium을 node_modules 안에 받는다.
+      - uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1
+        with:
+          require-lockfile: true
+          cache: true
+
+      - run: pnpm verify
+
+      # 의존성의 알려진 취약점(quality 120).
+      - run: pnpm audit --audit-level high
+
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
