@@ -38,6 +38,7 @@ pnpm verify
 | `pnpm package`  | `dist/`를 배포 ZIP과 체크섬으로 묶는다.                                           |
 | `pnpm generate` | 기능을 더하거나 뺀 뒤 진입점별 등록 목록을 다시 만든다.                           |
 | `pnpm mutation` | 핵심 로직에 돌연변이 테스트를 돌린다(느리다).                                     |
+| `pnpm measure`  | 성능 예산(페이지마다 더 드는 시간, 팝업이 뜨는 시간, 크기)을 잰다.                |
 
 ## 권한
 
