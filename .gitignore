@@ -14,3 +14,4 @@ test-results/
 playwright-report/
 .stryker-tmp/
 artifacts/
+.vitest/
