@@ -142,4 +142,23 @@ describe('COM-3.4 항목 손상', () => {
     expect(otherEnabled(state)).toEqual({ enabled: true });
     expect(effects).toContainEqual({ kind: 'corrupt', items: ['sample'] });
   });
+
+  it('결정 0016 손상 항목을 보면 서비스 워커에 고쳐 쓰기를 부탁하고, 고쳐 쓴 값을 받아들인다', () => {
+    const { state, effects } = run([
+      stored(t, { sample: { enabled: 1 }, other: { enabled: true } }),
+      stored(t + 1, { other: { enabled: true } }),
+    ]);
+    expect(effects.map((effect) => effect.kind)).toEqual([
+      'apply',
+      'corrupt',
+      'ensureReady',
+      'apply',
+    ]);
+    expect(state.accepted).toBe(t + 1);
+  });
+
+  it('손상 항목이 없으면 고쳐 쓰기를 부탁하지 않는다', () => {
+    const { effects } = run([stored(t, { 'future-feature': { mode: 1 } })]);
+    expect(effects.map((effect) => effect.kind)).toEqual(['apply']);
+  });
 });

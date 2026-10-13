@@ -10,18 +10,22 @@ import {
 } from '../shared/index.ts';
 import {
   type Repair,
+  type RepairScope,
   type SettingsFormat,
   type StoredSettings,
   checkFinal,
   checkSize,
+  isEmptyRepair,
   nextRevision,
   normalize,
+  repairScopeOf,
   settingsKey,
 } from '../storage/index.ts';
 import type { Problem } from './problems.ts';
 
 // 설정을 쓰는 곳은 이것 하나다(결정 0005, 0011). 쓰기는 들어온 순서대로 하나씩 하고, 쓰기 하나는
-// 읽기 → 버전으로 나누어 지금 형식의 값 얻기 → 바꾸기 → 새 revision → 최종 값 전체 검증 → 크기 확인 → set 한 번이다.
+// 읽기 → 버전으로 나누어 지금 형식의 값 얻기 → 바꾸기 → (손상을 고치면 복구 알림, 결정 0016) → 새 revision
+// → 최종 값 전체 검증 → 크기 확인 → set 한 번이다.
 
 export interface SettingsStore {
   // 고칠 것(없음, 손상, 옛 형식, 손상 항목)이 있으면 바꾸기 없이 고쳐 쓴다. 더 새 형식이면 쓰지 않는다.
@@ -39,8 +43,21 @@ export function createSettingsStore(deps: {
   readonly format: SettingsFormat;
   readonly features: readonly FeatureDefinition[];
   readonly record: (problem: Problem) => void;
+  // 손상을 기본값으로 고쳐 쓰기 전에 사용자에게 보일 복구 알림을 남긴다(결정 0016).
+  readonly noticeRepair: (scope: RepairScope) => Promise<Result<null, AppError>>;
 }): SettingsStore {
   const enqueue = createSerialQueue();
+
+  // 고쳐 쓰기 전에 알림을 먼저 남긴다. 고쳐 쓴 직후 서비스 워커가 멈춰도 사용자가 모르고 지나가지 않게 하려는 것이다.
+  // 알림을 남기지 못하면 고쳐 쓰지 않는다. 조용히 바꾸지 않는다(COM-3 기대 동작 4).
+  // 알림만 남고 고쳐 쓰기가 실패해도 화면은 그 항목을 이미 기본값으로 쓰므로 알림 내용과 맞다.
+  const noticeFirst = async (repairs: readonly Repair[]): Promise<Result<null, AppError>> => {
+    const scope = repairScopeOf(repairs);
+    if (isEmptyRepair(scope)) return ok(null);
+    const noticed = await deps.noticeRepair(scope);
+    if (noticed.ok) return noticed;
+    return err(appError('platform', '손상된 설정을 고치지 못했다. 저장된 설정은 바뀌지 않았다.'));
+  };
 
   const recordRepairs = (repairs: readonly Repair[]) => {
     for (const repair of repairs) {
@@ -104,6 +121,8 @@ export function createSettingsStore(deps: {
         const normalized = normalize(loaded.value.raw, deps.format, deps.features);
         if (!normalized.ok || normalized.value.repairs.length === 0) return ok(null);
         const { value, repairs } = normalized.value;
+        const noticed = await noticeFirst(repairs);
+        if (!noticed.ok) return noticed;
         const now = await timeAfter(loaded.value.readAt);
         const written = await write(
           { ...value, revision: nextRevision(value.revision, now) },
@@ -136,6 +155,8 @@ export function createSettingsStore(deps: {
         if (!merged.success) {
           return err(appError('invalid-input', '설정 값이 맞지 않아 저장하지 않았다.'));
         }
+        const noticed = await noticeFirst(normalized.value.repairs);
+        if (!noticed.ok) return noticed;
         const now = await timeAfter(loaded.value.readAt);
         const next: StoredSettings = {
           ...base,

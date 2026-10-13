@@ -72,7 +72,11 @@ export function receive(
       const { valid, corrupt } = checkFeatureItems(classified.value.features, specs);
       const snapshot: Snapshot = { features: valid, sites: classified.value.sites };
       const effects: ReaderEffect[] = [{ kind: 'apply', snapshot }];
-      if (corrupt.length > 0) effects.push({ kind: 'corrupt', items: corrupt });
+      // 손상 항목이 있으면 서비스 워커에 고쳐 쓰기를 부탁한다. 서비스 워커는 고쳐 쓰기 전에 복구 알림을 남기므로,
+      // 화면이 알림에 쓴 "기본값으로 바꿨다"가 저장소에서도 곧 참이 된다(결정 0016).
+      if (corrupt.length > 0) {
+        effects.push({ kind: 'corrupt', items: corrupt }, { kind: 'ensureReady' });
+      }
       return { state: { accepted: revision, snapshot, newer: null }, effects };
     }
   }

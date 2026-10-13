@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { problemReport, settingsUpdate, storageEnsureReady } from '../contracts/index.ts';
+import {
+  problemReport,
+  repairNoticeDismiss,
+  settingsUpdate,
+  storageEnsureReady,
+} from '../contracts/index.ts';
 import type { Sender } from '../platform/index.ts';
 import { appError, err, ok } from '../shared/index.ts';
 import { createRouter, route } from './router.ts';
@@ -16,6 +21,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
         return ok({ revision: 1 });
       }),
       route(storageEnsureReady, () => Promise.resolve(ok(null))),
+      route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
       route(problemReport, () => Promise.resolve(ok(null))),
     ],
     (error) => unexpected.push(error),
@@ -31,11 +37,15 @@ describe('요청 검증(결정 0006)', () => {
     expect(await router(update, extension)).toEqual({ ok: true, value: { revision: 1 } });
   });
 
-  it('콘텐츠 스크립트는 설정을 바꿀 수 없다', async () => {
+  it('콘텐츠 스크립트는 설정을 바꾸거나 설정 복구 알림을 지울 수 없다', async () => {
     const { router } = setup();
-    const result = await router(update, content);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.kind).toBe('permission');
+    const dismiss = { type: 'repairNotice.dismiss', payload: { stamp: 1 } };
+    for (const message of [update, dismiss]) {
+      const result = await router(message, content);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.kind).toBe('permission');
+    }
+    expect(await router(dismiss, extension)).toEqual(ok(null));
   });
 
   it('콘텐츠 스크립트도 준비 요청과 문제 기록은 보낼 수 있다', async () => {
@@ -84,6 +94,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(storageEnsureReady, () =>
           Promise.resolve(err(appError('platform', '설정을 읽지 못했다.'))),
         ),
+        route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
         route(problemReport, () => Promise.resolve(ok(null))),
       ],
       (error) => unexpected.push(error),

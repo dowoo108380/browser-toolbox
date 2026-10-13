@@ -33,6 +33,17 @@ body {
   opacity: 0.8;
 }
 
+.repair {
+  margin-top: 12px;
+  padding: 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}
+
+.repair p {
+  margin: 0 0 8px;
+}
+
 :focus-visible {
   outline: 2px solid Highlight;
   outline-offset: 2px;

@@ -1,6 +1,7 @@
 import {
   type FeatureDefinition,
   problemReport,
+  repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
 } from '../contracts/index.ts';
@@ -8,6 +9,7 @@ import type { LocalStore, Sender } from '../platform/index.ts';
 import { ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
 import { createProblemLog } from './problems.ts';
+import { createRepairNoticeLog } from './repair-notice.ts';
 import { createRouter, route } from './router.ts';
 import { createSettingsStore } from './settings-store.ts';
 
@@ -32,6 +34,7 @@ export function startBackground(deps: BackgroundDeps): void {
     // 기록을 못 남겨도 할 수 있는 일이 없다. 기록 실패는 기능에 영향이 없다.
     problems.record(problem).catch(() => undefined);
   };
+  const repairNotice = createRepairNoticeLog({ store: deps.store, now: deps.now });
   const settings = createSettingsStore({
     store: deps.store,
     now: deps.now,
@@ -39,11 +42,13 @@ export function startBackground(deps: BackgroundDeps): void {
     format: deps.format,
     features: deps.features,
     record,
+    noticeRepair: repairNotice.add,
   });
   const router = createRouter(
     [
       route(settingsUpdate, (payload) => settings.updateFeature(payload.featureId, payload.patch)),
       route(storageEnsureReady, () => settings.ensureReady()),
+      route(repairNoticeDismiss, (payload) => repairNotice.dismiss(payload.stamp)),
       route(problemReport, async (payload) => {
         await problems.record(payload);
         return ok(null);

@@ -2,6 +2,7 @@ export { type FeatureDefinition, type ToggleSettings, defineFeature } from './fe
 export {
   type RequestDefinition,
   problemReport,
+  repairNoticeDismiss,
   requests,
   responseSchema,
   settingsUpdate,

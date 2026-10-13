@@ -47,6 +47,14 @@ export const storageEnsureReady = defineRequest({
   senders: 'any',
 });
 
+// 사용자가 팝업에서 설정 복구 알림을 확인했다. 본 기록의 stamp를 보낸다. 서비스 워커는 지금 기록이 그것일 때만 지운다(결정 0016).
+export const repairNoticeDismiss = defineRequest({
+  type: 'repairNotice.dismiss',
+  payload: z.object({ stamp: z.int() }),
+  value: z.null(),
+  senders: 'extension',
+});
+
 export const problemReport = defineRequest({
   type: 'problem.report',
   payload: z.object({
@@ -57,4 +65,9 @@ export const problemReport = defineRequest({
   senders: 'any',
 });
 
-export const requests = [settingsUpdate, storageEnsureReady, problemReport] as const;
+export const requests = [
+  settingsUpdate,
+  storageEnsureReady,
+  repairNoticeDismiss,
+  problemReport,
+] as const;

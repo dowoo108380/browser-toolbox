@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as z from 'zod/mini';
 import { defineFeature } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
-import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
+import type {
+  RepairNotice,
+  RepairNoticeHandlers,
+  SettingsReaderHandlers,
+  Snapshot,
+} from '../storage/index.ts';
 import { PopupApp, keepAwakeIntervalMs } from './popup-app.tsx';
 
 // 팝업 부품(COM-2, COM-3, N-12). 저장소와 서비스 워커는 가짜로 바꿔 끼운다.
@@ -49,7 +54,14 @@ async function show({ wake = () => Promise.resolve(ok(null)), update }: Options 
   };
   await act(() => {
     render(
-      <PopupApp features={[feature]} subscribe={subscribe} wake={wakes} update={updates} />,
+      <PopupApp
+        features={[feature]}
+        subscribe={subscribe}
+        watchRepairs={() => () => undefined}
+        wake={wakes}
+        update={updates}
+        dismissRepair={() => Promise.resolve(ok(null))}
+      />,
       container,
     );
   });
@@ -145,37 +157,119 @@ describe('N-12 서비스 워커가 깨어난 뒤에만 조작한다', () => {
   });
 });
 
-describe('결정 0011 저장된 설정을 읽을 수 없을 때 팝업이 알린다', () => {
-  async function showWith(subscribe: (handlers: SettingsReaderHandlers) => void) {
+describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 알린다', () => {
+  const second = defineFeature({ ...feature, id: 'second', name: '두 번째 기능' });
+
+  interface Wiring {
+    // 처음 받은 설정. 없으면 시험 기능이 꺼진 정상 설정이다.
+    readonly subscribe?: (handlers: SettingsReaderHandlers) => void;
+    readonly dismiss?: (stamp: number) => Promise<Result<unknown, AppError>>;
+  }
+
+  async function showWith({
+    subscribe = (handlers) => {
+      handlers.apply(off);
+    },
+    dismiss,
+  }: Wiring) {
+    let reader: SettingsReaderHandlers | undefined;
+    let repairs: RepairNoticeHandlers | undefined;
+    const dismissals = vi.fn(dismiss ?? (() => Promise.resolve(ok(null))));
     await act(() => {
       render(
         <PopupApp
-          features={[feature]}
+          features={[feature, second]}
           subscribe={(handlers) => {
+            reader = handlers;
             subscribe(handlers);
+            return () => undefined;
+          }}
+          watchRepairs={(handlers) => {
+            repairs = handlers;
             return () => undefined;
           }}
           wake={() => Promise.resolve(ok(null))}
           update={() => Promise.resolve(ok(null))}
+          dismissRepair={dismissals}
         />,
         container,
       );
     });
+    return {
+      dismissals,
+      repairText: () => container.querySelector('.repair')?.textContent ?? null,
+      log: (notice: RepairNotice) => act(() => repairs?.notice(notice)),
+      corrupt: (items: 'all' | readonly string[]) => act(() => reader?.corrupt(items)),
+      confirm: () =>
+        act(async () => {
+          container.querySelector<HTMLButtonElement>('.repair button')?.click();
+          await Promise.resolve();
+        }),
+    };
   }
 
-  it('COM-3.4 손상 항목이 있으면 기본값을 보이고 알린다', async () => {
-    await showWith((handlers) => {
-      handlers.apply({ features: new Map(), sites: {} });
-      handlers.corrupt(['sample']);
+  it('COM-3.4 손상 항목이 있으면 기본값을 보이고 그 기능 이름을 알린다', async () => {
+    const popup = await showWith({
+      subscribe: (handlers) => {
+        handlers.apply({ features: new Map(), sites: {} });
+        handlers.corrupt(['sample']);
+      },
     });
     expect(container.querySelector('.state')?.textContent).toBe('꺼짐');
-    expect(container.querySelector('[role=status]')?.textContent).toContain('기본값으로 바꿨다');
+    expect(popup.repairText()).toContain('기본값으로 바꿨다: 시험 기능.');
+    expect(popup.repairText()).not.toContain('두 번째 기능');
+  });
+
+  it('COM-3.4 서비스 워커가 먼저 고쳐 썼으면 남긴 기록으로 알린다', async () => {
+    const popup = await showWith({});
+    expect(popup.repairText()).toBeNull();
+    await popup.log({ stamp: 7, whole: true, features: ['sample', 'second'] });
+    expect(popup.repairText()).toContain('모든 설정을 기본값으로 바꿨다');
+    expect(popup.repairText()).toContain('기본값으로 바꿨다: 시험 기능, 두 번째 기능.');
+  });
+
+  it('직접 본 손상과 서비스 워커의 기록이 겹치면 한 번만 보인다', async () => {
+    const popup = await showWith({});
+    await popup.corrupt(['sample']);
+    await popup.log({ stamp: 7, whole: false, features: ['sample'] });
+    expect(popup.repairText()).toContain('기본값으로 바꿨다: 시험 기능.');
+  });
+
+  it('확인하면 본 기록의 stamp로 지우게 하고 감춘다. 그 뒤 새 기록은 다시 보인다', async () => {
+    const popup = await showWith({});
+    await popup.log({ stamp: 7, whole: false, features: ['sample'] });
+    await popup.confirm();
+    expect(popup.dismissals).toHaveBeenCalledWith(7);
+    expect(popup.repairText()).toBeNull();
+    await popup.log({ stamp: 9, whole: false, features: ['sample', 'second'] });
+    expect(popup.repairText()).toContain('시험 기능, 두 번째 기능');
+  });
+
+  it('직접 본 손상만 있으면 확인해도 서비스 워커에 보내지 않는다', async () => {
+    const popup = await showWith({});
+    await popup.corrupt('all');
+    await popup.confirm();
+    expect(popup.dismissals).not.toHaveBeenCalled();
+    expect(popup.repairText()).toBeNull();
+  });
+
+  it('확인을 서비스 워커에 알리지 못하면 이유를 보이고 알림을 남긴다', async () => {
+    const failed = appError('platform', '설정 복구 알림을 지우지 못했다. 다시 확인을 누른다.');
+    const popup = await showWith({ dismiss: () => Promise.resolve(err(failed)) });
+    await popup.log({ stamp: 7, whole: false, features: ['sample'] });
+    await popup.confirm();
+    await vi.waitFor(() => {
+      expect(popup.repairText()).toContain('시험 기능');
+    });
+    expect(container.querySelector('[role=status]')?.textContent).toBe(failed.message);
   });
 
   it('COM-3.8 더 새 형식의 설정이면 기능을 보이지 않고 이유를 알린다', async () => {
-    await showWith((handlers) => {
-      handlers.apply(off);
-      handlers.newer(2);
+    await showWith({
+      subscribe: (handlers) => {
+        handlers.apply(off);
+        handlers.newer(2);
+      },
     });
     expect(container.querySelector('[role=switch]')).toBeNull();
     expect(container.textContent).toContain('더 새 버전의 확장이 저장한 설정');

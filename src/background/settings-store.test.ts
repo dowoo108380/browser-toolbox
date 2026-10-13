@@ -3,6 +3,7 @@ import { specs, stored } from '../../tests/support/settings.ts';
 import { createFakeLocalStore } from '../platform/fake.ts';
 import { appError, err, ok } from '../shared/index.ts';
 import {
+  type RepairScope,
   type SettingsReaderHandlers,
   type Snapshot,
   settingsFormat,
@@ -34,10 +35,19 @@ function fakeClock(start = t) {
   return clock;
 }
 
-// failWrites가 참이면 저장이 늘 실패한다(COM-3.3).
-function setup(initial?: unknown, failWrites = false) {
+interface SetupOptions {
+  // 참이면 설정 저장이 늘 실패한다(COM-3.3).
+  readonly failWrites?: boolean;
+  // 참이면 복구 알림을 남기지 못한다(결정 0016).
+  readonly failNotice?: boolean;
+}
+
+function setup(initial?: unknown, { failWrites = false, failNotice = false }: SetupOptions = {}) {
   const fake = createFakeLocalStore(initial === undefined ? {} : { [settingsKey]: initial });
   const problems: Problem[] = [];
+  const notices: RepairScope[] = [];
+  // 복구 알림과 설정 쓰기가 일어난 순서.
+  const events: string[] = [];
   const clock = fakeClock();
   // 쓴 값을 차례로 모은다.
   const written: unknown[] = [];
@@ -46,6 +56,7 @@ function setup(initial?: unknown, failWrites = false) {
       ...fake,
       set: async (values) => {
         if (failWrites) throw new Error('quota');
+        events.push('write');
         written.push(structuredClone(values[settingsKey]));
         await fake.set(values);
       },
@@ -55,8 +66,14 @@ function setup(initial?: unknown, failWrites = false) {
     format: settingsFormat,
     features: specs,
     record: (problem) => problems.push(problem),
+    noticeRepair: (scope) => {
+      if (failNotice) return Promise.resolve(err(appError('platform', '알림 저장 실패')));
+      events.push('notice');
+      notices.push(scope);
+      return Promise.resolve(ok(null));
+    },
   });
-  return { settings, store: fake, problems, clock, written };
+  return { settings, store: fake, problems, notices, events, clock, written };
 }
 
 describe('설정 바꾸기', () => {
@@ -104,10 +121,25 @@ describe('설정 바꾸기', () => {
   });
 
   it('COM-3.4 손상 항목이 있어도 다른 기능을 바꿀 수 있고, 손상 항목은 기본값이 되며 기록된다', async () => {
-    const { settings, store, problems } = setup(stored(5, { sample: { enabled: 'no' } }));
+    const { settings, store, problems, notices, events } = setup(
+      stored(5, { sample: { enabled: 'no' } }),
+    );
     expect((await settings.updateFeature('other', { enabled: true })).ok).toBe(true);
     expect(store.peek(settingsKey)).toEqual(stored(t + 1, { other: { enabled: true } }));
     expect(problems).toEqual([{ featureId: 'sample', kind: 'unexpected' }]);
+    // 고쳐 쓰기 전에 사용자에게 보일 복구 알림을 남긴다(결정 0016).
+    expect(notices).toEqual([{ whole: false, features: ['sample'] }]);
+    expect(events).toEqual(['notice', 'write']);
+  });
+
+  it('결정 0016 복구 알림을 남기지 못하면 손상을 고치지도 바꾸지도 않는다', async () => {
+    const value = stored(5, { sample: { enabled: 'no' } });
+    const { settings, store, problems } = setup(value, { failNotice: true });
+    const result = await settings.updateFeature('other', { enabled: true });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('platform');
+    expect(store.peek(settingsKey)).toEqual(value);
+    expect(problems).toEqual([]);
   });
 
   it('COM-3.8 같은 형식에서 모르는 기능의 항목은 다른 기능을 바꿔도 그대로 남고 손상으로 기록하지 않는다', async () => {
@@ -120,7 +152,7 @@ describe('설정 바꾸기', () => {
   });
 
   it('COM-3.3 저장이 실패하면 실패를 알리고 저장된 설정은 그대로다', async () => {
-    const { settings, store } = setup(stored(5), true);
+    const { settings, store } = setup(stored(5), { failWrites: true });
     const result = await settings.updateFeature('other', { enabled: true });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('platform');
@@ -147,19 +179,41 @@ describe('준비(ensureReady)', () => {
     expect(store.peek(settingsKey)).toEqual(stored(t + 1, { 'future-feature': big }));
   });
 
-  it('처음 설치면 기본 설정을 읽은 뒤의 시각을 revision으로 쓴다', async () => {
-    const { settings, store, problems } = setup();
+  it('처음 설치면 기본 설정을 읽은 뒤의 시각을 revision으로 쓰고, 손상이 아니므로 알리지 않는다', async () => {
+    const { settings, store, problems, notices } = setup();
     expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
     expect(store.peek(settingsKey)).toEqual(stored(t + 1));
     expect(problems).toEqual([]);
+    expect(notices).toEqual([]);
   });
 
-  it('전체 손상이면 기본 설정으로 고쳐 쓰고 한 번 기록한다', async () => {
-    const { settings, store, problems } = setup({ version: 'x' });
+  it('전체 손상이면 복구 알림을 남긴 뒤 기본 설정으로 고쳐 쓰고 한 번 기록한다', async () => {
+    const { settings, store, problems, notices, events } = setup({ version: 'x' });
     await settings.ensureReady();
     await settings.ensureReady();
     expect(store.peek(settingsKey)).toEqual(stored(t + 1));
     expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
+    expect(notices).toEqual([{ whole: true, features: [] }]);
+    expect(events).toEqual(['notice', 'write']);
+  });
+
+  it('COM-3.4 손상 항목만 기본값으로 고쳐 쓰고, 그 항목을 알린다', async () => {
+    const { settings, store, notices } = setup(
+      stored(5, { sample: { enabled: 'no' }, other: { enabled: true } }),
+    );
+    expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
+    expect(store.peek(settingsKey)).toEqual(stored(t + 1, { other: { enabled: true } }));
+    expect(notices).toEqual([{ whole: false, features: ['sample'] }]);
+  });
+
+  it('결정 0016 복구 알림을 남기지 못하면 고쳐 쓰지 않고 실패를 돌려준다(다음 준비 때 다시 한다)', async () => {
+    const value = { version: 'x' };
+    const { settings, store, problems } = setup(value, { failNotice: true });
+    const result = await settings.ensureReady();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('platform');
+    expect(store.peek(settingsKey)).toEqual(value);
+    expect(problems).toEqual([]);
   });
 
   it('고칠 것이 없으면 쓰지 않는다', async () => {

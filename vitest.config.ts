@@ -19,7 +19,8 @@ export default defineConfig({
       {
         test: {
           name: 'dom',
-          include: ['src/**/*.dom.test.{ts,tsx}'],
+          // tests/integration은 실제 모듈끼리 연결한 시험이다. 가짜는 Chrome 경계(저장소, 메시지 통로)뿐이다.
+          include: ['src/**/*.dom.test.{ts,tsx}', 'tests/integration/**/*.dom.test.{ts,tsx}'],
           browser: {
             enabled: true,
             headless: true,
