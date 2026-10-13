@@ -29,20 +29,34 @@ const classInheritance = [
 
 // 웹 페이지에서 도는 기능 코드는 이벤트 듣기, 관찰, 타이머를 자원 범위(scope)로만 만든다(결정 0014).
 // 직접 만들면 시작 도중 실패할 때 남고, 콜백의 예외가 그 기능의 정리와 기록으로 이어지지 않는다.
+// 이름으로 잡으므로 이름을 감춘 경우(전역 이름을 변수에 담기, 구조 분해, Reflect.get)는 검토로 본다.
+// 잡아야 하는 사례와 잡지 않아야 하는 사례는 tests/lint/page-resources.test.ts에 있다.
+const resourceNames =
+  'addEventListener|requestAnimationFrame|requestIdleCallback|setTimeout|setInterval|queueMicrotask';
+const observerNames = '[A-Z][A-Za-z]*Observer';
+const pageResourceMessage =
+  '페이지 쪽 자원(이벤트 듣기, 관찰, 타이머)은 scope로 만든다(결정 0014).';
 const pageResources = [
+  // 전역 함수를 이름으로 부름: setTimeout(...), queueMicrotask(...)
+  { selector: `CallExpression[callee.name=/^(${resourceNames})$/]`, message: pageResourceMessage },
+  // 속성으로 부르거나 꺼냄: video.addEventListener(...), window.queueMicrotask(...), window.setTimeout.bind(...), window['setTimeout'](...)
   {
-    selector:
-      'CallExpression[callee.property.name=/^(addEventListener|requestAnimationFrame|requestIdleCallback|setTimeout|setInterval)$/]',
-    message: '페이지 쪽 자원은 scope로 만든다(결정 0014).',
+    selector: `MemberExpression[property.name=/^(${resourceNames})$/]`,
+    message: pageResourceMessage,
   },
   {
-    selector:
-      'CallExpression[callee.name=/^(addEventListener|requestAnimationFrame|requestIdleCallback|setTimeout|setInterval|queueMicrotask)$/]',
-    message: '페이지 쪽 자원은 scope로 만든다(결정 0014).',
+    selector: `MemberExpression[property.value=/^(${resourceNames})$/]`,
+    message: pageResourceMessage,
+  },
+  // 관찰 생성자: new MutationObserver(...), new globalThis.MutationObserver(...), globalThis['ResizeObserver']
+  { selector: `NewExpression[callee.name=/^${observerNames}$/]`, message: pageResourceMessage },
+  {
+    selector: `MemberExpression[property.name=/^${observerNames}$/]`,
+    message: pageResourceMessage,
   },
   {
-    selector: 'NewExpression[callee.name=/Observer$/]',
-    message: '관찰은 scope로 만든다(결정 0014).',
+    selector: `MemberExpression[property.value=/^${observerNames}$/]`,
+    message: pageResourceMessage,
   },
 ];
 

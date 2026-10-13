@@ -12,7 +12,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
-          include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
+          include: ['src/**/*.test.ts', 'scripts/**/*.test.ts', 'tests/lint/**/*.test.ts'],
           exclude: ['src/**/*.dom.test.{ts,tsx}'],
         },
       },
