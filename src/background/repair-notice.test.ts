@@ -48,6 +48,16 @@ describe('설정 복구 알림 기록', () => {
     });
   });
 
+  it.each([
+    ['같은 기능', { whole: false, features: ['sample'] }],
+    ['설정 전체', { whole: true, features: [] }],
+  ])('확인보다 먼저 들어온 %s의 재손상은 확인이 지우지 않는다', async (_name, scope) => {
+    const { store, clock, log } = setup({ stamp: t, ...scope });
+    clock.time += 5;
+    await Promise.all([log.add(scope), log.dismiss(t)]);
+    expect(store.peek(repairNoticeKey)).toEqual({ stamp: t + 5, ...scope });
+  });
+
   it('형식이 틀린 기록은 버리고 새로 시작한다', async () => {
     const { store, log } = setup({ stamp: 'x' });
     await log.add({ whole: false, features: ['sample'] });

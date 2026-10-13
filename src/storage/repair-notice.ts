@@ -56,17 +56,18 @@ export function repairScopeOf(repairs: readonly Repair[]): RepairScope {
   };
 }
 
-// 앞 기록에 새로 고친 범위를 더한 기록. 더해지는 것이 없으면 null(쓰지 않는다).
+// 앞 기록에 새로 고친 범위를 더한 기록. 고칠 범위가 비었으면 null(쓰지 않는다).
+// 이미 기록된 기능이나 설정 전체를 다시 고쳐도 새 stamp를 준다. 범위가 같아도 새 손상이므로, 앞 기록에 대한
+// 늦은 확인이 이 기록을 지우지 않아야 한다(결정 0016).
 // stamp는 설정의 세대 번호와 같은 방식으로 정한다: 앞의 값보다 크고, 기록이 없어졌다 다시 생겨도 지금 시각 이상이다.
 export function addRepair(
   previous: RepairNotice | null,
   added: RepairScope,
   now: number,
 ): RepairNotice | null {
+  if (isEmptyRepair(added)) return null;
   const base = previous ?? { stamp: 0, ...noRepair };
-  const merged = mergeRepairs(base, added);
-  if (merged.whole === base.whole && merged.features.length === base.features.length) return null;
-  return { stamp: nextRevision(base.stamp, now), ...merged };
+  return { stamp: nextRevision(base.stamp, now), ...mergeRepairs(base, added) };
 }
 
 // 사용자가 stamp인 기록을 확인했다. 지금 기록이 그것이 아니면(그 뒤에 손상이 더해짐) 지우지 않는다. 지울 것이 없으면 null.

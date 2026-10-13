@@ -12,6 +12,7 @@ import { type FakeLocalStore, createFakeLocalStore } from '../../src/platform/fa
 import type { LocalStore, Requester, Sender } from '../../src/platform/index.ts';
 import { appError, err } from '../../src/shared/index.ts';
 import {
+  parseRepairNotice,
   repairNoticeKey,
   settingsFormat,
   settingsKey,
@@ -283,4 +284,55 @@ describe('COM-3.4 팝업이 열린 채 손상이 생긴다', () => {
     expect(store.peek(repairNoticeKey)).toMatchObject({ features: ['sample', 'other'] });
     expect(popup.repairText()).toContain('시험 기능, 다른 기능');
   });
+
+  // 같은 범위가 다시 손상되어 고쳐진 경우. 기록의 범위는 그대로라도 새 기록이어야, 첫 손상에 대한 늦은 확인이
+  // 두 번째 손상의 알림까지 지우지 않는다(결정 0016).
+  it.each([
+    {
+      name: '같은 기능',
+      // 팝업의 읽기 도우미는 이 값을 보지 못한다(이미 받은 값보다 세대 번호가 작다). 팝업은 기록으로만 안다.
+      corrupt: () => stored(3, { sample: { enabled: 'no' }, other: { enabled: true } }),
+      scope: { whole: false, features: ['sample'] },
+      text: '기본값으로 바꿨다: 시험 기능.',
+    },
+    {
+      name: '설정 전체',
+      corrupt: () => ({ version: 1 }),
+      scope: { whole: true, features: [] },
+      text: '모든 설정을 기본값으로 바꿨다',
+    },
+  ])(
+    '확인이 서비스 워커에 닿기 전에 같은 범위가 다시 손상되어 고쳐지면, 늦은 확인은 두 번째 기록을 지우지 않는다: $name',
+    async ({ corrupt, scope, text }) => {
+      const { store, worker, popup } = await openOnHealthySettings();
+      const stampOf = () => parseRepairNotice(store.peek(repairNoticeKey))?.stamp ?? 0;
+      // 손상되고, 다른 탭의 페이지가 서비스 워커에 고쳐 쓰기를 부탁한다.
+      store.replace(settingsKey, corrupt());
+      expect(await worker.request(storageEnsureReady, {})).toEqual({ ok: true, value: null });
+      await vi.waitFor(() => {
+        expect(store.peek(repairNoticeKey)).toMatchObject(scope);
+        expect(popup.repairText()).toContain(text);
+      });
+      const first = stampOf();
+
+      worker.holdRequests('repairNotice.dismiss');
+      await popup.confirm();
+      expect(popup.repairText()).toBeNull();
+      // 같은 범위가 다시 손상되고, 다시 고쳐 쓰기를 부탁한다.
+      store.replace(settingsKey, corrupt());
+      expect(await worker.request(storageEnsureReady, {})).toEqual({ ok: true, value: null });
+      await vi.waitFor(() => {
+        expect(stampOf()).toBeGreaterThan(first);
+      });
+      await vi.waitFor(() => {
+        expect(popup.repairText()).toContain(text);
+      });
+
+      worker.releaseRequests();
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(store.peek(repairNoticeKey)).toMatchObject(scope);
+      expect(stampOf()).toBeGreaterThan(first);
+      expect(popup.repairText()).toContain(text);
+    },
+  );
 });

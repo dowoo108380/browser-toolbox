@@ -46,9 +46,24 @@ describe('서비스 워커가 쓰는 기록', () => {
     expect(addRepair(null, { whole: false, features: ['sample'] }, t)).toEqual(sample);
   });
 
-  it('더해지는 것이 없으면 쓰지 않는다', () => {
-    expect(addRepair(sample, { whole: false, features: ['sample'] }, t + 5)).toBeNull();
+  it('고칠 범위가 비었으면 쓰지 않는다', () => {
+    expect(addRepair(sample, noRepair, t + 5)).toBeNull();
     expect(addRepair(null, noRepair, t)).toBeNull();
+  });
+
+  it('이미 기록된 기능이나 설정 전체가 다시 고쳐지면 범위는 그대로이고 stamp가 커진다', () => {
+    expect(addRepair(sample, { whole: false, features: ['sample'] }, t + 5)).toEqual({
+      ...sample,
+      stamp: t + 5,
+    });
+    const whole: RepairNotice = { stamp: t, whole: true, features: [] };
+    expect(addRepair(whole, { whole: true, features: [] }, t)).toEqual({ ...whole, stamp: t + 1 });
+  });
+
+  it('첫 손상에 대한 확인은 같은 기능이 다시 고쳐진 기록을 지우지 않는다', () => {
+    const again = addRepair(sample, { whole: false, features: ['sample'] }, t + 5);
+    expect(again).not.toBeNull();
+    if (again !== null) expect(dismissRepair(again, t, t + 10)).toBeNull();
   });
 
   it('새 손상을 더하면 앞의 것을 남기고 stamp가 커진다(시계가 뒤로 가도)', () => {
