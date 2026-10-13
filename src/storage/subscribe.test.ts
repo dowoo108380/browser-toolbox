@@ -76,3 +76,95 @@ describe('읽기 도우미', () => {
     expect(harness.applied).toHaveLength(1);
   });
 });
+
+describe('COM-7 그만둔 뒤에는 읽지도 알리지도 않는다', () => {
+  // 준비 요청의 응답과 저장소 읽기를 시험이 정한 때에 끝낸다.
+  function controlled() {
+    const store = createFakeLocalStore();
+    let reads = 0;
+    let failRead: ((error: Error) => void) | null = null;
+    let answer: (result: Result<unknown, AppError>) => void = () => undefined;
+    const applied: Snapshot[] = [];
+    const problems: AppError[] = [];
+    const request: Requester = (definition) =>
+      new Promise((resolve) => {
+        answer = (result) => {
+          if (!result.ok) {
+            resolve(result);
+            return;
+          }
+          const parsed = definition.value.safeParse(result.value);
+          resolve(parsed.success ? ok(parsed.data) : err(appError('unexpected', '응답 형식')));
+        };
+      });
+    const stop = startSettingsReader(
+      {
+        store: {
+          ...store,
+          get: (key) => {
+            reads += 1;
+            // 두 번째 읽기부터는 시험이 실패시킬 때까지 끝나지 않는다.
+            if (reads === 1) return store.get(key);
+            return new Promise((_resolve, reject) => {
+              failRead = reject;
+            });
+          },
+        },
+        request,
+        format: settingsFormat,
+        specs,
+      },
+      {
+        apply: (snapshot) => applied.push(snapshot),
+        corrupt: () => undefined,
+        newer: () => undefined,
+        problem: (error) => problems.push(error),
+      },
+    );
+    return {
+      stop,
+      store,
+      applied,
+      problems,
+      reads: () => reads,
+      answer: (result: Result<unknown, AppError>) => {
+        answer(result);
+      },
+      failRead: () => failRead?.(new Error('읽기 실패')),
+    };
+  }
+
+  it('준비 요청 중에 그만두면, 성공 응답이 늦게 와도 다시 읽지 않는다', async () => {
+    const reader = controlled();
+    await settle();
+    expect(reader.reads()).toBe(1);
+    reader.stop();
+    reader.store.replace(settingsKey, stored(t));
+    reader.answer(ok(null));
+    await settle();
+    expect(reader.reads()).toBe(1);
+    expect(reader.applied).toEqual([]);
+    expect(reader.problems).toEqual([]);
+  });
+
+  it('준비 요청 중에 그만두면, 실패 응답이 늦게 와도 알리지 않는다', async () => {
+    const reader = controlled();
+    await settle();
+    reader.stop();
+    reader.answer(err(appError('timeout', '응답 없음')));
+    await settle();
+    expect(reader.problems).toEqual([]);
+  });
+
+  it('다시 읽는 중에 그만두면, 읽기가 늦게 실패해도 알리지 않는다', async () => {
+    const reader = controlled();
+    await settle();
+    reader.answer(ok(null));
+    await settle();
+    expect(reader.reads()).toBe(2);
+    reader.stop();
+    reader.failRead();
+    await settle();
+    expect(reader.problems).toEqual([]);
+  });
+});

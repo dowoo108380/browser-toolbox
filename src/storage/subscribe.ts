@@ -30,6 +30,8 @@ export function startSettingsReader(
 ): () => void {
   let state: ReaderState = initialReaderState;
   let stopped = false;
+  // await 사이에 바뀔 수 있어 함수로 읽는다. TypeScript는 await 뒤에도 앞에서 확인한 값을 그대로 이어 쓴다.
+  const hasStopped = () => stopped;
   let ensuring = false;
   let attempts = 0;
 
@@ -56,12 +58,13 @@ export function startSettingsReader(
     }
   };
 
+  // 기다리는 동안 그만두었으면(기능이 물러남, 화면이 닫힘) 결과를 버린다. 그만둔 뒤에는 읽지도 알리지도 않는다(COM-7).
   const read = async () => {
     let raw: unknown;
     try {
       raw = await deps.store.get(settingsKey);
     } catch {
-      handlers.problem(appError('platform', '설정을 읽지 못했다.'));
+      if (!hasStopped()) handlers.problem(appError('platform', '설정을 읽지 못했다.'));
       return;
     }
     dispatch(raw);
@@ -80,6 +83,7 @@ export function startSettingsReader(
     attempts += 1;
     const result = await deps.request(storageEnsureReady, {});
     ensuring = false;
+    if (hasStopped()) return;
     if (!result.ok) {
       handlers.problem(result.error);
       return;
