@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createScope } from './scope.ts';
 
 // 자원 범위(결정 0014). 실행 틀이 기능마다 하나 만들어 시작 함수에 넘긴다.
@@ -120,6 +120,64 @@ describe('자원 범위', () => {
     await new Promise((resolve) => requestAnimationFrame(resolve));
     await new Promise((resolve) => requestAnimationFrame(resolve));
     expect(cancelled).not.toHaveBeenCalled();
+  });
+
+  describe('닫힌 범위에서는 관찰을 새로 시작하지 않는다', () => {
+    // 닫힌 뒤에는 콜백이 불리지 않으므로 콜백으로는 구별되지 않는다. 브라우저에 관찰이 등록되는지를 본다.
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('MutationObserver', () => {
+      const { scope } = setup();
+      const observer = scope.mutationObserver(() => undefined);
+      scope.close();
+      const registered = vi.spyOn(MutationObserver.prototype, 'observe');
+      observer.observe(document.body, { childList: true });
+      expect(registered).not.toHaveBeenCalled();
+    });
+
+    it('ResizeObserver', () => {
+      const { scope } = setup();
+      const observer = scope.resizeObserver(() => undefined);
+      scope.close();
+      const registered = vi.spyOn(ResizeObserver.prototype, 'observe');
+      observer.observe(document.body);
+      expect(registered).not.toHaveBeenCalled();
+    });
+
+    it('안쪽 범위가 닫힌 뒤에도(바깥은 열려 있음)', () => {
+      const { scope } = setup();
+      const inner = scope.child();
+      const observer = inner.resizeObserver(() => undefined);
+      inner.close();
+      const registered = vi.spyOn(ResizeObserver.prototype, 'observe');
+      observer.observe(document.body);
+      expect(registered).not.toHaveBeenCalled();
+    });
+
+    it('열린 범위에서는 관찰을 등록한다', () => {
+      const { scope } = setup();
+      const registered = vi.spyOn(MutationObserver.prototype, 'observe');
+      scope.mutationObserver(() => undefined).observe(document.body, { childList: true });
+      expect(registered).toHaveBeenCalledTimes(1);
+      scope.close();
+    });
+  });
+
+  it('관찰 콜백은 관찰자를 받지 않는다(콜백이 관찰자를 붙잡아 닫힌 뒤에 쓸 수 없다)', async () => {
+    const { scope } = setup();
+    const records = vi.fn();
+    const target = document.createElement('div');
+    document.body.append(target);
+    scope.mutationObserver(records).observe(target, { childList: true });
+    target.append(document.createElement('span'));
+    await vi.waitFor(() => {
+      expect(records).toHaveBeenCalledTimes(1);
+    });
+    expect(records.mock.calls[0]).toHaveLength(1);
+    scope.close();
+    target.remove();
   });
 
   it('관찰은 닫으면 끊긴다', async () => {

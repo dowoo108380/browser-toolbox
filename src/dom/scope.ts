@@ -23,10 +23,25 @@ export interface Scope {
     listener: (event: Event) => void | Promise<void>,
     options?: { readonly capture?: boolean; readonly passive?: boolean },
   ) => () => void;
-  readonly mutationObserver: (callback: MutationCallback) => MutationObserver;
-  readonly resizeObserver: (callback: ResizeObserverCallback) => ResizeObserver;
+  // 관찰은 관찰자 객체를 내주지 않고 관찰을 시작하는 함수만 내준다. 닫힌 범위에서는 관찰을 시작하지 않는다.
+  // 콜백도 관찰자를 받지 않는다. 그래서 범위가 닫힌 뒤에 관찰이 다시 생길 길이 없다.
+  readonly mutationObserver: (
+    callback: (records: MutationRecord[]) => void | Promise<void>,
+  ) => ScopedMutationObserver;
+  readonly resizeObserver: (
+    callback: (entries: ResizeObserverEntry[]) => void | Promise<void>,
+  ) => ScopedResizeObserver;
   // 다음 화면 그리기 전에 한 번 부른다.
   readonly animationFrame: (callback: () => void | Promise<void>) => () => void;
+}
+
+interface ScopedMutationObserver {
+  readonly observe: (target: Node, options?: MutationObserverInit) => void;
+}
+
+interface ScopedResizeObserver {
+  readonly observe: (target: Element, options?: ResizeObserverOptions) => void;
+  readonly unobserve: (target: Element) => void;
 }
 
 // onError는 콜백의 예외와 정리 함수의 예외를 받는다. 받은 쪽이 기능을 멈추고 기록한다.
@@ -109,18 +124,35 @@ function makeScope(
       });
     },
     mutationObserver: (callback) => {
-      const observer = new MutationObserver(guard(callback));
+      const guarded = guard(callback);
+      const observer = new MutationObserver((records) => {
+        guarded(records);
+      });
       defer(() => {
         observer.disconnect();
       });
-      return observer;
+      return {
+        observe: (target, options) => {
+          if (!closed) observer.observe(target, options);
+        },
+      };
     },
     resizeObserver: (callback) => {
-      const observer = new ResizeObserver(guard(callback));
+      const guarded = guard(callback);
+      const observer = new ResizeObserver((entries) => {
+        guarded(entries);
+      });
       defer(() => {
         observer.disconnect();
       });
-      return observer;
+      return {
+        observe: (target, options) => {
+          if (!closed) observer.observe(target, options);
+        },
+        unobserve: (target) => {
+          observer.unobserve(target);
+        },
+      };
     },
     animationFrame: (callback) => {
       const guarded = guard(callback);
