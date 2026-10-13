@@ -46,7 +46,10 @@ export function createRouter(
       return err(appError('permission', '이 요청은 확장 화면만 보낼 수 있다.'));
     }
     try {
-      return await target.handle(envelope.data.payload, sender);
+      const result = await target.handle(envelope.data.payload, sender);
+      // 처리기가 돌려준 unexpected도 일어나면 안 되는 일이다. 던진 예외와 같이 기록한다(quality 066).
+      if (!result.ok && result.error.kind === 'unexpected') onUnexpected(result.error);
+      return result;
     } catch (error) {
       // 처리기에서 예상하지 못한 예외: 그 요청만 실패시키고 기록한다(quality 010, 066).
       onUnexpected(error);

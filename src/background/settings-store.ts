@@ -79,12 +79,10 @@ export function createSettingsStore(deps: {
     value: StoredSettings,
     previous: StoredSettings | null,
   ): Promise<Result<null, AppError>> => {
+    // 서비스 워커가 만든 값이 틀렸다. 일어나면 안 되는 일이다(quality 066). unexpected로 돌려주고,
+    // 기록은 결과를 받는 쪽(서비스 워커 시작, 라우터)이 한다.
     const final = checkFinal(value, deps.format, deps.features);
-    if (!final.ok) {
-      // 서비스 워커가 만든 값이 틀렸다. 일어나면 안 되는 일이므로 기록한다(quality 066).
-      deps.record({ featureId: null, kind: 'unexpected' });
-      return final;
-    }
+    if (!final.ok) return final;
     // 형식 이전과 고쳐 쓰기는 크기 한도와 상관없이 한다(결정 0011 "크기 한도").
     if (previous !== null) {
       const size = checkSize(value, previous);

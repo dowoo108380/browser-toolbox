@@ -59,8 +59,14 @@ export function startBackground(deps: BackgroundDeps): void {
       record({ featureId: null, kind: 'platform' });
     });
   });
-  // 서비스 워커가 시작할 때 설정을 준비한다(처음 설치, 손상, 옛 형식).
-  settings.ensureReady().catch(() => {
-    record({ featureId: null, kind: 'platform' });
-  });
+  // 서비스 워커가 시작할 때 설정을 준비한다(처음 설치, 손상, 옛 형식). 실패 결과도 버리지 않고 기록한다(quality 067).
+  // 읽는 쪽은 준비되지 않은 설정을 보면 storage.ensureReady로 다시 부탁한다(결정 0011).
+  settings
+    .ensureReady()
+    .then((result) => {
+      if (!result.ok) record({ featureId: null, kind: result.error.kind });
+    })
+    .catch(() => {
+      record({ featureId: null, kind: 'unexpected' });
+    });
 }

@@ -172,14 +172,15 @@ describe('최종 값 검증(결정 0011 "쓰기")', () => {
   // revision이 더 올라갈 수 없는 값. 이 확장이 쓸 수 없는 값이다(손으로 고친 값).
   const exhausted = Number.MAX_SAFE_INTEGER;
 
-  it('설정 바꾸기: 다음 revision이 스키마 밖이면 쓰지 않고 기록하며, 저장된 값은 그대로다', async () => {
+  // 이 모듈은 unexpected를 돌려주기만 한다. 기록은 결과를 받는 쪽(라우터, 서비스 워커 시작)이 한다.
+  it('설정 바꾸기: 다음 revision이 스키마 밖이면 쓰지 않고 unexpected를 돌려주며, 저장된 값은 그대로다', async () => {
     const value = stored(exhausted, { other: { enabled: true } });
     const { settings, store, problems } = setup(value);
     const result = await settings.updateFeature('other', { enabled: false });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('unexpected');
     expect(store.peek(settingsKey)).toEqual(value);
-    expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
+    expect(problems).toEqual([]);
   });
 
   it('고쳐 쓰기: 다음 revision이 스키마 밖이면 손상 항목을 고치지 않고 그대로 둔다', async () => {
@@ -187,9 +188,10 @@ describe('최종 값 검증(결정 0011 "쓰기")', () => {
     const { settings, store, problems } = setup(value);
     const result = await settings.ensureReady();
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('unexpected');
     expect(store.peek(settingsKey)).toEqual(value);
-    // 손상 항목은 고쳐 쓴 뒤에만 기록한다. 쓰지 못했으므로 최종 값 실패만 남는다.
-    expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
+    // 손상 항목은 고쳐 쓴 뒤에만 기록한다. 쓰지 못했으므로 아무것도 기록하지 않는다.
+    expect(problems).toEqual([]);
   });
 });
 

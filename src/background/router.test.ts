@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { problemReport, settingsUpdate, storageEnsureReady } from '../contracts/index.ts';
 import type { Sender } from '../platform/index.ts';
-import { ok } from '../shared/index.ts';
+import { appError, err, ok } from '../shared/index.ts';
 import { createRouter, route } from './router.ts';
 
 const extension: Sender = { kind: 'extension' };
@@ -70,5 +70,27 @@ describe('요청 검증(결정 0006)', () => {
 
   it('처리기가 빠진 요청이 있으면 시작할 때 드러낸다', () => {
     expect(() => createRouter([], () => undefined)).toThrow();
+  });
+});
+
+describe('일어나면 안 되는 일의 기록(quality 066)', () => {
+  it('처리기가 돌려준 unexpected 결과도 기록한다. 다른 실패는 기록하지 않는다', async () => {
+    const unexpected: unknown[] = [];
+    const router = createRouter(
+      [
+        route(settingsUpdate, () =>
+          Promise.resolve(err(appError('unexpected', '저장할 설정이 형식에 맞지 않는다.'))),
+        ),
+        route(storageEnsureReady, () =>
+          Promise.resolve(err(appError('platform', '설정을 읽지 못했다.'))),
+        ),
+        route(problemReport, () => Promise.resolve(ok(null))),
+      ],
+      (error) => unexpected.push(error),
+    );
+    expect((await router(update, extension)).ok).toBe(false);
+    expect(unexpected).toHaveLength(1);
+    expect((await router({ type: 'storage.ensureReady', payload: {} }, content)).ok).toBe(false);
+    expect(unexpected).toHaveLength(1);
   });
 });
