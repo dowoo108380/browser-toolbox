@@ -74,6 +74,10 @@ describe('서비스 워커가 쓰는 기록', () => {
     expect(dismissRepair({ stamp: t, ...noRepair }, t, t + 1)).toBeNull();
   });
 
+  it('저장 키 이름은 바뀌지 않는다(이미 저장된 기록을 다음 판이 읽는다)', () => {
+    expect(repairNoticeKey).toBe('repairNotice');
+  });
+
   it('형식이 틀린 기록은 없는 것으로 본다', () => {
     expect(parseRepairNotice({ stamp: 0, whole: false, features: [] })).toBeNull();
     expect(parseRepairNotice({ stamp: t, whole: 'yes', features: [] })).toBeNull();
@@ -160,5 +164,26 @@ describe('확장 화면이 읽는 기록', () => {
     await settle();
     expect(stopped.problems).toEqual([]);
     expect(stopped.notices).toEqual([]);
+  });
+
+  it('그만두면 듣기를 그만두고, 그 직후에 이미 보낸 바뀜 알림이 와도 알리지 않는다', async () => {
+    const store = createFakeLocalStore();
+    let listening = 0;
+    // 듣기를 그만두기 전에 보낸 알림이 그만둔 뒤에 닿는 경우: 듣기를 그만둬도 알림이 계속 오게 흉내 낸다.
+    const watcher = watch({
+      get: (key) => store.get(key),
+      onChanged: (key, listener) => {
+        listening += 1;
+        store.onChanged(key, listener);
+        return () => {
+          listening -= 1;
+        };
+      },
+    });
+    await settle();
+    watcher.stop();
+    expect(listening).toBe(0);
+    store.replace(repairNoticeKey, first);
+    expect(watcher.notices).toEqual([]);
   });
 });

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { oldStored, specs, stored, twoVersionFormat } from '../../tests/support/settings.ts';
 import { type SettingsFormat, settingsFormat } from './format.ts';
-import { type ReaderEffect, type ReaderState, initialReaderState, receive } from './reader.ts';
+import {
+  type ReaderEffect,
+  type ReaderState,
+  initialReaderState,
+  receive,
+  settingsOf,
+} from './reader.ts';
 
 // 받은 값을 차례로 넣고, 마지막 상태와 그동안의 할 일을 돌려준다.
 function run(values: readonly unknown[], format: SettingsFormat = settingsFormat) {
@@ -160,5 +166,21 @@ describe('COM-3.4 항목 손상', () => {
   it('손상 항목이 없으면 고쳐 쓰기를 부탁하지 않는다', () => {
     const { effects } = run([stored(t, { 'future-feature': { mode: 1 } })]);
     expect(effects.map((effect) => effect.kind)).toEqual(['apply']);
+  });
+});
+
+describe('한 기능의 설정', () => {
+  const [sample] = specs;
+
+  it('항목이 없으면(손상으로 뺀 항목 포함) 기본값이고, 있으면 검증한 값이다', () => {
+    if (sample === undefined) throw new Error('시험 기능이 없다.');
+    const { state } = run([
+      stored(t, { sample: { enabled: true, step: 0.5, label: 'a' }, other: { enabled: 'no' } }),
+    ]);
+    if (state.snapshot === null) throw new Error('적용한 설정이 없다.');
+    expect(settingsOf(state.snapshot, sample)).toEqual({ enabled: true, step: 0.5, label: 'a' });
+    expect(settingsOf({ features: new Map(), sites: {} }, sample)).toEqual(
+      sample.settings.defaults,
+    );
   });
 });

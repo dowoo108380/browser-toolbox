@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { oldStored, specs, stored, twoVersionFormat } from '../../tests/support/settings.ts';
-import { type FakeLocalStore, createFakeLocalStore } from '../platform/fake.ts';
-import type { Requester } from '../platform/index.ts';
+import { createFakeLocalStore } from '../platform/fake.ts';
+import type { LocalStore, Requester } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import { type SettingsFormat, settingsFormat, settingsKey } from './format.ts';
 import type { Snapshot } from './reader.ts';
@@ -9,13 +9,15 @@ import { startSettingsReader } from './subscribe.ts';
 
 const t = 1_790_000_000_000;
 
-function setup(
-  store: FakeLocalStore,
+function setup<Store extends Pick<LocalStore, 'get' | 'onChanged'>>(
+  store: Store,
   onEnsureReady: () => Promise<Result<unknown, AppError>>,
   format: SettingsFormat = settingsFormat,
 ) {
   const applied: Snapshot[] = [];
   const problems: AppError[] = [];
+  const corrupted: ('all' | readonly string[])[] = [];
+  const newer: number[] = [];
   let ensureCount = 0;
   // 진짜처럼 응답을 그 요청의 정의로 검증해 돌려준다.
   const request: Requester = async (definition) => {
@@ -29,15 +31,24 @@ function setup(
     { store, request, format, specs },
     {
       apply: (snapshot) => applied.push(snapshot),
-      corrupt: () => undefined,
-      newer: () => undefined,
+      corrupt: (items) => corrupted.push(items),
+      newer: (version) => newer.push(version),
       problem: (error) => problems.push(error),
     },
   );
-  return { store, applied, problems, stop, ensureCount: () => ensureCount };
+  return { store, applied, problems, corrupted, newer, stop, ensureCount: () => ensureCount };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+// 서비스 워커가 준비했다고 답하지만 아무것도 바꾸지 않는다. 응답은 다음 작업으로 미뤄,
+// 횟수 제한이 듣지 않으면 settle마다 요청이 늘어나게 한다.
+const answerLater = (): Promise<Result<unknown, AppError>> =>
+  new Promise((resolve) =>
+    setTimeout(() => {
+      resolve(ok(null));
+    }, 0),
+  );
 
 describe('읽기 도우미', () => {
   it('설정이 없으면 서비스 워커에 준비를 부탁하고, 쓴 값을 다시 읽어 시작한다', async () => {
@@ -74,18 +85,8 @@ describe('읽기 도우미', () => {
     const store = createFakeLocalStore({
       [settingsKey]: { version: 2, revision: t, features: {}, sites: {} },
     });
-    // 서비스 워커는 준비했다고 답하지만 저장소에는 옛 형식 값이 그대로 남는다.
-    // 응답을 다음 작업으로 미뤄, 횟수 제한이 듣지 않으면 settle마다 요청이 늘어나게 한다.
-    const harness = setup(
-      store,
-      () =>
-        new Promise((resolve) =>
-          setTimeout(() => {
-            resolve(ok(null));
-          }, 0),
-        ),
-      twoVersionFormat,
-    );
+    // 저장소에는 옛 형식 값이 그대로 남는다.
+    const harness = setup(store, answerLater, twoVersionFormat);
     await settle();
     expect(harness.applied).toHaveLength(1);
     store.replace(settingsKey, oldStored(5));
@@ -96,22 +97,95 @@ describe('읽기 도우미', () => {
     expect(harness.applied).toHaveLength(1);
   });
 
+  it('다시 부탁하는 동안 받아들인 값을 잃게 하는 손상 값이 와도 횟수를 이어 센다(quality 069)', async () => {
+    const store = createFakeLocalStore({
+      [settingsKey]: { version: 2, revision: t, features: {}, sites: {} },
+    });
+    // 옛 형식 값 뒤에 부탁하면, 서비스 워커는 답하지만 저장소에는 손상 값이 남는다.
+    const harness = setup(
+      store,
+      async () => {
+        const answer = await answerLater();
+        store.replace(settingsKey, { version: 'x' });
+        return answer;
+      },
+      twoVersionFormat,
+    );
+    await settle();
+    store.replace(settingsKey, oldStored(5));
+    for (let round = 0; round < 10; round += 1) await settle();
+    expect(harness.ensureCount()).toBe(3);
+    expect(harness.problems.map((problem) => problem.kind)).toEqual(['unexpected']);
+  });
+
+  it('준비 요청이 진행 중이면 그사이 온 값이 다시 부탁하게 해도 하나만 보낸다', async () => {
+    const store = createFakeLocalStore();
+    let answer: () => void = () => undefined;
+    const harness = setup(
+      store,
+      () =>
+        new Promise((resolve) => {
+          answer = () => {
+            resolve(ok(null));
+          };
+        }),
+    );
+    await settle();
+    expect(harness.ensureCount()).toBe(1);
+    // 응답을 기다리는 동안 다시 부탁해야 하는 값(손상, 없음)이 온다.
+    store.replace(settingsKey, { version: 'x' });
+    store.replace(settingsKey, undefined);
+    await settle();
+    expect(harness.ensureCount()).toBe(1);
+    // 서비스 워커가 기본 설정을 쓰고 답하면 다시 읽어 시작한다.
+    store.replace(settingsKey, stored(t));
+    answer();
+    await settle();
+    expect(harness.ensureCount()).toBe(1);
+    expect(harness.problems).toEqual([]);
+  });
+
+  it('COM-3.4 손상을 화면에 알린다: 설정 전체와 손상 항목', async () => {
+    const store = createFakeLocalStore({ [settingsKey]: { version: 'x' } });
+    const harness = setup(store, () => {
+      store.replace(settingsKey, stored(t, { sample: { enabled: 'no' } }));
+      return Promise.resolve(ok(null));
+    });
+    await settle();
+    expect(harness.corrupted).toEqual(['all', ['sample']]);
+  });
+
+  it('COM-3.8 더 새 형식이면 그 버전을 화면에 알린다', async () => {
+    const harness = setup(createFakeLocalStore({ [settingsKey]: { version: 9 } }), answerLater);
+    await settle();
+    expect(harness.newer).toEqual([9]);
+    expect(harness.applied).toEqual([]);
+  });
+
+  it('설정을 읽지 못하면 알린다', async () => {
+    const store = createFakeLocalStore();
+    const harness = setup(
+      { ...store, get: () => Promise.reject(new Error('읽기 실패')) },
+      answerLater,
+    );
+    await settle();
+    expect(harness.problems.map((problem) => problem.kind)).toEqual(['platform']);
+  });
+
   it('다시 부탁해 새 값을 받아들이면 횟수를 처음부터 센다', async () => {
     const store = createFakeLocalStore({ [settingsKey]: oldStored(5) });
     let answers = 0;
     // 처음 두 번은 옛 형식 그대로 두고, 세 번째에 이전을 마친다. 그 뒤 다시 옛 형식 값이 온다.
     const harness = setup(
       store,
-      () =>
-        new Promise((resolve) =>
-          setTimeout(() => {
-            answers += 1;
-            if (answers === 3) {
-              store.replace(settingsKey, { version: 2, revision: t, features: {}, sites: {} });
-            }
-            resolve(ok(null));
-          }, 0),
-        ),
+      async () => {
+        const answer = await answerLater();
+        answers += 1;
+        if (answers === 3) {
+          store.replace(settingsKey, { version: 2, revision: t, features: {}, sites: {} });
+        }
+        return answer;
+      },
       twoVersionFormat,
     );
     for (let round = 0; round < 10; round += 1) await settle();
@@ -124,14 +198,50 @@ describe('읽기 도우미', () => {
     expect(harness.problems.map((problem) => problem.kind)).toEqual(['unexpected']);
   });
 
-  it('그만두면 바뀜 알림을 더 받지 않는다', async () => {
-    const harness = setup(createFakeLocalStore({ [settingsKey]: stored(t) }), () =>
-      Promise.resolve(ok(null)),
+  it('그만두면 바뀜 듣기를 그만둔다', async () => {
+    const store = createFakeLocalStore({ [settingsKey]: stored(t) });
+    let listening = 0;
+    const harness = setup(
+      {
+        get: (key) => store.get(key),
+        onChanged: (key, listener) => {
+          listening += 1;
+          const unsubscribe = store.onChanged(key, listener);
+          return () => {
+            listening -= 1;
+            unsubscribe();
+          };
+        },
+      },
+      answerLater,
+    );
+    await settle();
+    expect(listening).toBe(1);
+    harness.stop();
+    expect(listening).toBe(0);
+  });
+
+  it('그만둔 직후에 이미 보낸 바뀜 알림이 와도 적용하지 않는다', async () => {
+    // 듣기를 그만두기 전에 보낸 알림이 그만둔 뒤에 닿는 경우: 듣기를 그만둬도 알림이 계속 오는 저장소로 흉내 낸다.
+    const store = createFakeLocalStore({ [settingsKey]: stored(t) });
+    const harness = setup(
+      {
+        get: (key) => store.get(key),
+        onChanged: (key, listener) => {
+          store.onChanged(key, listener);
+          return () => undefined;
+        },
+      },
+      answerLater,
     );
     await settle();
     harness.stop();
-    harness.store.replace(settingsKey, stored(t + 1, { other: { enabled: true } }));
+    store.replace(settingsKey, stored(t + 1, { other: { enabled: true } }));
+    store.replace(settingsKey, { version: 'x' });
+    await settle();
     expect(harness.applied).toHaveLength(1);
+    expect(harness.corrupted).toEqual([]);
+    expect(harness.ensureCount()).toBe(0);
   });
 });
 
