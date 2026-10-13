@@ -50,6 +50,10 @@ pnpm verify
 
 확장은 스스로 외부 서버에 데이터를 보내지 않는다.
 
+## 문제 알리기
+
+결함과 요청은 [GitHub Issues](https://github.com/dowoo108380/browser-toolbox/issues)에 양식으로 남긴다. 결함 양식은 Chrome 버전, 확장 버전, 사이트, 재현 절차를 묻는다. 이슈는 누구나 볼 수 있으므로 개인정보와 로그인한 화면의 내용은 넣지 않고, 사이트는 도메인만 적는다.
+
 ## 구조
 
 ```text

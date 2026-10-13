@@ -1,0 +1,44 @@
+# 요청 기록 양식. 기술적 부채도 여기에 남긴다(quality 125). 공개 저장소라 개인정보를 받지 않는다.
+name: 요청
+description: 새 기능, 바꾸고 싶은 동작, 코드·도구의 정리(기술적 부채)를 남긴다.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이 저장소와 이슈는 누구나 볼 수 있다. **개인정보와 로그인한 화면의 내용은 넣지 않는다.** 사이트는 도메인만 적는다.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 종류
+      options:
+        - 새 기능
+        - 있는 기능 바꾸기
+        - 기술적 부채(코드·도구 정리)
+    validations:
+      required: true
+  - type: textarea
+    id: need
+    attributes:
+      label: 필요한 것과 이유
+      description: 어떤 상황에서 무엇이 불편하거나 위험한지 적는다.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 생각한 방법
+      description: 있으면 적는다.
+  - type: input
+    id: site
+    attributes:
+      label: 관련 사이트
+      description: 있으면 도메인만 적는다.
+      placeholder: chatgpt.com
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 공개 확인
+      options:
+        - label: 개인정보와 로그인한 화면의 내용을 넣지 않았다.
+          required: true

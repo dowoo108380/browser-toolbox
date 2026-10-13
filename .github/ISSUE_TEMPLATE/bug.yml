@@ -1,0 +1,72 @@
+# 결함 기록 양식(quality 107). 공개 저장소라 개인정보와 로그인한 화면의 내용을 받지 않는다.
+name: 결함
+description: 기대와 다르게 동작하는 것을 알린다.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이 저장소와 이슈는 누구나 볼 수 있다. **개인정보와 로그인한 화면의 내용은 넣지 않는다.**
+        - 사이트는 도메인만 적는다(예: `youtube.com`). 주소의 경로, 검색어, 영상·대화 id는 넣지 않는다.
+        - 계정 이름, 메일, 로그인한 화면의 글과 스크린숏, 쿠키, 토큰, 자막 본문, 파일 이름은 넣지 않는다.
+        - 로그인해야 생기는 문제는 로그인하지 않은 화면에서 재현되는 절차로 바꿔 적는다. 그럴 수 없으면 무엇이 보였는지 일반적인 말로만 적는다.
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome 버전
+      description: '`chrome://version` 맨 위 줄'
+      placeholder: 155.0.8059.40 (Official Build) (64-bit)
+    validations:
+      required: true
+  - type: input
+    id: extension-version
+    attributes:
+      label: 확장 버전
+      description: '`chrome://extensions`에 보이는 Browser Toolbox의 버전. 직접 빌드했으면 커밋도 적는다.'
+      placeholder: 0.1.0 (커밋 dc09fc6)
+    validations:
+      required: true
+  - type: input
+    id: site
+    attributes:
+      label: 사이트
+      description: 도메인만 적는다. 확장의 화면(팝업, 설정 페이지)에서 생겼으면 그 화면 이름을 적는다.
+      placeholder: youtube.com
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 절차
+      description: 처음 상태(켜 둔 기능)부터 차례로 적는다. 늘 생기는지, 몇 번 중 몇 번 생기는지도 적는다.
+      placeholder: |
+        1. 팝업에서 "미디어 배속"을 켠다.
+        2. 영상이 있는 페이지를 연다.
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 동작
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 동작
+      description: 화면에 나온 문구나 오류 문구가 있으면 그대로 적는다. 개인정보가 들어 있으면 지운다.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 진단 정보
+      description: 있으면 설정 페이지의 진단 정보를 붙인다. 주소와 개인정보가 들어가지 않게 만들어져 있다.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 공개 확인
+      options:
+        - label: 개인정보와 로그인한 화면의 내용을 넣지 않았다.
+          required: true
