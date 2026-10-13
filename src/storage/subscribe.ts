@@ -39,7 +39,9 @@ export function startSettingsReader(
   const dispatch = (raw: unknown) => {
     if (stopped) return;
     const step = receive(state, raw, deps.format, deps.specs);
-    if (step.state.accepted !== null) attempts = 0;
+    // 새 값을 받아들였을 때만 횟수를 처음부터 센다. 받아들인 값이 그대로인 채 옛 형식 값이 이어지면
+    // 같은 준비 실패가 되풀이되는 것이므로 횟수를 이어 센다.
+    if (step.state.accepted !== null && step.state.accepted !== state.accepted) attempts = 0;
     state = step.state;
     for (const effect of step.effects) {
       switch (effect.kind) {

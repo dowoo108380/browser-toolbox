@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { specs, stored } from '../../tests/support/settings.ts';
+import { oldStored, specs, stored, twoVersionFormat } from '../../tests/support/settings.ts';
 import { type FakeLocalStore, createFakeLocalStore } from '../platform/fake.ts';
 import type { Requester } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
-import { settingsFormat, settingsKey } from './format.ts';
+import { type SettingsFormat, settingsFormat, settingsKey } from './format.ts';
 import type { Snapshot } from './reader.ts';
 import { startSettingsReader } from './subscribe.ts';
 
 const t = 1_790_000_000_000;
 
-function setup(store: FakeLocalStore, onEnsureReady: () => Promise<Result<unknown, AppError>>) {
+function setup(
+  store: FakeLocalStore,
+  onEnsureReady: () => Promise<Result<unknown, AppError>>,
+  format: SettingsFormat = settingsFormat,
+) {
   const applied: Snapshot[] = [];
   const problems: AppError[] = [];
   let ensureCount = 0;
@@ -22,7 +26,7 @@ function setup(store: FakeLocalStore, onEnsureReady: () => Promise<Result<unknow
     return parsed.success ? ok(parsed.data) : err(appError('unexpected', '응답 형식'));
   };
   const stop = startSettingsReader(
-    { store, request, format: settingsFormat, specs },
+    { store, request, format, specs },
     {
       apply: (snapshot) => applied.push(snapshot),
       corrupt: () => undefined,
@@ -63,6 +67,60 @@ describe('읽기 도우미', () => {
     await settle();
     await settle();
     expect(harness.ensureCount()).toBe(3);
+    expect(harness.problems.map((problem) => problem.kind)).toEqual(['unexpected']);
+  });
+
+  it('정상 값을 받은 뒤 옛 형식 값이 계속 와도 정한 횟수만 다시 부탁한다(quality 069)', async () => {
+    const store = createFakeLocalStore({
+      [settingsKey]: { version: 2, revision: t, features: {}, sites: {} },
+    });
+    // 서비스 워커는 준비했다고 답하지만 저장소에는 옛 형식 값이 그대로 남는다.
+    // 응답을 다음 작업으로 미뤄, 횟수 제한이 듣지 않으면 settle마다 요청이 늘어나게 한다.
+    const harness = setup(
+      store,
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            resolve(ok(null));
+          }, 0),
+        ),
+      twoVersionFormat,
+    );
+    await settle();
+    expect(harness.applied).toHaveLength(1);
+    store.replace(settingsKey, oldStored(5));
+    for (let round = 0; round < 10; round += 1) await settle();
+    expect(harness.ensureCount()).toBe(3);
+    expect(harness.problems.map((problem) => problem.kind)).toEqual(['unexpected']);
+    // 기능은 받아들인 정상 값으로 계속 돈다.
+    expect(harness.applied).toHaveLength(1);
+  });
+
+  it('다시 부탁해 새 값을 받아들이면 횟수를 처음부터 센다', async () => {
+    const store = createFakeLocalStore({ [settingsKey]: oldStored(5) });
+    let answers = 0;
+    // 처음 두 번은 옛 형식 그대로 두고, 세 번째에 이전을 마친다. 그 뒤 다시 옛 형식 값이 온다.
+    const harness = setup(
+      store,
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            answers += 1;
+            if (answers === 3) {
+              store.replace(settingsKey, { version: 2, revision: t, features: {}, sites: {} });
+            }
+            resolve(ok(null));
+          }, 0),
+        ),
+      twoVersionFormat,
+    );
+    for (let round = 0; round < 10; round += 1) await settle();
+    expect(harness.ensureCount()).toBe(3);
+    expect(harness.applied).toHaveLength(1);
+    expect(harness.problems).toEqual([]);
+    store.replace(settingsKey, oldStored(6));
+    for (let round = 0; round < 10; round += 1) await settle();
+    expect(harness.ensureCount()).toBe(6);
     expect(harness.problems.map((problem) => problem.kind)).toEqual(['unexpected']);
   });
 
