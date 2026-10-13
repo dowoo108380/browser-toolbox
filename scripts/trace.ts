@@ -30,10 +30,13 @@ if (!existsSync(requirementsDirectory)) {
         .map((line) => criterionLine.exec(line)?.[1])
         .filter((id) => id !== undefined),
   );
+  // 근거로 읽는 파일: 시험 파일과 수동 확인 절차. tests/에는 확장 전체 시험(e2e, measure의 .spec.ts),
+  // 실제 모듈 연결 시험(integration의 .test.ts·.test.tsx), 린트 규칙 시험, 수동 절차(manual의 .md)가 있다.
+  // 시험 도우미(support)와 시험 페이지(fixtures)는 읽지 않는다. 새 시험 파일 이름 규칙을 더하면 여기를 고친다.
   const evidence = [
     ...filesUnder(path.join(root, 'src'), (file) => /\.test\.tsx?$/.test(file)),
     ...filesUnder(path.join(root, 'scripts'), (file) => file.endsWith('.test.ts')),
-    ...filesUnder(path.join(root, 'tests'), (file) => /\.(spec\.ts|md)$/.test(file)),
+    ...filesUnder(path.join(root, 'tests'), (file) => /\.(spec\.ts|test\.tsx?|md)$/.test(file)),
   ]
     .map((file) => readFileSync(file, 'utf8'))
     .join('\n');
