@@ -10,7 +10,9 @@ import { distPath, expect, test } from './support/extension.ts';
 
 const iterations = Number(process.env['N15_ITERATIONS'] ?? '2');
 
-// 한도(262,144바이트)에 가까운 설정. 모르는 기능의 항목은 손상이 아니므로 그대로 남는다(결정 0011).
+// 큰 설정. ASCII 값은 250,124바이트로 크기 한도(262,144바이트)에 가깝고, 한글 값은 250,125글자(750,125바이트)로
+// 한도를 넘는다. 쓰기 도우미를 거치지 않고 저장소에 직접 쓰므로 한도에 막히지 않는다. 큰 값을 쓰는 도중에
+// 끊겨도 값이 온전한지만 본다. 모르는 기능의 항목은 손상이 아니므로 그대로 남는다(결정 0011).
 function settingsOfSize(revision: number, enabled: boolean, fill: string) {
   return {
     version: 1,
