@@ -7,7 +7,7 @@ import {
   pageElementAttribute,
 } from '../dom/index.ts';
 import { retireInFrame } from '../platform/index.ts';
-import { type ErrorKind, ok } from '../shared/index.ts';
+import { type AppError, type ErrorKind, type Result, appError, err, ok } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import type { PagePart } from './part.ts';
 import { startPageRuntime } from './runtime.ts';
@@ -41,7 +41,7 @@ function setup(parts: readonly PagePart[], connected = true) {
         unsubscribed += 1;
       };
     },
-    report: (featureId: string | null, kind: ErrorKind) => {
+    report: (featureId: string | null, kind: ErrorKind): Promise<Result<null, AppError>> => {
       reports.push({ featureId, kind });
       return Promise.resolve(ok(null));
     },
@@ -53,6 +53,7 @@ function setup(parts: readonly PagePart[], connected = true) {
     deps,
     reports,
     apply: (value: Snapshot) => handlers?.apply(value),
+    problem: (error: AppError) => handlers?.problem(error),
     subscriptions: () => subscriptions,
     unsubscribed: () => unsubscribed,
   };
@@ -359,5 +360,81 @@ describe('결정 0014 기능의 자원 범위와 실패 격리', () => {
     runtime.apply(snapshot({ cleanup: { enabled: false } }));
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(runtime.reports).toEqual([{ featureId: 'cleanup', kind: 'unexpected' }]);
+  });
+});
+
+describe('결정 0008 보조 방법: 물러남 이벤트 없이 연결만 끊긴 경우', () => {
+  // 물러남 이벤트는 보내지 않고 연결만 끊는다. 새 판이 이벤트를 보내지 못했거나 놓친 경우다.
+  function disconnectedRuntime() {
+    const a = countingPart('a');
+    const runtime = setup([a.part], true);
+    runtime.apply(snapshot({ a: { enabled: true } }));
+    runtime.deps.isConnected = () => false;
+    return { a, runtime };
+  }
+
+  function expectRetired({ a, runtime }: ReturnType<typeof disconnectedRuntime>) {
+    expect(a.counts.disposed).toBe(1);
+    expect(runtime.unsubscribed()).toBe(1);
+  }
+
+  it('COM-7.2 탭이 다시 보이면 연결을 확인해 물러난다', () => {
+    const disconnected = disconnectedRuntime();
+    expect(document.visibilityState).toBe('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expectRetired(disconnected);
+  });
+
+  it('COM-7.2 페이지 안에서 이동하면(history.pushState) 연결을 확인해 물러난다', async () => {
+    const original = location.href;
+    const disconnected = disconnectedRuntime();
+    history.pushState(null, '', `${original.split('#')[0] ?? ''}#moved`);
+    try {
+      await vi.waitFor(() => {
+        expectRetired(disconnected);
+      });
+    } finally {
+      history.replaceState(null, '', original);
+    }
+  });
+
+  it('COM-7.2 기능이 페이지 사건(확장 단축키, 화면 조작 포함)에 반응하려 하면 확인해 물러나고, 그 콜백은 돌지 않는다', () => {
+    const disconnected = disconnectedRuntime();
+    ping();
+    expect(disconnected.a.counts.pings).toBe(0);
+    expectRetired(disconnected);
+  });
+
+  it('COM-7.2 읽기 도우미가 문제를 알릴 때도 확인해, 끊겼으면 기록하지 않고 물러난다', () => {
+    const disconnected = disconnectedRuntime();
+    disconnected.runtime.problem(appError('platform', '설정을 읽지 못했다.'));
+    expect(disconnected.runtime.reports).toEqual([]);
+    expectRetired(disconnected);
+  });
+
+  it('결정 0008 셋째 방법: 확장에 보낸 요청이 끊김으로 돌아오면 물러난다', async () => {
+    const a = countingPart('a');
+    const runtime = setup([a.part], true);
+    runtime.apply(snapshot({ a: { enabled: true } }));
+    runtime.deps.report = () =>
+      Promise.resolve(err(appError('disconnected', '확장이 다시 로드되었다.')));
+    runtime.problem(appError('timeout', '응답 없음'));
+    await vi.waitFor(() => {
+      expect(a.counts.disposed).toBe(1);
+    });
+    expect(runtime.unsubscribed()).toBe(1);
+  });
+
+  it('연결이 살아 있으면 보이기·이동·페이지 사건에도 물러나지 않는다', () => {
+    const a = countingPart('a');
+    const runtime = setup([a.part], true);
+    runtime.apply(snapshot({ a: { enabled: true } }));
+    const original = location.href;
+    document.dispatchEvent(new Event('visibilitychange'));
+    history.pushState(null, '', `${original.split('#')[0] ?? ''}#stay`);
+    history.replaceState(null, '', original);
+    ping();
+    expect(a.counts).toMatchObject({ disposed: 0, pings: 1 });
+    expect(runtime.unsubscribed()).toBe(0);
   });
 });

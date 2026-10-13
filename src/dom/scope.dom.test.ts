@@ -3,10 +3,15 @@ import { createScope } from './scope.ts';
 
 // 자원 범위(결정 0014). 실행 틀이 기능마다 하나 만들어 시작 함수에 넘긴다.
 
+// live가 거짓이면 실행 틀이 "연결이 끊겼다"고 답하는 것과 같다.
 function setup() {
   const errors: unknown[] = [];
-  const scope = createScope(window, (error) => errors.push(error));
-  return { scope, errors };
+  const state = { live: true };
+  const scope = createScope(window, {
+    onError: (error) => errors.push(error),
+    isLive: () => state.live,
+  });
+  return { scope, errors, state };
 }
 
 describe('자원 범위', () => {
@@ -68,6 +73,18 @@ describe('자원 범위', () => {
     scope.close();
     guarded();
     expect(later).not.toHaveBeenCalled();
+  });
+
+  it('결정 0008 실행 틀이 살아 있지 않다고 하면(연결 끊김) 감싼 콜백을 부르지 않는다', () => {
+    const { scope, state } = setup();
+    const callback = vi.fn();
+    const guarded = scope.child().guard(callback);
+    state.live = false;
+    guarded();
+    expect(callback).not.toHaveBeenCalled();
+    state.live = true;
+    guarded();
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
   it('안쪽 범위는 바깥이 닫히면 함께 닫히고, 먼저 닫으면 바깥에서 빠진다', () => {

@@ -15,8 +15,14 @@ function isDisconnected(error: unknown): boolean {
   return error instanceof Error && error.message.includes('Extension context invalidated');
 }
 
+const disconnected = () =>
+  err(appError('disconnected', '확장이 다시 로드되었다. 이 페이지를 새로 고친다.'));
+
 export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester {
   return async (definition, payload) => {
+    // 연결이 끊긴 옛 스크립트에서는 chrome.runtime 자체가 없어지기도 한다(결정 0008 고친 기록).
+    // 그때 부르면 TypeError가 나므로 먼저 확인한다.
+    if (!isExtensionConnected()) return disconnected();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => {
@@ -37,9 +43,8 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
       }
       return parsed.data;
     } catch (error) {
-      if (isDisconnected(error)) {
-        return err(appError('disconnected', '확장이 다시 로드되었다. 이 페이지를 새로 고친다.'));
-      }
+      // 보내는 도중에 끊긴 경우도 끊김으로 본다.
+      if (isDisconnected(error) || !isExtensionConnected()) return disconnected();
       return err(appError('platform', '확장에 요청을 보내지 못했다.'));
     } finally {
       clearTimeout(timer);

@@ -44,14 +44,21 @@ interface ScopedResizeObserver {
   readonly unobserve: (target: Element) => void;
 }
 
-// onError는 콜백의 예외와 정리 함수의 예외를 받는다. 받은 쪽이 기능을 멈추고 기록한다.
-export function createScope(window: Window, onError: (error: unknown) => void): Scope {
-  return makeScope(window, onError, null);
+interface ScopeHooks {
+  // 콜백의 예외와 정리 함수의 예외를 받는다. 받은 쪽(실행 틀)이 기능을 멈추고 기록한다.
+  readonly onError: (error: unknown) => void;
+  // 감싼 콜백을 부르기 전에 묻는다. 거짓이면 부르지 않는다. 실행 틀은 이때 확장과의 연결을 확인하고,
+  // 끊겼으면 물러난다(결정 0008의 보조 방법: 확장의 단축키와 화면 조작도 이 콜백으로 온다).
+  readonly isLive: () => boolean;
+}
+
+export function createScope(window: Window, hooks: ScopeHooks): Scope {
+  return makeScope(window, hooks, null);
 }
 
 function makeScope(
   window: Window,
-  onError: (error: unknown) => void,
+  { onError, isLive }: ScopeHooks,
   detachFromParent: (() => void) | null,
 ): Scope {
   let closed = false;
@@ -93,7 +100,7 @@ function makeScope(
   const guard =
     <A extends unknown[]>(callback: (...args: A) => void | Promise<void>) =>
     (...args: A) => {
-      if (closed) return;
+      if (closed || !isLive()) return;
       try {
         const result = callback(...args);
         if (result instanceof Promise) result.catch(onError);
@@ -104,7 +111,7 @@ function makeScope(
 
   const child = (): Scope => {
     let detach = (): void => undefined;
-    const inner = makeScope(window, onError, () => {
+    const inner = makeScope(window, { onError, isLive }, () => {
       detach();
     });
     detach = defer(inner.close);

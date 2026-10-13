@@ -39,6 +39,17 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     });
   };
 
+  // 결정 0008의 보조 방법: 물러남 이벤트를 놓친 옛 스크립트도 스스로 알아차린다. 주기적으로 확인하지 않고(quality 003)
+  // 탭이 다시 보일 때, 페이지 안에서 이동할 때, 기능이 페이지 사건에 반응하려 할 때 확인한다. 확장의 단축키와
+  // 페이지 위 화면 조작은 기능의 콜백으로 오므로 마지막 경우에 든다(자원 범위가 콜백 전에 묻는다, 결정 0014).
+  // 끊겼으면 물러나고 거짓을 돌려준다.
+  const checkConnection = (): boolean => {
+    if (retired) return false;
+    if (deps.isConnected()) return true;
+    retire();
+    return false;
+  };
+
   // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
   // 다른 기능과 실행 틀은 그대로 돈다.
   const fail = (featureId: string, scope: Scope) => {
@@ -64,8 +75,11 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       const key = JSON.stringify(snapshot.features.get(part.featureId) ?? null);
       if (running.get(part.featureId)?.key === key) continue;
       stop(part.featureId);
-      const scope: Scope = createScope(deps.context.window, () => {
-        fail(part.featureId, scope);
+      const scope: Scope = createScope(deps.context.window, {
+        onError: () => {
+          fail(part.featureId, scope);
+        },
+        isLive: checkConnection,
       });
       // 시작 도중 콜백이 실패해도 fail이 이 범위를 찾을 수 있게 먼저 둔다.
       running.set(part.featureId, { key, scope });
@@ -102,6 +116,17 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   };
   deps.context.document.addEventListener(retireEventName, onRetireEvent);
 
+  const onVisibilityChange = () => {
+    if (deps.context.document.visibilityState === 'visible') checkConnection();
+  };
+  const onNavigation = () => {
+    checkConnection();
+  };
+  // 페이지 안 이동(history.pushState, 주소의 # 바꾸기, 뒤로·앞으로)은 Navigation API가 한 이벤트로 알린다(Chrome 102부터).
+  const { navigation } = deps.context.window;
+  deps.context.document.addEventListener('visibilitychange', onVisibilityChange);
+  navigation.addEventListener('currententrychange', onNavigation);
+
   unsubscribe = deps.subscribe({
     apply,
     // 손상은 서비스 워커가 고쳐 쓰면서 한 번 기록한다. 프레임마다 기록하지 않는다.
@@ -109,6 +134,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     // 더 새 형식의 설정이면 기능을 멈춘다(결정 0011).
     newer: stopAll,
     problem: (error) => {
+      if (!checkConnection()) return;
       if (error.kind === 'disconnected') retire();
       else report(null, error.kind);
     },
@@ -118,6 +144,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     if (retired) return;
     retired = true;
     deps.context.document.removeEventListener(retireEventName, onRetireEvent);
+    deps.context.document.removeEventListener('visibilitychange', onVisibilityChange);
+    navigation.removeEventListener('currententrychange', onNavigation);
     for (const timer of recheckTimers) deps.context.window.clearTimeout(timer);
     recheckTimers.clear();
     unsubscribe();

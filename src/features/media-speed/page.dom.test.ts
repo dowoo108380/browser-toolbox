@@ -51,7 +51,10 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 // 실행 틀 없이 기능만 시작한다. 돌려준 close가 실행 틀이 기능을 끌 때 하는 일이다.
 function start(snapshot: Snapshot) {
   const errors: unknown[] = [];
-  const scope = createScope(window, (error) => errors.push(error));
+  const scope = createScope(window, {
+    onError: (error) => errors.push(error),
+    isLive: () => true,
+  });
   page.start(snapshot, { window, document, scope });
   return { close: scope.close, errors };
 }
