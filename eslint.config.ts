@@ -27,10 +27,21 @@ const classInheritance = [
   },
 ];
 
+// 외부 웹사이트나 다른 확장의 메시지를 받지 않는다(결정 0006). manifest에 externally_connectable도 두지 않는다.
+const externalMessaging = [
+  {
+    selector: 'MemberExpression[property.name=/^(onMessageExternal|onConnectExternal)$/]',
+    message: '외부 메시지를 받지 않는다(결정 0006).',
+  },
+];
+
+// 모든 파일에 거는 문법 제한.
+const baseRestrictions = [...htmlInjection, ...classInheritance, ...externalMessaging];
+
 // 웹 페이지에서 도는 기능 코드는 이벤트 듣기, 관찰, 타이머를 자원 범위(scope)로만 만든다(결정 0014).
 // 직접 만들면 시작 도중 실패할 때 남고, 콜백의 예외가 그 기능의 정리와 기록으로 이어지지 않는다.
 // 이름으로 잡으므로 이름을 감춘 경우(전역 이름을 변수에 담기, 구조 분해, Reflect.get)는 검토로 본다.
-// 잡아야 하는 사례와 잡지 않아야 하는 사례는 tests/lint/page-resources.test.ts에 있다.
+// 잡아야 하는 사례와 잡지 않아야 하는 사례는 tests/lint/restricted-syntax.test.ts에 있다.
 const resourceNames =
   'addEventListener|requestAnimationFrame|requestIdleCallback|setTimeout|setInterval|queueMicrotask';
 const observerNames = '[A-Z][A-Za-z]*Observer';
@@ -104,7 +115,7 @@ export default defineConfig(
       reportUnusedDisableDirectives: 'error',
     },
     rules: {
-      'no-restricted-syntax': ['error', ...htmlInjection, ...classInheritance],
+      'no-restricted-syntax': ['error', ...baseRestrictions],
       eqeqeq: 'error',
       // 런타임 검증은 zod/mini 방식 하나만 쓴다(결정 0006).
       'no-restricted-imports': [
@@ -131,7 +142,7 @@ export default defineConfig(
     ],
     ignores: ['src/dom/scope.ts', '**/*.test.ts'],
     rules: {
-      'no-restricted-syntax': ['error', ...htmlInjection, ...classInheritance, ...pageResources],
+      'no-restricted-syntax': ['error', ...baseRestrictions, ...pageResources],
     },
   },
   {

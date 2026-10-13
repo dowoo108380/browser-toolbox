@@ -8,7 +8,8 @@ import { type ReaderState, type Snapshot, initialReaderState, receive } from './
 // 읽기 도우미(결정 0011 읽는 쪽 계약). 콘텐츠 스크립트와 확장 화면은 설정을 이것으로만 읽는다.
 
 export interface SettingsReaderDeps {
-  readonly store: LocalStore;
+  // 읽기와 바뀜 듣기만 받는다. 설정을 쓰는 곳은 서비스 워커 하나다(결정 0005).
+  readonly store: Pick<LocalStore, 'get' | 'onChanged'>;
   readonly request: Requester;
   readonly format: SettingsFormat;
   readonly specs: readonly FeatureSettingsSpec[];

@@ -138,6 +138,15 @@ describe('설정 바꾸기', () => {
 });
 
 describe('준비(ensureReady)', () => {
+  it('결정 0011 고쳐 쓰기는 크기 한도와 상관없이 한다(한도를 넘은 설정의 손상 항목도 고친다)', async () => {
+    const big = { note: 'a'.repeat(300_000) };
+    const { settings, store } = setup(
+      stored(5, { sample: { enabled: 'no' }, 'future-feature': big }),
+    );
+    expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
+    expect(store.peek(settingsKey)).toEqual(stored(t + 1, { 'future-feature': big }));
+  });
+
   it('처음 설치면 기본 설정을 읽은 뒤의 시각을 revision으로 쓴다', async () => {
     const { settings, store, problems } = setup();
     expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
@@ -211,7 +220,6 @@ describe('세대 번호: 쓰는 쪽이 만든 값을 읽는 쪽에 넣는다(결
       {
         store: {
           get: () => Promise.resolve(view),
-          set: () => Promise.resolve(),
           onChanged: (_key, listener) => {
             deliver = listener;
             return () => undefined;

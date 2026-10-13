@@ -54,6 +54,7 @@ function setup(parts: readonly PagePart[], connected = true) {
     reports,
     apply: (value: Snapshot) => handlers?.apply(value),
     problem: (error: AppError) => handlers?.problem(error),
+    newer: (version: number) => handlers?.newer(version),
     subscriptions: () => subscriptions,
     unsubscribed: () => unsubscribed,
   };
@@ -108,6 +109,14 @@ describe('콘텐츠 스크립트 실행 틀', () => {
     runtime.apply(snapshot({ a: { enabled: false }, b: { enabled: true } }));
     expect(a.counts).toMatchObject({ started: 1, disposed: 1 });
     expect(b.counts).toMatchObject({ started: 1, disposed: 0 });
+  });
+
+  it('결정 0011 더 새 형식의 설정을 보면 돌던 기능을 모두 멈춘다', () => {
+    const a = countingPart('a');
+    const runtime = setup([a.part]);
+    runtime.apply(snapshot({ a: { enabled: true } }));
+    runtime.newer(2);
+    expect(a.counts).toMatchObject({ started: 1, disposed: 1 });
   });
 
   it('quality 010 한 기능의 시작이 실패해도 다른 기능은 시작하고 실패를 기록한다', () => {

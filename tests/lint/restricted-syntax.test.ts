@@ -3,7 +3,7 @@ import { ESLint, Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
 import { describe, expect, it } from 'vitest';
 
-// 결정 0014의 린트 규칙(eslint.config.ts의 pageResources)이 잡아야 할 것과 잡지 않아야 할 것.
+// 결정이 린터로 지키게 한 문법 제한(eslint.config.ts의 no-restricted-syntax)이 잡아야 할 것과 잡지 않아야 할 것.
 // 실제 설정이 그 파일에 정한 no-restricted-syntax 규칙을 꺼내, 코드 조각에 그 규칙만 돌린다.
 
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -114,5 +114,26 @@ describe('결정 0014 페이지 쪽 자원 규칙', () => {
   it.each(mustNotReport)('잡지 않는다: %s', async (code) => {
     const restrictions = (await restrictionsFor(targets[0] ?? '')).filter(isPageResource);
     expect(reported(restrictions, code)).toBe(0);
+  });
+});
+
+describe('결정 0006 외부 메시지를 받지 않는다', () => {
+  const isExternal = (restriction: Restriction) => restriction.message.includes('결정 0006');
+
+  it.each([
+    'src/background/router.ts',
+    'src/platform/messaging.ts',
+    'src/features/media-speed/page.ts',
+  ])('%s에 규칙이 걸린다', async (file) => {
+    expect((await restrictionsFor(file)).filter(isExternal)).not.toHaveLength(0);
+  });
+
+  it.each([
+    ['잡는다', 'chrome.runtime.onMessageExternal.addListener(f);', true],
+    ['잡는다', 'chrome.runtime.onConnectExternal.addListener(f);', true],
+    ['잡지 않는다', 'chrome.runtime.onMessage.addListener(f);', false],
+  ])('%s: %s', async (_label, code, expected) => {
+    const restrictions = (await restrictionsFor('src/platform/messaging.ts')).filter(isExternal);
+    expect(reported(restrictions, code) > 0).toBe(expected);
   });
 });

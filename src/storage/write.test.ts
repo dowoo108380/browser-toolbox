@@ -41,6 +41,20 @@ describe('쓰기 전에 지금 형식의 값을 만든다', () => {
     });
   });
 
+  it('결정 0011 이전 함수는 항목 손상을 고치거나 버리지 않고 넘기고, 지금 형식의 항목 검증이 알아본다', () => {
+    const old = oldStored(5, { sample: { enabled: 'no' }, other: { enabled: true } });
+    expect(normalize(old, twoVersionFormat, specs)).toEqual({
+      ok: true,
+      value: {
+        value: { version: 2, revision: 5, features: { other: { enabled: true } }, sites: {} },
+        repairs: [
+          { kind: 'migrated', from: 1 },
+          { kind: 'corruptItems', items: ['sample'] },
+        ],
+      },
+    });
+  });
+
   it('COM-3.7 그 버전의 구조로도 틀린 옛 값은 설정 전체의 손상이다', () => {
     expect(normalize({ version: 1, rev: 'x' }, twoVersionFormat, specs)).toEqual({
       ok: true,

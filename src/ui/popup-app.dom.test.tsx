@@ -144,3 +144,40 @@ describe('N-12 서비스 워커가 깨어난 뒤에만 조작한다', () => {
     expect(popup.wakes).toHaveBeenCalledTimes(4);
   });
 });
+
+describe('결정 0011 저장된 설정을 읽을 수 없을 때 팝업이 알린다', () => {
+  async function showWith(subscribe: (handlers: SettingsReaderHandlers) => void) {
+    await act(() => {
+      render(
+        <PopupApp
+          features={[feature]}
+          subscribe={(handlers) => {
+            subscribe(handlers);
+            return () => undefined;
+          }}
+          wake={() => Promise.resolve(ok(null))}
+          update={() => Promise.resolve(ok(null))}
+        />,
+        container,
+      );
+    });
+  }
+
+  it('COM-3.4 손상 항목이 있으면 기본값을 보이고 알린다', async () => {
+    await showWith((handlers) => {
+      handlers.apply({ features: new Map(), sites: {} });
+      handlers.corrupt(['sample']);
+    });
+    expect(container.querySelector('.state')?.textContent).toBe('꺼짐');
+    expect(container.querySelector('[role=status]')?.textContent).toContain('기본값으로 바꿨다');
+  });
+
+  it('COM-3.8 더 새 형식의 설정이면 기능을 보이지 않고 이유를 알린다', async () => {
+    await showWith((handlers) => {
+      handlers.apply(off);
+      handlers.newer(2);
+    });
+    expect(container.querySelector('[role=switch]')).toBeNull();
+    expect(container.textContent).toContain('더 새 버전의 확장이 저장한 설정');
+  });
+});
