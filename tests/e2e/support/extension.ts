@@ -11,6 +11,11 @@ import {
 
 export const fixtureOrigin = 'http://127.0.0.1:4173';
 
+// 같은 시험 페이지 서버를 보안 문맥이 아닌 일반 http 출처로 연다. Chromium은 localhost와 루프백 주소를 보안 문맥으로
+// 보므로(fixtureOrigin도 보안 문맥이다), 다른 이름을 루프백에 이어 붙인다(아래 --host-resolver-rules).
+// 보안 문맥에서만 있는 API(예: crypto.randomUUID)는 이 출처의 페이지와 그 iframe에 없다.
+export const insecureFixtureOrigin = 'http://insecure.test:4173';
+
 export const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist');
 
 export const test = base.extend<{
@@ -32,6 +37,7 @@ export const test = base.extend<{
       args: [
         `--disable-extensions-except=${distPath}`,
         `--load-extension=${distPath}`,
+        `--host-resolver-rules=MAP ${new URL(insecureFixtureOrigin).hostname} 127.0.0.1`,
         ...(browserDebugging
           ? ['--remote-debugging-port=0', '--enable-unsafe-extension-debugging']
           : []),
@@ -63,11 +69,22 @@ interface ShadowNode {
 }
 
 // 확장의 화면 요소는 닫힌 shadow root 안에 있어 페이지에서는 보이지 않는다.
-// CDP로 shadow root와 같은 프로세스의 iframe까지 펼쳐 표시창의 글자를 모은다.
+// CDP로 shadow root와 iframe까지 펼쳐 표시창의 글자를 모은다. CDP 세션 하나는 같은 프로세스의 iframe까지만 펼친다.
+// 사이트가 다른 iframe은 다른 프로세스에 뜨므로(예: insecure.test 페이지 안의 127.0.0.1 iframe) 그 프레임의 세션으로 따로 읽는다.
 export async function indicatorTexts(page: Page): Promise<string[]> {
-  const cdp = await page.context().newCDPSession(page);
+  const sessions = [await page.context().newCDPSession(page)];
   try {
-    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true });
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      try {
+        sessions.push(await page.context().newCDPSession(frame));
+      } catch (error) {
+        // 같은 프로세스의 iframe은 따로 세션이 없다. 부모 프레임의 세션이 이미 펼친다.
+        if (!(error instanceof Error) || !error.message.includes('separate CDP session')) {
+          throw error;
+        }
+      }
+    }
     const texts: string[] = [];
     const visit = (node: ShadowNode, insideHost: boolean) => {
       const isHost = node.nodeName === 'BROWSER-TOOLBOX-UI';
@@ -82,11 +99,14 @@ export async function indicatorTexts(page: Page): Promise<string[]> {
         visit(child, insideHost || isHost);
       }
     };
-    visit(root, false);
+    for (const session of sessions) {
+      const { root } = await session.send('DOM.getDocument', { depth: -1, pierce: true });
+      visit(root, false);
+    }
     // 스타일 시트의 글자는 빼고, 프레임 순서와 상관없이 비교하도록 정렬한다.
     return texts.filter((text) => !text.includes('{')).sort();
   } finally {
-    await cdp.detach();
+    for (const session of sessions) await session.detach();
   }
 }
 

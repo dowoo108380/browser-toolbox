@@ -216,7 +216,7 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
     const runtime = setup([hostPart], true);
     runtime.apply(snapshot({ host: { enabled: true } }));
     const stale = staleElement();
-    retireInFrame(retireEventName, pageElementAttribute, claimAttribute);
+    retireInFrame(retireEventName, pageElementAttribute, claimAttribute, 'service-worker-token');
     expect(stale.isConnected).toBe(false);
     expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
   });
@@ -224,7 +224,7 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
   it('COM-7.2 연결이 끊긴 실행 틀은 물러나며 자기 요소를 지운다', () => {
     const runtime = setup([hostPart], false);
     runtime.apply(snapshot({ host: { enabled: true } }));
-    retireInFrame(retireEventName, pageElementAttribute, claimAttribute);
+    retireInFrame(retireEventName, pageElementAttribute, claimAttribute, 'service-worker-token');
     expect(document.querySelectorAll(hostTagName)).toHaveLength(0);
     expect(runtime.unsubscribed()).toBe(1);
   });
