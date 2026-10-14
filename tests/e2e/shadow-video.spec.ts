@@ -22,6 +22,17 @@ test('MED-3.1 결정 0019 열린 shadow root 안의 영상에도 실제 배속�
     if (message.type() === 'error') pageErrors.push(message.text());
   });
   await page.goto(`${fixtureOrigin}/video-shadow.html`);
+  // 영상 플레이어를 사용자 정의 요소로 만든 사이트처럼, 영상을 열린 shadow root 안의 겹친 열린 shadow root 안에 둔다.
+  // 기능을 켜기 전에 둔다(처음부터 있는 영상).
+  await page.evaluate(() => {
+    const player = document.getElementById('player');
+    if (player === null) throw new Error('시험 페이지에 #player가 없다.');
+    const inner = document.createElement('div');
+    player.attachShadow({ mode: 'open' }).append(inner);
+    const video = document.createElement('video');
+    video.style.cssText = 'display: block; width: 320px; height: 180px; background: #222';
+    inner.attachShadow({ mode: 'open' }).append(video);
+  });
   const popup = await openPopup(context, extensionId);
   await popup.getByRole('switch', { name: '미디어 배속' }).check();
   await popup.close();
