@@ -217,8 +217,8 @@ describe('배속 표시창(05단계 뼈대)', () => {
     ).toBe(video);
   });
 
-  describe('영상만 다른 자리로 옮겨져도 표시창이 영상의 왼쪽 위를 따라간다(MED-3)', () => {
-    // 영상의 크기는 그대로이고 스크롤도 창 크기 변경도 없는 경우들이다.
+  describe('영상이 다른 자리로 옮겨져도 표시창이 영상이 그려진 상자의 왼쪽 위를 따라간다(MED-3)', () => {
+    // 영상의 레이아웃 크기는 그대로인 경우들이다(크기 관찰 알림이 오지 않는다).
     function indicatorOn(video: HTMLVideoElement) {
       const label = labelAt(0);
       const from = video.getBoundingClientRect();
@@ -289,6 +289,57 @@ describe('배속 표시창(05단계 뼈대)', () => {
       expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
       close();
     });
+
+    it('문서가 스크롤될 때', async () => {
+      const video = addVideo(320, 180);
+      document.body.append(addBlock(3000));
+      const { close } = start(enabled);
+      const first = await settled(video);
+      window.scrollTo(0, 120);
+      await vi.waitFor(() => {
+        expect(indicatorOn(video)).toBeCloseTo(first - 120, 0);
+      });
+      window.scrollTo(0, 0);
+      close();
+    });
+
+    it('안쪽 스크롤 컨테이너가 스크롤될 때', async () => {
+      const scroller = addBlock(200);
+      scroller.style.overflow = 'auto';
+      document.body.append(scroller);
+      const video = addVideo(320, 180);
+      scroller.append(addBlock(100), video, addBlock(600));
+      const { close } = start(enabled);
+      const first = await settled(video);
+      scroller.scrollTop = 50;
+      await vi.waitFor(() => {
+        expect(indicatorOn(video)).toBeCloseTo(first - 50, 0);
+      });
+      close();
+    });
+
+    it('감싼 요소의 transform으로 옮겨지고 줄어들 때', async () => {
+      const video = addVideo(320, 180);
+      const wrapper = addBlock(180);
+      video.before(wrapper);
+      wrapper.append(video);
+      const { close } = start(enabled);
+      const first = await settled(video);
+      wrapper.style.transformOrigin = '0 0';
+      wrapper.style.transform = 'translate(40px, 30px) scale(0.8)';
+      await vi.waitFor(() => {
+        expect(indicatorOn(video)).toBeCloseTo(first + 30, 0);
+      });
+      close();
+    });
+  });
+
+  it('영상 요소에는 아무것도 적지 않는다(앵커는 popover를 연 source로 정한다)', async () => {
+    const video = addVideo(320, 180);
+    const before = video.outerHTML;
+    start(enabled);
+    await frames();
+    expect(video.outerHTML).toBe(before);
   });
 
   it('COM-1.3 끄면 더한 요소가 남지 않는다', () => {
