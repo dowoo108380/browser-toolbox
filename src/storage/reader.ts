@@ -1,6 +1,7 @@
 import type { FeatureDefinition, ToggleSettings } from '../contracts/index.ts';
 import { type SettingsFormat, classify } from './format.ts';
-import { type FeatureSettingsSpec, checkFeatureItems } from './items.ts';
+import { type FeatureSettingsSpec, checkItems } from './items.ts';
+import { type RepairScope, wholeRepair } from './repair-notice.ts';
 
 // 읽는 쪽의 공통 계약(결정 0011)을 순수 함수로 둔다. 받은 값(읽기 결과나 바뀜 알림의 새 값)마다
 // (지금 상태, 받은 값) → (새 상태, 할 일)을 계산한다. 받는 순서에 기대지 않는다.
@@ -9,7 +10,8 @@ import { type FeatureSettingsSpec, checkFeatureItems } from './items.ts';
 export interface Snapshot {
   // 검증을 통과한 기능 설정. 없는 기능은 기본값을 쓴다.
   readonly features: ReadonlyMap<string, unknown>;
-  readonly sites: Readonly<Record<string, unknown>>;
+  // 검증을 통과한 사이트 항목: 사이트(호스트) → 기능 id → 값. 없는 항목은 기본값이다(결정 0017).
+  readonly sites: ReadonlyMap<string, ReadonlyMap<string, unknown>>;
 }
 
 export interface ReaderState {
@@ -26,7 +28,8 @@ export const initialReaderState: ReaderState = { accepted: null, snapshot: null,
 export type ReaderEffect =
   | { readonly kind: 'apply'; readonly snapshot: Snapshot }
   | { readonly kind: 'ensureReady' }
-  | { readonly kind: 'corrupt'; readonly items: 'all' | readonly string[] }
+  // 기본값으로 대신 쓰는 범위(설정 전체이거나 손상 항목).
+  | { readonly kind: 'corrupt'; readonly scope: RepairScope }
   | { readonly kind: 'newer'; readonly version: number };
 
 export interface ReaderStep {
@@ -34,7 +37,7 @@ export interface ReaderStep {
   readonly effects: readonly ReaderEffect[];
 }
 
-const defaultsSnapshot: Snapshot = { features: new Map(), sites: {} };
+const defaultsSnapshot: Snapshot = { features: new Map(), sites: new Map() };
 
 export function receive(
   state: ReaderState,
@@ -54,7 +57,7 @@ export function receive(
         state: { accepted: null, snapshot: defaultsSnapshot, newer: null },
         effects: [
           { kind: 'apply', snapshot: defaultsSnapshot },
-          { kind: 'corrupt', items: 'all' },
+          { kind: 'corrupt', scope: wholeRepair },
           { kind: 'ensureReady' },
         ],
       };
@@ -69,13 +72,22 @@ export function receive(
     case 'current': {
       const { revision } = classified.value;
       if (state.accepted !== null && revision <= state.accepted) return { state, effects: [] };
-      const { valid, corrupt } = checkFeatureItems(classified.value.features, specs);
-      const snapshot: Snapshot = { features: valid, sites: classified.value.sites };
+      const { features, sites, corruptFeatures, corruptSites } = checkItems(
+        classified.value,
+        specs,
+      );
+      const snapshot: Snapshot = { features, sites };
       const effects: ReaderEffect[] = [{ kind: 'apply', snapshot }];
       // 손상 항목이 있으면 서비스 워커에 고쳐 쓰기를 부탁한다. 서비스 워커는 고쳐 쓰기 전에 복구 알림을 남기므로,
       // 화면이 알림에 쓴 "기본값으로 바꿨다"가 저장소에서도 곧 참이 된다(결정 0016).
-      if (corrupt.length > 0) {
-        effects.push({ kind: 'corrupt', items: corrupt }, { kind: 'ensureReady' });
+      if (corruptFeatures.length > 0 || corruptSites.length > 0) {
+        effects.push(
+          {
+            kind: 'corrupt',
+            scope: { whole: false, features: corruptFeatures, sites: corruptSites },
+          },
+          { kind: 'ensureReady' },
+        );
       }
       return { state: { accepted: revision, snapshot, newer: null }, effects };
     }

@@ -5,6 +5,7 @@ import type { LocalStore, Requester } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import { type SettingsFormat, settingsFormat, settingsKey } from './format.ts';
 import type { Snapshot } from './reader.ts';
+import type { RepairScope } from './repair-notice.ts';
 import { startSettingsReader } from './subscribe.ts';
 
 const t = 1_790_000_000_000;
@@ -16,7 +17,7 @@ function setup<Store extends Pick<LocalStore, 'get' | 'onChanged'>>(
 ) {
   const applied: Snapshot[] = [];
   const problems: AppError[] = [];
-  const corrupted: ('all' | readonly string[])[] = [];
+  const corrupted: RepairScope[] = [];
   const newer: number[] = [];
   let ensureCount = 0;
   // 진짜처럼 응답을 그 요청의 정의로 검증해 돌려준다.
@@ -31,7 +32,7 @@ function setup<Store extends Pick<LocalStore, 'get' | 'onChanged'>>(
     { store, request, format, specs },
     {
       apply: (snapshot) => applied.push(snapshot),
-      corrupt: (items) => corrupted.push(items),
+      corrupt: (scope) => corrupted.push(scope),
       newer: (version) => newer.push(version),
       problem: (error) => problems.push(error),
     },
@@ -152,7 +153,10 @@ describe('읽기 도우미', () => {
       return Promise.resolve(ok(null));
     });
     await settle();
-    expect(harness.corrupted).toEqual(['all', ['sample']]);
+    expect(harness.corrupted).toEqual([
+      { whole: true, features: [], sites: [] },
+      { whole: false, features: ['sample'], sites: [] },
+    ]);
   });
 
   it('COM-3.8 더 새 형식이면 그 버전을 화면에 알린다', async () => {

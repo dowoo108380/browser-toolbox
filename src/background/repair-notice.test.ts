@@ -14,43 +14,57 @@ function setup(initial?: unknown) {
   return { store, clock, log };
 }
 
+const sampleOnly = { whole: false, features: ['sample'], sites: [] };
+
 describe('설정 복구 알림 기록', () => {
   it('고친 범위를 더해 가며 남긴다', async () => {
     const { store, clock, log } = setup();
-    expect(await log.add({ whole: false, features: ['sample'] })).toEqual({
-      ok: true,
-      value: null,
-    });
+    expect(await log.add(sampleOnly)).toEqual({ ok: true, value: null });
     clock.time += 1_000;
-    await log.add({ whole: true, features: ['sample', 'other'] });
+    await log.add({
+      whole: true,
+      features: ['sample', 'other'],
+      sites: [{ host: 'example.com', featureId: 'sample' }],
+    });
     expect(store.peek(repairNoticeKey)).toEqual({
       stamp: t + 1_000,
       whole: true,
       features: ['sample', 'other'],
+      sites: [{ host: 'example.com', featureId: 'sample' }],
     });
   });
 
   it('사용자가 본 기록을 확인하면 비운다', async () => {
-    const { store, clock, log } = setup({ stamp: t, whole: false, features: ['sample'] });
+    const { store, clock, log } = setup({ stamp: t, ...sampleOnly });
     clock.time += 5;
     expect(await log.dismiss(t)).toEqual({ ok: true, value: null });
-    expect(store.peek(repairNoticeKey)).toEqual({ stamp: t + 5, whole: false, features: [] });
+    expect(store.peek(repairNoticeKey)).toEqual({
+      stamp: t + 5,
+      whole: false,
+      features: [],
+      sites: [],
+    });
   });
 
   it('확인보다 먼저 들어온 새 손상은 확인이 지우지 않는다(들어온 순서대로 한다)', async () => {
-    const { store, clock, log } = setup({ stamp: t, whole: false, features: ['sample'] });
+    const { store, clock, log } = setup({ stamp: t, ...sampleOnly });
     clock.time += 5;
-    await Promise.all([log.add({ whole: false, features: ['other'] }), log.dismiss(t)]);
+    await Promise.all([log.add({ whole: false, features: ['other'], sites: [] }), log.dismiss(t)]);
     expect(store.peek(repairNoticeKey)).toEqual({
       stamp: t + 5,
       whole: false,
       features: ['sample', 'other'],
+      sites: [],
     });
   });
 
   it.each([
-    ['같은 기능', { whole: false, features: ['sample'] }],
-    ['설정 전체', { whole: true, features: [] }],
+    ['같은 기능', sampleOnly],
+    ['설정 전체', { whole: true, features: [], sites: [] }],
+    [
+      '같은 사이트 항목',
+      { whole: false, features: [], sites: [{ host: 'a.test', featureId: null }] },
+    ],
   ])('확인보다 먼저 들어온 %s의 재손상은 확인이 지우지 않는다', async (_name, scope) => {
     const { store, clock, log } = setup({ stamp: t, ...scope });
     clock.time += 5;
@@ -60,8 +74,19 @@ describe('설정 복구 알림 기록', () => {
 
   it('형식이 틀린 기록은 버리고 새로 시작한다', async () => {
     const { store, log } = setup({ stamp: 'x' });
-    await log.add({ whole: false, features: ['sample'] });
-    expect(store.peek(repairNoticeKey)).toEqual({ stamp: t, whole: false, features: ['sample'] });
+    await log.add(sampleOnly);
+    expect(store.peek(repairNoticeKey)).toEqual({ stamp: t, ...sampleOnly });
+  });
+
+  it('결정 0017 사이트 항목이 없던 때의 기록에 사이트 항목을 더한다', async () => {
+    const { store, log } = setup({ stamp: t - 10, whole: false, features: ['sample'] });
+    await log.add({ whole: false, features: [], sites: [{ host: 'a.test', featureId: 'sample' }] });
+    expect(store.peek(repairNoticeKey)).toEqual({
+      stamp: t,
+      whole: false,
+      features: ['sample'],
+      sites: [{ host: 'a.test', featureId: 'sample' }],
+    });
   });
 
   it('저장소에 쓰지 못하면 실패를 돌려준다', async () => {
@@ -70,7 +95,7 @@ describe('설정 복구 알림 기록', () => {
       store: { ...fake, set: () => Promise.reject(new Error('quota')) },
       now: () => t,
     });
-    const added = await log.add({ whole: true, features: [] });
+    const added = await log.add({ whole: true, features: [], sites: [] });
     expect(added.ok).toBe(false);
     if (!added.ok) expect(added.error.kind).toBe('platform');
   });

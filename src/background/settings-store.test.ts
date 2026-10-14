@@ -128,8 +128,45 @@ describe('설정 바꾸기', () => {
     expect(store.peek(settingsKey)).toEqual(stored(t + 1, { other: { enabled: true } }));
     expect(problems).toEqual([{ featureId: 'sample', kind: 'unexpected' }]);
     // 고쳐 쓰기 전에 사용자에게 보일 복구 알림을 남긴다(결정 0016).
-    expect(notices).toEqual([{ whole: false, features: ['sample'] }]);
+    expect(notices).toEqual([{ whole: false, features: ['sample'], sites: [] }]);
     expect(events).toEqual(['notice', 'write']);
+  });
+
+  it('COM-3.4 결정 0017 손상된 사이트 항목이 있어도 다른 기능을 바꿀 수 있고, 그 사이트 항목만 지우며 사이트 이름 없이 기록한다', async () => {
+    const { settings, store, problems, notices } = setup(
+      stored(
+        5,
+        {},
+        {
+          'a.test': { sample: { rules: 'x' }, 'future-feature': { mode: 1 } },
+          'b.test': 7,
+          'c.test': { sample: { rules: ['#ad'] } },
+        },
+      ),
+    );
+    expect((await settings.updateFeature('other', { enabled: true })).ok).toBe(true);
+    expect(store.peek(settingsKey)).toEqual(
+      stored(
+        t + 1,
+        { other: { enabled: true } },
+        { 'a.test': { 'future-feature': { mode: 1 } }, 'c.test': { sample: { rules: ['#ad'] } } },
+      ),
+    );
+    expect(notices).toEqual([
+      {
+        whole: false,
+        features: [],
+        sites: [
+          { host: 'a.test', featureId: 'sample' },
+          { host: 'b.test', featureId: null },
+        ],
+      },
+    ]);
+    // 문제 기록에는 사이트 이름을 넣지 않는다(COM-5 기대 동작 3).
+    expect(problems).toEqual([
+      { featureId: 'sample', kind: 'unexpected' },
+      { featureId: null, kind: 'unexpected' },
+    ]);
   });
 
   it('결정 0016 복구 알림을 남기지 못하면 손상을 고치지도 바꾸지도 않는다', async () => {
@@ -193,7 +230,7 @@ describe('준비(ensureReady)', () => {
     await settings.ensureReady();
     expect(store.peek(settingsKey)).toEqual(stored(t + 1));
     expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
-    expect(notices).toEqual([{ whole: true, features: [] }]);
+    expect(notices).toEqual([{ whole: true, features: [], sites: [] }]);
     expect(events).toEqual(['notice', 'write']);
   });
 
@@ -203,7 +240,29 @@ describe('준비(ensureReady)', () => {
     );
     expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
     expect(store.peek(settingsKey)).toEqual(stored(t + 1, { other: { enabled: true } }));
-    expect(notices).toEqual([{ whole: false, features: ['sample'] }]);
+    expect(notices).toEqual([{ whole: false, features: ['sample'], sites: [] }]);
+  });
+
+  it('COM-3.4 결정 0017 손상된 사이트 항목만 고쳐 쓰고 알린다. 모르는 기능의 사이트 항목은 손상이 아니다', async () => {
+    const { settings, store, notices, events } = setup(
+      stored(5, {}, { 'a.test': [], 'b.test': { 'future-feature': 'x' } }),
+    );
+    expect(await settings.ensureReady()).toEqual({ ok: true, value: null });
+    expect(store.peek(settingsKey)).toEqual(
+      stored(t + 1, {}, { 'b.test': { 'future-feature': 'x' } }),
+    );
+    expect(notices).toEqual([
+      { whole: false, features: [], sites: [{ host: 'a.test', featureId: null }] },
+    ]);
+    expect(events).toEqual(['notice', 'write']);
+  });
+
+  it('결정 0017 모르는 기능의 사이트 항목만 있으면 고칠 것이 없어 쓰지 않는다', async () => {
+    const value = stored(5, {}, { 'a.test': { 'future-feature': 'x', other: [] } });
+    const { settings, store, notices } = setup(value);
+    await settings.ensureReady();
+    expect(store.peek(settingsKey)).toEqual(value);
+    expect(notices).toEqual([]);
   });
 
   it('결정 0016 복구 알림을 남기지 못하면 고쳐 쓰지 않고 실패를 돌려준다(다음 준비 때 다시 한다)', async () => {

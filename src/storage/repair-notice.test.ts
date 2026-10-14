@@ -3,8 +3,10 @@ import { createFakeLocalStore } from '../platform/fake.ts';
 import type { AppError } from '../shared/index.ts';
 import {
   type RepairNotice,
+  type RepairScope,
   addRepair,
   dismissRepair,
+  isEmptyRepair,
   mergeRepairs,
   noRepair,
   parseRepairNotice,
@@ -17,33 +19,82 @@ import {
 
 const t = 1_790_000_000_000;
 
+// 기능 id와 사이트 항목으로 범위를 만든다.
+function scope(features: readonly string[], sites: RepairScope['sites'] = []): RepairScope {
+  return { whole: false, features, sites };
+}
+
 describe('알릴 범위', () => {
   it('설정이 없음과 형식 이전은 손상이 아니라 알리지 않는다', () => {
     expect(repairScopeOf([{ kind: 'missing' }, { kind: 'migrated', from: 1 }])).toEqual(noRepair);
   });
 
-  it('전체 손상과 손상 항목을 모은다', () => {
+  it('전체 손상과 손상 항목(기능, 사이트)을 모은다', () => {
     expect(
       repairScopeOf([
         { kind: 'corrupt' },
-        { kind: 'corruptItems', items: ['sample'] },
-        { kind: 'corruptItems', items: ['other'] },
+        { kind: 'corruptItems', features: ['sample'], sites: [] },
+        {
+          kind: 'corruptItems',
+          features: ['other'],
+          sites: [
+            { host: 'a.test', featureId: null },
+            { host: 'b.test', featureId: 'sample' },
+          ],
+        },
       ]),
-    ).toEqual({ whole: true, features: ['sample', 'other'] });
+    ).toEqual({
+      whole: true,
+      features: ['sample', 'other'],
+      sites: [
+        { host: 'a.test', featureId: null },
+        { host: 'b.test', featureId: 'sample' },
+      ],
+    });
   });
 
-  it('합칠 때 기능 id는 처음 나온 순서대로 한 번씩만 둔다', () => {
-    expect(
-      mergeRepairs({ whole: false, features: ['b', 'a'] }, { whole: false, features: ['a', 'c'] }),
-    ).toEqual({ whole: false, features: ['b', 'a', 'c'] });
+  it('합칠 때 기능 id와 사이트 항목은 처음 나온 순서대로 한 번씩만 둔다', () => {
+    const first = scope(
+      ['b', 'a'],
+      [
+        { host: 'a.test', featureId: 'sample' },
+        { host: 'a.test', featureId: null },
+      ],
+    );
+    const second = scope(
+      ['a', 'c'],
+      [
+        { host: 'a.test', featureId: null },
+        { host: 'a.test', featureId: 'other' },
+        { host: 'b.test', featureId: 'sample' },
+      ],
+    );
+    expect(mergeRepairs(first, second)).toEqual(
+      scope(
+        ['b', 'a', 'c'],
+        [
+          { host: 'a.test', featureId: 'sample' },
+          { host: 'a.test', featureId: null },
+          { host: 'a.test', featureId: 'other' },
+          { host: 'b.test', featureId: 'sample' },
+        ],
+      ),
+    );
+  });
+
+  it('사이트 항목만 있어도 알릴 것이 있다', () => {
+    expect(isEmptyRepair(noRepair)).toBe(true);
+    expect(isEmptyRepair(scope([], [{ host: 'a.test', featureId: null }]))).toBe(false);
+    expect(isEmptyRepair(scope(['sample']))).toBe(false);
+    expect(isEmptyRepair({ ...noRepair, whole: true })).toBe(false);
   });
 });
 
 describe('서비스 워커가 쓰는 기록', () => {
-  const sample: RepairNotice = { stamp: t, whole: false, features: ['sample'] };
+  const sample: RepairNotice = { stamp: t, ...scope(['sample']) };
 
   it('기록이 없으면 지금 시각을 stamp로 새로 쓴다', () => {
-    expect(addRepair(null, { whole: false, features: ['sample'] }, t)).toEqual(sample);
+    expect(addRepair(null, scope(['sample']), t)).toEqual(sample);
   });
 
   it('고칠 범위가 비었으면 쓰지 않는다', () => {
@@ -51,35 +102,39 @@ describe('서비스 워커가 쓰는 기록', () => {
     expect(addRepair(null, noRepair, t)).toBeNull();
   });
 
-  it('이미 기록된 기능이나 설정 전체가 다시 고쳐지면 범위는 그대로이고 stamp가 커진다', () => {
-    expect(addRepair(sample, { whole: false, features: ['sample'] }, t + 5)).toEqual({
-      ...sample,
-      stamp: t + 5,
+  it('이미 기록된 기능이나 설정 전체, 사이트 항목이 다시 고쳐지면 범위는 그대로이고 stamp가 커진다', () => {
+    expect(addRepair(sample, scope(['sample']), t + 5)).toEqual({ ...sample, stamp: t + 5 });
+    const whole: RepairNotice = { stamp: t, ...noRepair, whole: true };
+    expect(addRepair(whole, { ...noRepair, whole: true }, t)).toEqual({ ...whole, stamp: t + 1 });
+    const site: RepairNotice = { stamp: t, ...scope([], [{ host: 'a.test', featureId: null }]) };
+    expect(addRepair(site, scope([], [{ host: 'a.test', featureId: null }]), t)).toEqual({
+      ...site,
+      stamp: t + 1,
     });
-    const whole: RepairNotice = { stamp: t, whole: true, features: [] };
-    expect(addRepair(whole, { whole: true, features: [] }, t)).toEqual({ ...whole, stamp: t + 1 });
   });
 
   it('첫 손상에 대한 확인은 같은 기능이 다시 고쳐진 기록을 지우지 않는다', () => {
-    const again = addRepair(sample, { whole: false, features: ['sample'] }, t + 5);
+    const again = addRepair(sample, scope(['sample']), t + 5);
     expect(again).not.toBeNull();
     if (again !== null) expect(dismissRepair(again, t, t + 10)).toBeNull();
   });
 
   it('새 손상을 더하면 앞의 것을 남기고 stamp가 커진다(시계가 뒤로 가도)', () => {
-    expect(addRepair(sample, { whole: true, features: [] }, t - 60_000)).toEqual({
+    expect(addRepair(sample, { ...noRepair, whole: true }, t - 60_000)).toEqual({
       stamp: t + 1,
+      ...scope(['sample']),
       whole: true,
-      features: ['sample'],
     });
   });
 
   it('사용자가 본 기록을 확인하면 비우고 stamp가 커진다', () => {
     expect(dismissRepair(sample, t, t + 10)).toEqual({ stamp: t + 10, ...noRepair });
+    const site: RepairNotice = { stamp: t, ...scope([], [{ host: 'a.test', featureId: null }]) };
+    expect(dismissRepair(site, t, t + 10)).toEqual({ stamp: t + 10, ...noRepair });
   });
 
   it('확인한 뒤에 손상이 더해졌으면(stamp가 다름) 지우지 않는다', () => {
-    const later = addRepair(sample, { whole: false, features: ['other'] }, t + 3);
+    const later = addRepair(sample, scope(['other']), t + 3);
     expect(later).not.toBeNull();
     if (later !== null) expect(dismissRepair(later, t, t + 10)).toBeNull();
   });
@@ -96,8 +151,14 @@ describe('서비스 워커가 쓰는 기록', () => {
   it('형식이 틀린 기록은 없는 것으로 본다', () => {
     expect(parseRepairNotice({ stamp: 0, whole: false, features: [] })).toBeNull();
     expect(parseRepairNotice({ stamp: t, whole: 'yes', features: [] })).toBeNull();
+    expect(parseRepairNotice({ ...sample, sites: [{ host: 'a.test' }] })).toBeNull();
+    expect(parseRepairNotice({ ...sample, sites: 'a.test' })).toBeNull();
     expect(parseRepairNotice(undefined)).toBeNull();
     expect(parseRepairNotice(sample)).toEqual(sample);
+  });
+
+  it('결정 0017 사이트 항목이 없던 때의 기록은 사이트 항목이 없는 것으로 읽는다', () => {
+    expect(parseRepairNotice({ stamp: t, whole: false, features: ['sample'] })).toEqual(sample);
   });
 });
 
@@ -113,8 +174,8 @@ describe('확장 화면이 읽는 기록', () => {
   }
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const first: RepairNotice = { stamp: t, whole: false, features: ['sample'] };
-  const second: RepairNotice = { stamp: t + 1, whole: true, features: ['sample'] };
+  const first: RepairNotice = { stamp: t, ...scope(['sample']) };
+  const second: RepairNotice = { stamp: t + 1, ...scope(['sample']), whole: true };
 
   it('열 때 남아 있는 기록을 읽고, 바뀌면 새 기록을 받는다', async () => {
     const store = createFakeLocalStore({ [repairNoticeKey]: first });

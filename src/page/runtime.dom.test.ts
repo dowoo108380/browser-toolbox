@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 function snapshot(features: Record<string, unknown>): Snapshot {
-  return { features: new Map(Object.entries(features)), sites: {} };
+  return { features: new Map(Object.entries(features)), sites: new Map() };
 }
 
 function setup(parts: readonly PagePart[], connected = true) {

@@ -4,6 +4,7 @@ import { type AppError, appError } from '../shared/index.ts';
 import { type SettingsFormat, settingsKey } from './format.ts';
 import type { FeatureSettingsSpec } from './items.ts';
 import { type ReaderState, type Snapshot, initialReaderState, receive } from './reader.ts';
+import type { RepairScope } from './repair-notice.ts';
 
 // 읽기 도우미(결정 0011 읽는 쪽 계약). 콘텐츠 스크립트와 확장 화면은 설정을 이것으로만 읽는다.
 
@@ -17,7 +18,8 @@ export interface SettingsReaderDeps {
 
 export interface SettingsReaderHandlers {
   readonly apply: (snapshot: Snapshot) => void;
-  readonly corrupt: (items: 'all' | readonly string[]) => void;
+  // 손상을 보아 기본값으로 대신 쓰는 범위(설정 전체, 손상 항목).
+  readonly corrupt: (scope: RepairScope) => void;
   readonly newer: (version: number) => void;
   readonly problem: (error: AppError) => void;
 }
@@ -49,7 +51,7 @@ export function startSettingsReader(
           handlers.apply(effect.snapshot);
           break;
         case 'corrupt':
-          handlers.corrupt(effect.items);
+          handlers.corrupt(effect.scope);
           break;
         case 'newer':
           handlers.newer(effect.version);

@@ -59,11 +59,13 @@ export function createSettingsStore(deps: {
     return err(appError('platform', '손상된 설정을 고치지 못했다. 저장된 설정은 바뀌지 않았다.'));
   };
 
+  // 문제 기록에는 사이트 이름을 넣지 않는다(COM-5 기대 동작 3). 사이트 항목은 그 기능(사이트 전체면 null)으로만 남긴다.
   const recordRepairs = (repairs: readonly Repair[]) => {
     for (const repair of repairs) {
       if (repair.kind === 'corrupt') deps.record({ featureId: null, kind: 'unexpected' });
       if (repair.kind === 'corruptItems') {
-        for (const featureId of repair.items) deps.record({ featureId, kind: 'unexpected' });
+        for (const featureId of repair.features) deps.record({ featureId, kind: 'unexpected' });
+        for (const { featureId } of repair.sites) deps.record({ featureId, kind: 'unexpected' });
       }
     }
   };

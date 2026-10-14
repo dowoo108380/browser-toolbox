@@ -29,8 +29,11 @@ afterEach(() => {
   for (const element of added.splice(0)) element.remove();
 });
 
-const enabled: Snapshot = { features: new Map([['media-speed', { enabled: true }]]), sites: {} };
-const disabled: Snapshot = { features: new Map(), sites: {} };
+const enabled: Snapshot = {
+  features: new Map([['media-speed', { enabled: true }]]),
+  sites: new Map(),
+};
+const disabled: Snapshot = { features: new Map(), sites: new Map() };
 
 function addVideo(width: number, height: number): HTMLVideoElement {
   const video = document.createElement('video');

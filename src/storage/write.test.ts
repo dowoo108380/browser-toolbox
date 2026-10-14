@@ -49,7 +49,7 @@ describe('쓰기 전에 지금 형식의 값을 만든다', () => {
         value: { version: 2, revision: 5, features: { other: { enabled: true } }, sites: {} },
         repairs: [
           { kind: 'migrated', from: 1 },
-          { kind: 'corruptItems', items: ['sample'] },
+          { kind: 'corruptItems', features: ['sample'], sites: [] },
         ],
       },
     });
@@ -75,7 +75,47 @@ describe('쓰기 전에 지금 형식의 값을 만든다', () => {
       ok: true,
       value: {
         value: stored(4, { other: { enabled: true }, 'future-feature': { anything: 1 } }),
-        repairs: [{ kind: 'corruptItems', items: ['sample'] }],
+        repairs: [{ kind: 'corruptItems', features: ['sample'], sites: [] }],
+      },
+    });
+  });
+
+  it('COM-3.4 결정 0017 손상된 사이트 항목만 지우고, 그 사이트의 다른 항목과 모르는 기능의 사이트 항목은 그대로 둔다', () => {
+    const raw = stored(
+      4,
+      { other: { enabled: true } },
+      {
+        'a.test': { sample: { rules: 'x' }, other: { kept: true }, 'future-feature': [1] },
+        'b.test': 'x',
+        'c.test': { sample: { rules: ['#ad'], note: '새 판이 더한 필드' } },
+        'd.test': { sample: { rules: [1] } },
+      },
+    );
+    expect(normalize(raw, settingsFormat, specs)).toEqual({
+      ok: true,
+      value: {
+        // 남는 항목은 스키마를 거친 값이 아니라 저장된 값 그대로다(새 판이 더한 필드도 남는다).
+        // 항목이 모두 빠진 사이트는 빈 객체로 남는다.
+        value: stored(
+          4,
+          { other: { enabled: true } },
+          {
+            'a.test': { other: { kept: true }, 'future-feature': [1] },
+            'c.test': { sample: { rules: ['#ad'], note: '새 판이 더한 필드' } },
+            'd.test': {},
+          },
+        ),
+        repairs: [
+          {
+            kind: 'corruptItems',
+            features: [],
+            sites: [
+              { host: 'a.test', featureId: 'sample' },
+              { host: 'b.test', featureId: null },
+              { host: 'd.test', featureId: 'sample' },
+            ],
+          },
+        ],
       },
     });
   });
@@ -124,6 +164,16 @@ describe('최종 값 검증(결정 0011 "쓰기")', () => {
 
   it('아는 기능의 항목이 틀리면 쓰지 않는다', () => {
     expect(checkFinal(stored(5, { other: { enabled: 1 } }), settingsFormat, specs).ok).toBe(false);
+  });
+
+  it('결정 0017 사이트 항목도 읽는 쪽과 같은 기준으로 본다', () => {
+    const check = (sites: Record<string, unknown>) =>
+      checkFinal(stored(5, {}, sites), settingsFormat, specs).ok;
+    expect(
+      check({ 'a.test': { sample: { rules: ['#ad'] }, 'future-feature': 'x', other: 1 } }),
+    ).toBe(true);
+    expect(check({ 'a.test': { sample: { rules: 'x' } } })).toBe(false);
+    expect(check({ 'a.test': null })).toBe(false);
   });
 });
 

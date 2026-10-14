@@ -185,6 +185,42 @@ describe('COM-3.4 서비스 워커가 먼저 고쳐 쓴 뒤 팝업을 연다', (
     expect(again.repairText()).toBeNull();
   });
 
+  it('결정 0017 손상된 사이트 항목은 그것만 지우고 사이트 이름으로 알린다. 모르는 기능의 사이트 항목과 다른 사이트는 그대로다', async () => {
+    const store = createFakeLocalStore({
+      [settingsKey]: stored(
+        5,
+        { other: { enabled: true } },
+        {
+          'a.test': { sample: { rules: 'x' }, 'future-feature': { mode: 1 } },
+          'b.test': 'x',
+          'c.test': { sample: { rules: ['#ad'] } },
+        },
+      ),
+    });
+    const worker = startServiceWorker(store);
+    // 서비스 워커가 시작하면서 고쳐 쓴다. 팝업은 그 뒤에 열린다.
+    await vi.waitFor(() => {
+      expect(store.peek(settingsKey)).toHaveProperty('sites', {
+        'a.test': { 'future-feature': { mode: 1 } },
+        'c.test': { sample: { rules: ['#ad'] } },
+      });
+    });
+
+    const popup = await openPopup(store, worker.request);
+    await vi.waitFor(() => {
+      expect(popup.repairText()).toContain(
+        '다음 사이트의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: a.test(시험 기능), b.test.',
+      );
+    });
+    expect(popup.repairText()).not.toContain('c.test');
+    expect(popup.checked('other')).toBe(true);
+    await popup.awake();
+    await popup.confirm();
+    await vi.waitFor(() => {
+      expect(store.peek(repairNoticeKey)).toMatchObject({ whole: false, features: [], sites: [] });
+    });
+  });
+
   it('설정 전체가 손상되었으면 모든 설정을 기본값으로 바꿨다고 알린다', async () => {
     const store = createFakeLocalStore({ [settingsKey]: { version: 'x' } });
     const worker = startServiceWorker(store);
@@ -300,6 +336,14 @@ describe('COM-3.4 팝업이 열린 채 손상이 생긴다', () => {
       corrupt: () => ({ version: 1 }),
       scope: { whole: true, features: [] },
       text: '모든 설정을 기본값으로 바꿨다',
+    },
+    {
+      name: '같은 사이트 항목',
+      // 같은 기능의 경우처럼 팝업은 이 값을 보지 못하고 기록으로만 안다.
+      corrupt: () =>
+        stored(3, { other: { enabled: true } }, { 'a.test': { sample: { rules: 1 } } }),
+      scope: { whole: false, features: [], sites: [{ host: 'a.test', featureId: 'sample' }] },
+      text: '기본값으로 바꿨다: a.test(시험 기능).',
     },
   ])(
     '확인이 서비스 워커에 닿기 전에 같은 범위가 다시 손상되어 고쳐지면, 늦은 확인은 두 번째 기록을 지우지 않는다: $name',

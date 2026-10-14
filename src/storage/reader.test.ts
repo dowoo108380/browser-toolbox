@@ -64,8 +64,8 @@ describe('COM-3.10 전체 손상 뒤 복구', () => {
     expect(state.accepted).toBeNull();
     expect(otherEnabled(state)).toBeUndefined();
     expect(effects.slice(1)).toEqual([
-      { kind: 'apply', snapshot: { features: new Map(), sites: {} } },
-      { kind: 'corrupt', items: 'all' },
+      { kind: 'apply', snapshot: { features: new Map(), sites: new Map() } },
+      { kind: 'corrupt', scope: { whole: true, features: [], sites: [] } },
       { kind: 'ensureReady' },
     ]);
   });
@@ -146,7 +146,10 @@ describe('COM-3.4 항목 손상', () => {
     ]);
     expect(state.snapshot?.features.has('sample')).toBe(false);
     expect(otherEnabled(state)).toEqual({ enabled: true });
-    expect(effects).toContainEqual({ kind: 'corrupt', items: ['sample'] });
+    expect(effects).toContainEqual({
+      kind: 'corrupt',
+      scope: { whole: false, features: ['sample'], sites: [] },
+    });
   });
 
   it('결정 0016 손상 항목을 보면 서비스 워커에 고쳐 쓰기를 부탁하고, 고쳐 쓴 값을 받아들인다', () => {
@@ -169,6 +172,79 @@ describe('COM-3.4 항목 손상', () => {
   });
 });
 
+describe('결정 0017 사이트 항목', () => {
+  it('COM-3.4 사이트 항목을 그 기능의 사이트 스키마로 검증해, 손상 항목만 기본값(없음)으로 쓰고 알린다', () => {
+    const { state, effects } = run([
+      stored(
+        t,
+        { other: { enabled: true } },
+        {
+          'a.test': { sample: { rules: ['#ad'], note: '새 판이 더한 필드' } },
+          'b.test': { sample: { rules: 'x' } },
+          'c.test': 5,
+          'd.test': [],
+          'e.test': { sample: { rules: [] } },
+        },
+      ),
+    ]);
+    // 사이트 값이 객체가 아니면(배열 포함) 그 사이트 전체가 손상이다. 받아들인 값은 스키마를 거친 값이다.
+    expect(state.snapshot?.sites).toEqual(
+      new Map([
+        ['a.test', new Map([['sample', { rules: ['#ad'] }]])],
+        ['e.test', new Map([['sample', { rules: [] }]])],
+      ]),
+    );
+    expect(otherEnabled(state)).toEqual({ enabled: true });
+    expect(effects.slice(1)).toEqual([
+      {
+        kind: 'corrupt',
+        scope: {
+          whole: false,
+          features: [],
+          sites: [
+            { host: 'b.test', featureId: 'sample' },
+            { host: 'c.test', featureId: null },
+            { host: 'd.test', featureId: null },
+          ],
+        },
+      },
+      { kind: 'ensureReady' },
+    ]);
+  });
+
+  it('COM-3.8 사이트 설정을 정하지 않은 기능과 모르는 기능의 사이트 항목은 손상이 아니고 쓰지 않는다', () => {
+    const { state, effects } = run([
+      stored(
+        t,
+        {},
+        {
+          'a.test': { other: 'x', 'future-feature': [1], sample: { rules: ['p'] } },
+          'b.test': { 'future-feature': { mode: 2 } },
+          'c.test': {},
+        },
+      ),
+    ]);
+    expect(state.snapshot?.sites).toEqual(
+      new Map([['a.test', new Map([['sample', { rules: ['p'] }]])]]),
+    );
+    expect(effects.map((effect) => effect.kind)).toEqual(['apply']);
+  });
+
+  it('기능 항목과 사이트 항목의 손상을 함께 알린다', () => {
+    const { effects } = run([
+      stored(t, { sample: { enabled: 1 } }, { 'a.test': { sample: { rules: [1] } } }),
+    ]);
+    expect(effects).toContainEqual({
+      kind: 'corrupt',
+      scope: {
+        whole: false,
+        features: ['sample'],
+        sites: [{ host: 'a.test', featureId: 'sample' }],
+      },
+    });
+  });
+});
+
 describe('한 기능의 설정', () => {
   const [sample] = specs;
 
@@ -179,7 +255,7 @@ describe('한 기능의 설정', () => {
     ]);
     if (state.snapshot === null) throw new Error('적용한 설정이 없다.');
     expect(settingsOf(state.snapshot, sample)).toEqual({ enabled: true, step: 0.5, label: 'a' });
-    expect(settingsOf({ features: new Map(), sites: {} }, sample)).toEqual(
+    expect(settingsOf({ features: new Map(), sites: new Map() }, sample)).toEqual(
       sample.settings.defaults,
     );
   });

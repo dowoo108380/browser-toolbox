@@ -1,6 +1,7 @@
 import * as z from 'zod/mini';
 import type { LocalStore } from '../platform/index.ts';
 import { type AppError, appError } from '../shared/index.ts';
+import type { SiteItem } from './items.ts';
 import { type Repair, nextRevision } from './write.ts';
 
 // 설정 복구 알림(결정 0016). 서비스 워커는 손상된 설정을 기본값으로 고쳐 쓰기 전에 무엇을 바꾸는지 여기에 남기고,
@@ -9,10 +10,11 @@ import { type Repair, nextRevision } from './write.ts';
 
 export const repairNoticeKey = 'repairNotice';
 
-// 기본값으로 바꾼 범위: 설정 전체인지와, 기본값으로 바꾼 기능 id.
+// 기본값으로 바꾼 범위: 설정 전체인지와, 기본값으로 바꾼 기능 id와 사이트 항목. 읽기 도우미가 직접 본 손상도 이 모양으로 알린다.
 export interface RepairScope {
   readonly whole: boolean;
   readonly features: readonly string[];
+  readonly sites: readonly SiteItem[];
 }
 
 export interface RepairNotice extends RepairScope {
@@ -21,12 +23,19 @@ export interface RepairNotice extends RepairScope {
   readonly stamp: number;
 }
 
-export const noRepair: RepairScope = { whole: false, features: [] };
+export const noRepair: RepairScope = { whole: false, features: [], sites: [] };
+
+export const wholeRepair: RepairScope = { whole: true, features: [], sites: [] };
 
 const noticeSchema = z.object({
   stamp: z.int().check(z.minimum(1)),
   whole: z.boolean(),
   features: z.array(z.string()),
+  // 사이트 항목은 결정 0017에서 더했다. 그 전에 남은 기록에는 없으므로 없으면 빈 목록으로 읽는다.
+  sites: z._default(
+    z.array(z.object({ host: z.string(), featureId: z.nullable(z.string()) })),
+    () => [],
+  ),
 });
 
 // 기록이 없거나 형식이 틀리면 null이다. 이 기록은 알림을 돕는 것이라, 틀렸으면 없는 것으로 보고
@@ -37,23 +46,33 @@ export function parseRepairNotice(raw: unknown): RepairNotice | null {
 }
 
 export function isEmptyRepair(scope: RepairScope): boolean {
-  return !scope.whole && scope.features.length === 0;
+  return !scope.whole && scope.features.length === 0 && scope.sites.length === 0;
 }
 
-// 두 범위를 합친다. 기능 id는 처음 나온 순서대로 한 번씩만 둔다.
+const sameSite = (a: SiteItem, b: SiteItem) => a.host === b.host && a.featureId === b.featureId;
+
+// 두 범위를 합친다. 기능 id와 사이트 항목은 처음 나온 순서대로 한 번씩만 둔다.
 export function mergeRepairs(first: RepairScope, second: RepairScope): RepairScope {
+  const sites: SiteItem[] = [];
+  for (const item of [...first.sites, ...second.sites]) {
+    if (!sites.some((seen) => sameSite(seen, item))) sites.push(item);
+  }
   return {
     whole: first.whole || second.whole,
     features: [...new Set([...first.features, ...second.features])],
+    sites,
   };
 }
 
 // 서비스 워커가 고쳐 쓰기 전에 사용자에게 알릴 범위. 설정이 없음과 형식 이전은 손상이 아니므로 알리지 않는다.
 export function repairScopeOf(repairs: readonly Repair[]): RepairScope {
-  return {
-    whole: repairs.some((repair) => repair.kind === 'corrupt'),
-    features: repairs.flatMap((repair) => (repair.kind === 'corruptItems' ? repair.items : [])),
-  };
+  return repairs.reduce<RepairScope>((scope, repair) => {
+    if (repair.kind === 'corrupt') return mergeRepairs(scope, wholeRepair);
+    if (repair.kind === 'corruptItems') {
+      return mergeRepairs(scope, { whole: false, features: repair.features, sites: repair.sites });
+    }
+    return scope;
+  }, noRepair);
 }
 
 // 앞 기록에 새로 고친 범위를 더한 기록. 고칠 범위가 비었으면 null(쓰지 않는다).

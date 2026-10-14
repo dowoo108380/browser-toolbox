@@ -42,6 +42,11 @@ const strings = {
   repairWhole: '저장된 설정을 읽을 수 없어 모든 설정을 기본값으로 바꿨다.',
   repairFeatures: (names: string) =>
     `다음 기능의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: ${names}.`,
+  // 사이트 이름 뒤 괄호의 기능만 바꿨다. 괄호가 없으면 그 사이트의 설정 전부다.
+  repairSites: (items: string) =>
+    `다음 사이트의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: ${items}.`,
+  siteItem: (host: string, featureName: string | null) =>
+    featureName === null ? host : `${host}(${featureName})`,
   repairConfirm: '확인',
   newer:
     '더 새 버전의 확장이 저장한 설정이라 이 버전에서는 기능을 쓸 수 없다. 새 버전을 다시 설치한다.',
@@ -77,9 +82,7 @@ export function PopupApp({
     () =>
       subscribe({
         apply: setSnapshot,
-        corrupt: (items) => {
-          const scope =
-            items === 'all' ? { whole: true, features: [] } : { whole: false, features: items };
+        corrupt: (scope) => {
           setSeenRepair((previous) => mergeRepairs(previous, scope));
         },
         newer: () => {
@@ -184,6 +187,17 @@ export function PopupApp({
           {repair.whole && <p>{strings.repairWhole}</p>}
           {repair.features.length > 0 && (
             <p>{strings.repairFeatures(repair.features.map(nameOf).join(', '))}</p>
+          )}
+          {repair.sites.length > 0 && (
+            <p>
+              {strings.repairSites(
+                repair.sites
+                  .map(({ host, featureId }) =>
+                    strings.siteItem(host, featureId === null ? null : nameOf(featureId)),
+                  )
+                  .join(', '),
+              )}
+            </p>
           )}
           <button
             type="button"

@@ -6,7 +6,7 @@ import {
   emptySettings,
   migrateToCurrent,
 } from './format.ts';
-import { type FeatureSettingsSpec, checkFeatureItems } from './items.ts';
+import { type FeatureSettingsSpec, type SiteItem, checkItems, withoutItems } from './items.ts';
 
 // 서비스 워커가 settings를 쓰기 전에 하는 순수한 계산(결정 0011 "쓰기", "세대 번호", "크기 한도").
 
@@ -14,7 +14,11 @@ export type Repair =
   | { readonly kind: 'missing' }
   | { readonly kind: 'corrupt' }
   | { readonly kind: 'migrated'; readonly from: number }
-  | { readonly kind: 'corruptItems'; readonly items: readonly string[] };
+  | {
+      readonly kind: 'corruptItems';
+      readonly features: readonly string[];
+      readonly sites: readonly SiteItem[];
+    };
 
 export interface Normalized {
   readonly value: StoredSettings;
@@ -62,13 +66,10 @@ export function normalize(
       value = classified.value;
       break;
   }
-  const { corrupt } = checkFeatureItems(value.features, specs);
-  if (corrupt.length > 0) {
-    const features = Object.fromEntries(
-      Object.entries(value.features).filter(([id]) => !corrupt.includes(id)),
-    );
-    value = { ...value, features };
-    repairs.push({ kind: 'corruptItems', items: corrupt });
+  const { corruptFeatures, corruptSites } = checkItems(value, specs);
+  if (corruptFeatures.length > 0 || corruptSites.length > 0) {
+    value = withoutItems(value, corruptFeatures, corruptSites);
+    repairs.push({ kind: 'corruptItems', features: corruptFeatures, sites: corruptSites });
   }
   return ok({ value, repairs });
 }
@@ -89,11 +90,9 @@ export function checkFinal(
   specs: readonly FeatureSettingsSpec[],
 ): Result<StoredSettings, AppError> {
   const classified = classify(value, format);
-  if (
-    classified.kind === 'current' &&
-    checkFeatureItems(value.features, specs).corrupt.length === 0
-  ) {
-    return ok(value);
+  if (classified.kind === 'current') {
+    const { corruptFeatures, corruptSites } = checkItems(classified.value, specs);
+    if (corruptFeatures.length === 0 && corruptSites.length === 0) return ok(value);
   }
   return err(
     appError(
