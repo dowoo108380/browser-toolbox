@@ -94,17 +94,18 @@ export function createSettingsStore(deps: {
   };
 
   // 최종 값 전체를 검사한 뒤 쓴다. 저장 실패는 예상할 수 있는 실패다. 저장된 설정은 바꾸기 전 그대로다(COM-3.3).
+  // 사용자가 하는 저장이면 크기를 지금 값(읽은 그대로의 값, 그것을 고쳐 쓰기·형식 이전만 한 값)과 비교한다.
   const write = async (
     value: StoredSettings,
-    previous: StoredSettings | null,
+    current: { readonly stored: unknown; readonly normalized: StoredSettings } | null,
   ): Promise<Result<null, AppError>> => {
     // 서비스 워커가 만든 값이 틀렸다. 일어나면 안 되는 일이다(quality 066). unexpected로 돌려주고,
     // 기록은 결과를 받는 쪽(서비스 워커 시작, 라우터)이 한다.
     const final = checkFinal(value, deps.format, deps.features);
     if (!final.ok) return final;
-    // 형식 이전과 고쳐 쓰기는 크기 한도와 상관없이 한다(결정 0011 "크기 한도").
-    if (previous !== null) {
-      const size = checkSize(value, previous);
+    // 형식 이전과 고쳐 쓰기만 하는 쓰기(current가 null)는 크기 한도와 상관없이 한다(결정 0011 "크기 한도").
+    if (current !== null) {
+      const size = checkSize(value, current.stored, current.normalized);
       if (!size.ok) return size;
     }
     try {
@@ -165,7 +166,7 @@ export function createSettingsStore(deps: {
           revision: nextRevision(base.revision, now),
           features: { ...base.features, [featureId]: merged.data },
         };
-        const written = await write(next, base);
+        const written = await write(next, { stored: loaded.value.raw, normalized: base });
         if (!written.ok) return written;
         recordRepairs(normalized.value.repairs);
         return ok({ revision: next.revision });

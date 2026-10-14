@@ -105,22 +105,29 @@ export function checkFinal(
 export const settingsSizeLimit = 262_144;
 
 // 설정을 JSON으로 쓴 UTF-8 바이트 수. 문자열 길이(UTF-16 코드 단위)가 아니다(결정 0011 "크기 한도").
-export function settingsSize(value: StoredSettings): number {
+// 저장된 값은 무엇이든(옛 형식, 손상 값) 읽은 그대로 같은 단위로 잰다. 저장된 값이 없으면 0이다.
+export function settingsSize(value: unknown): number {
+  if (value === undefined) return 0;
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
-// 한도를 넘고 지금보다 커지는 저장만 막는다. 줄이는 저장은 언제나 된다.
+// 사용자가 하는 저장의 결과(next)가 한도를 넘고 지금보다 커지면 막는다. 줄이는 저장은 언제나 된다.
+// 지금은 저장된 값(stored, 읽은 그대로)이다. 손상 항목을 지운 값이 아니다. 알리는 지금 크기도 이것이다.
+// 같은 쓰기에 형식 이전이 섞여 커졌으면 그 커진 만큼은 막지 않는다: 이전만 한 값(normalized, 손상 항목도 지운 값)보다
+// 커지지 않는 저장도 한다. 형식 이전과 고쳐 쓰기는 한도와 상관없이 하므로, 그것을 먼저 따로 써 두었다면 되었을 저장이다.
 export function checkSize(
   next: StoredSettings,
-  previous: StoredSettings,
+  stored: unknown,
+  normalized: StoredSettings,
 ): Result<number, AppError> {
   const size = settingsSize(next);
-  const currentSize = settingsSize(previous);
-  if (size <= settingsSizeLimit || size <= currentSize) return ok(size);
+  if (size <= settingsSizeLimit) return ok(size);
+  const storedSize = settingsSize(stored);
+  if (size <= storedSize || size <= settingsSize(normalized)) return ok(size);
   return err(
     appError(
       'limit',
-      `설정이 크기 한도(${String(settingsSizeLimit)}바이트)를 넘게 되어 저장하지 않았다. 지금 크기는 ${String(currentSize)}바이트다. 쓰지 않는 사이트 규칙을 지운다.`,
+      `설정이 크기 한도(${String(settingsSizeLimit)}바이트)를 넘게 되어 저장하지 않았다. 지금 크기는 ${String(storedSize)}바이트다. 쓰지 않는 사이트 규칙을 지운다.`,
     ),
   );
 }

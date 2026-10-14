@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import * as z from 'zod/mini';
 import { specs, stored } from '../../tests/support/settings.ts';
 import { createFakeLocalStore } from '../platform/fake.ts';
 import { appError, err, ok } from '../shared/index.ts';
 import {
   type RepairScope,
+  type SettingsFormat,
   type SettingsReaderHandlers,
   type Snapshot,
+  currentStructure,
   settingsFormat,
   settingsKey,
   startSettingsReader,
@@ -40,9 +43,13 @@ interface SetupOptions {
   readonly failWrites?: boolean;
   // 참이면 복구 알림을 남기지 못한다(결정 0016).
   readonly failNotice?: boolean;
+  readonly format?: SettingsFormat;
 }
 
-function setup(initial?: unknown, { failWrites = false, failNotice = false }: SetupOptions = {}) {
+function setup(
+  initial?: unknown,
+  { failWrites = false, failNotice = false, format = settingsFormat }: SetupOptions = {},
+) {
   const fake = createFakeLocalStore(initial === undefined ? {} : { [settingsKey]: initial });
   const problems: Problem[] = [];
   const notices: RepairScope[] = [];
@@ -63,7 +70,7 @@ function setup(initial?: unknown, { failWrites = false, failNotice = false }: Se
     },
     now: clock.now,
     sleep: clock.sleep,
-    format: settingsFormat,
+    format,
     features: specs,
     record: (problem) => problems.push(problem),
     noticeRepair: (scope) => {
@@ -314,6 +321,119 @@ describe('최종 값 검증(결정 0011 "쓰기")', () => {
     expect(store.peek(settingsKey)).toEqual(value);
     // 손상 항목은 고쳐 쓴 뒤에만 기록한다. 쓰지 못했으므로 아무것도 기록하지 않는다.
     expect(problems).toEqual([]);
+  });
+});
+
+describe('COM-3.9 설정 바꾸기의 크기 한도는 지금 저장된 값과 비교한다(결정 0011 "크기 한도")', () => {
+  // 요구사항의 정의대로 잰다: JSON으로 쓴 UTF-8 바이트 수, 한도 262,144(COM-3 기대 동작 8).
+  const limit = 262_144;
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
+  // 저장된 값과 쓰는 값(t + 1)의 revision 자릿수를 같게 해, 크기 차이가 바꾼 내용에서만 나게 한다.
+  const revision = t - 1000;
+  const sample = (label: string) => ({ sample: { enabled: false, step: 0.1, label } });
+  const longLabel = 'b'.repeat(200);
+
+  // 한도 가까이 찬 사이트 규칙(a.test)과 손상된 사이트 항목(z.test)이 함께 저장된 값에서 기능 설정(sample의 label)을 늘린다.
+  // 바꾼 값(next)은 손상 항목을 지운 값(repaired)보다 크고 한도를 넘는다. 저장된 값보다 몇 바이트 큰지(more)는 손상 항목의 길이로 맞춘다.
+  // 항목이 모두 빠진 사이트는 빈 객체로 남는다(결정 0017).
+  function nearLimit(more: number) {
+    const sites = (rule: string, zTest: unknown) => ({
+      'a.test': { sample: { rules: [rule] } },
+      'z.test': zTest,
+    });
+    const rule = 'a'.repeat(limit - 100 - bytes(stored(t + 1, sample(''), sites('', {}))));
+    const withCorrupt = (length: number) =>
+      stored(revision, sample(''), sites(rule, { sample: { rules: 'x'.repeat(length) } }));
+    const next = stored(t + 1, sample(longLabel), sites(rule, {}));
+    const raw = withCorrupt(bytes(next) - more - bytes(withCorrupt(0)));
+    return { raw, next, repaired: stored(revision, sample(''), sites(rule, {})) };
+  }
+
+  it.each([
+    ['작아지는', -1],
+    ['크기가 같은', 0],
+  ])(
+    '손상된 사이트 항목을 지우며 다른 설정을 바꾼 결과가 한도를 넘어도, 저장된 값보다 %s 저장은 한다',
+    async (_name, more) => {
+      const { raw, next, repaired } = nearLimit(more);
+      expect(bytes(next)).toBeGreaterThan(limit);
+      expect(bytes(next)).toBeGreaterThan(bytes(repaired));
+      expect(bytes(next) - bytes(raw)).toBe(more);
+      const { settings, store, notices, problems } = setup(raw);
+      expect(await settings.updateFeature('sample', { label: longLabel })).toEqual({
+        ok: true,
+        value: { revision: t + 1 },
+      });
+      expect(store.peek(settingsKey)).toEqual(next);
+      expect(notices).toEqual([
+        { whole: false, features: [], sites: [{ host: 'z.test', featureId: 'sample' }] },
+      ]);
+      expect(problems).toEqual([{ featureId: 'sample', kind: 'unexpected' }]);
+    },
+  );
+
+  it('저장된 값보다 커지면 하지 않고, 알리는 지금 크기는 손상 항목을 지운 값이 아니라 저장된 값의 크기다', async () => {
+    const { raw, repaired } = nearLimit(1);
+    const { settings, store, problems } = setup(raw);
+    const result = await settings.updateFeature('sample', { label: longLabel });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe('limit');
+      expect(result.error.message).toContain(String(bytes(raw)));
+      expect(result.error.message).not.toContain(String(bytes(repaired)));
+    }
+    expect(store.peek(settingsKey)).toEqual(raw);
+    // 쓰지 못했으므로 손상 항목은 지우지 않았고 기록하지 않는다. 다음 준비 때 고친다.
+    expect(problems).toEqual([]);
+  });
+
+  // 세대 번호의 이름만 rev에서 revision으로 바꾼 가짜 옛 형식 1. 이전하면 5바이트 커진다.
+  const renamedOld = z.object({
+    version: z.literal(1),
+    rev: z.int(),
+    features: z.record(z.string(), z.unknown()),
+    sites: z.record(z.string(), z.unknown()),
+  });
+  const renamedFormat: SettingsFormat = {
+    version: 2,
+    structure: currentStructure(2),
+    migrations: new Map([
+      [
+        1,
+        {
+          structure: renamedOld,
+          migrate: (value: unknown) => {
+            const { rev, ...rest } = renamedOld.parse(value);
+            return { ...rest, version: 2, revision: rev };
+          },
+        },
+      ],
+    ]),
+  };
+
+  it('형식 이전으로 커지는 값에서 줄이는 저장은, 결과가 저장된 옛 값보다 커도 이전만 한 값보다 크지 않으면 한다', async () => {
+    const old = (label: string) => ({
+      version: 1,
+      rev: revision,
+      features: sample(label),
+      sites: {},
+    });
+    // 이전한 값이 한도를 3바이트 넘게 label을 맞춘다. 저장된 옛 값은 그보다 5바이트 작아 한도 안이다.
+    const length = limit + 3 - bytes({ version: 2, revision, features: sample(''), sites: {} });
+    const raw = old('b'.repeat(length));
+    expect(bytes(raw)).toBe(limit - 2);
+    const { settings, store } = setup(raw, { format: renamedFormat });
+    // label을 한 글자 줄인다. 결과는 한도와 저장된 옛 값보다 크지만 이전만 한 값보다 1바이트 작다.
+    expect(await settings.updateFeature('sample', { label: 'b'.repeat(length - 1) })).toEqual({
+      ok: true,
+      value: { revision: t + 1 },
+    });
+    expect(store.peek(settingsKey)).toEqual({
+      version: 2,
+      revision: t + 1,
+      features: sample('b'.repeat(length - 1)),
+      sites: {},
+    });
   });
 });
 

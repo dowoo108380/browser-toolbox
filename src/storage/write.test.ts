@@ -190,13 +190,13 @@ describe('COM-3.9 크기 한도', () => {
   it('한도까지는 저장한다', () => {
     const next = withSize(settingsSizeLimit);
     expect(settingsSize(next)).toBe(settingsSizeLimit);
-    expect(checkSize(next, stored(1)).ok).toBe(true);
+    expect(checkSize(next, stored(1), stored(1)).ok).toBe(true);
   });
 
   it('한도에서 1바이트 넘으면 저장하지 않고 지금 크기를 알린다', () => {
     const next = withSize(settingsSizeLimit + 1);
     expect(settingsSize(next)).toBe(settingsSizeLimit + 1);
-    const result = checkSize(next, stored(1));
+    const result = checkSize(next, stored(1), stored(1));
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.kind).toBe('limit');
@@ -207,18 +207,47 @@ describe('COM-3.9 크기 한도', () => {
   it('한도를 넘은 상태에서도 줄이는 저장은 한다', () => {
     const big = withSize(settingsSizeLimit + 300);
     const smaller = withSize(settingsSizeLimit + 100);
-    expect(checkSize(smaller, big).ok).toBe(true);
+    expect(checkSize(smaller, big, big).ok).toBe(true);
   });
 
   it('한도를 넘은 상태에서 크기가 같은 저장은 한다', () => {
     const big = withSize(settingsSizeLimit + 300);
-    expect(checkSize(big, big).ok).toBe(true);
+    expect(checkSize(big, big, big).ok).toBe(true);
   });
 
   it('한글은 UTF-8 바이트로 센다', () => {
     // 한 글자 3바이트. 문자열 길이로 세면 한도의 3분의 1 남짓이라 통과해 버린다.
     const next = withSize(settingsSizeLimit + 3, '가');
     expect(JSON.stringify(next).length).toBeLessThan(settingsSizeLimit);
-    expect(checkSize(next, stored(1)).ok).toBe(false);
+    expect(checkSize(next, stored(1), stored(1)).ok).toBe(false);
+  });
+
+  it('지금은 저장된 값이다: 손상 항목을 지운 값보다 커져도 저장된 값보다 크지 않으면 하고, 알리는 크기도 저장된 값이다', () => {
+    const storedValue = withSize(settingsSizeLimit + 300);
+    const repaired = withSize(settingsSizeLimit + 100);
+    expect(checkSize(withSize(settingsSizeLimit + 300), storedValue, repaired).ok).toBe(true);
+    const result = checkSize(withSize(settingsSizeLimit + 301), storedValue, repaired);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain(String(settingsSize(storedValue)));
+      expect(result.error.message).not.toContain(String(settingsSize(repaired)));
+    }
+  });
+
+  it('결정 0011 같은 쓰기에 섞인 형식 이전으로 커진 만큼은 막지 않는다. 알리는 크기는 저장된 값이다', () => {
+    // 저장된 옛 값(여기서는 크기만 본다)과, 그것을 이전해 한도를 넘게 커진 값.
+    const storedOld = withSize(settingsSizeLimit - 100);
+    const migrated = withSize(settingsSizeLimit + 300);
+    expect(checkSize(withSize(settingsSizeLimit + 300), storedOld, migrated).ok).toBe(true);
+    const result = checkSize(withSize(settingsSizeLimit + 301), storedOld, migrated);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain(String(settingsSize(storedOld)));
+      expect(result.error.message).not.toContain(String(settingsSize(migrated)));
+    }
+  });
+
+  it('저장된 값이 없으면 지금 크기는 0이다', () => {
+    expect(settingsSize(undefined)).toBe(0);
   });
 });
