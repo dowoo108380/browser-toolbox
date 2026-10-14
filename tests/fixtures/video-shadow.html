@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청(404)이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>열린 shadow root 안에 영상이 있는 페이지</title>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      // 영상 플레이어를 사용자 정의 요소로 만든 사이트처럼, 영상이 열린 shadow root 안의 겹친 열린 shadow root 안에 있다.
+      const outer = document.getElementById('player').attachShadow({ mode: 'open' });
+      const inner = document.createElement('div');
+      outer.append(inner);
+      const video = document.createElement('video');
+      video.style.cssText = 'display: block; width: 320px; height: 180px; background: #222';
+      inner.attachShadow({ mode: 'open' }).append(video);
+    </script>
+  </body>
+</html>

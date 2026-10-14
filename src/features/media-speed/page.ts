@@ -4,6 +4,7 @@ import { formatRate } from './core/rate.ts';
 import { mediaSpeed } from './feature.ts';
 
 // 배속 표시창의 가장 작은 판(05단계 뼈대). 영상마다 지금 실제 배속을 영상 왼쪽 위에 보인다.
+// 영상은 문서와 열린 shadow root 안에서 찾는다(결정 0019).
 // 드래그, 보이기·숨기기, 전체 화면은 06단계 MED-3에서 더한다.
 //
 // 표시창은 페이지의 최상위 층(top layer)에 popover로 띄우고, 자리와 크기는 브라우저가 영상에 붙여 잡는다(CSS 앵커 위치, 결정 0018).
@@ -79,28 +80,39 @@ export const page = definePagePart(mediaSpeed, (_settings, { document, scope }) 
     host.showPopover({ source: video });
   };
 
-  const detach = (video: HTMLVideoElement) => {
-    indicators.get(video)?.close();
-  };
-
-  const videosIn = (node: Node): HTMLVideoElement[] => {
-    if (node instanceof HTMLVideoElement) return [node];
-    if (node instanceof Element) return [...node.querySelectorAll('video')];
-    return [];
-  };
-
-  // 바뀐 부분만 본다. 문서 전체를 되풀이해 훑지 않는다(quality 078).
+  // 영상은 문서 트리에도, 사용자 정의 요소 등의 열린 shadow root 안(겹친 것 포함)에도 있다(결정 0019).
+  // 관찰 하나로 문서와 찾은 열린 shadow root를 모두 본다. 관찰은 그 트리 안의 바뀜만 알리고 안쪽 shadow root의 바뀜은
+  // 알리지 않으므로, 훑다가 만난 열린 shadow root도 관찰한다. 바뀐 부분만 본다. 문서 전체를 되풀이해 훑지 않는다(quality 078).
   const mutationObserver = scope.mutationObserver((records) => {
+    let removed = false;
     for (const record of records) {
-      for (const node of record.removedNodes) {
-        for (const video of videosIn(node)) if (!video.isConnected) detach(video);
-      }
-      for (const node of record.addedNodes) {
-        for (const video of videosIn(node)) if (video.isConnected) attach(video);
-      }
+      if (record.removedNodes.length > 0) removed = true;
+      for (const node of record.addedNodes) if (node instanceof Element) visit(node);
     }
+    // 사라진 영상은 표시창이 있는 영상 가운데서 찾는다. 지워진 부분(그 안의 shadow root까지)은 훑지 않는다.
+    // 문서에서 떼어 낸 요소의 shadow root 안 영상도 문서에서 빠졌으므로 함께 닫힌다.
+    if (!removed) return;
+    for (const [video, own] of indicators) if (!video.isConnected) own.close();
   });
 
-  for (const video of document.querySelectorAll('video')) attach(video);
+  // tree와 그 아래, 그 안의 열린 shadow root 안까지 훑어 문서에 붙어 있는 영상에 띄우고, 만난 열린 shadow root를 관찰한다.
+  // 닫힌 shadow root에는 들어가지 않는다(결정 0019). 문서에서 떼어 낸 요소의 root는 관찰을 풀지 않는다(관찰은 대상을
+  // 붙잡지 않는다). 그 요소가 다시 붙으면 더해진 요소로 다시 훑는다.
+  function visit(tree: Document | Element) {
+    const pending: (Document | Element | ShadowRoot)[] = [tree];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const walker = document.createTreeWalker(next, NodeFilter.SHOW_ELEMENT);
+      for (let node: Node | null = walker.currentNode; node !== null; node = walker.nextNode()) {
+        if (node instanceof HTMLVideoElement && node.isConnected) attach(node);
+        const root = node instanceof Element ? node.shadowRoot : null;
+        if (root !== null) {
+          mutationObserver.observe(root, { childList: true, subtree: true });
+          pending.push(root);
+        }
+      }
+    }
+  }
+
+  visit(document);
   mutationObserver.observe(document, { childList: true, subtree: true });
 });

@@ -7,6 +7,7 @@ import type { SettingsReaderHandlers, Snapshot } from '../../storage/index.ts';
 import { page } from './page.ts';
 
 // 표시창은 닫힌 shadow root 안에 있다. 테스트는 attachShadow가 돌려준 root를 잡아서 안을 본다.
+// 시험이 페이지 쪽에 만드는 shadow root(영상 플레이어 흉내)는 잡지 않는다.
 let roots: ShadowRoot[] = [];
 const added: Element[] = [];
 // 시작한 기능을 끄는 함수. 시험이 중간에 실패해도 다음 시험에 기능이 남지 않게 afterEach에서 끈다.
@@ -21,7 +22,7 @@ beforeEach(() => {
     init: ShadowRootInit,
   ) {
     const root = originalAttachShadow.call(this, init);
-    roots.push(root);
+    if (this.localName === hostTagName) roots.push(root);
     return root;
   });
 });
@@ -349,6 +350,170 @@ describe('배속 표시창(05단계 뼈대)', () => {
     expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
     close();
     expect(document.documentElement.outerHTML).toBe(before);
+  });
+});
+
+describe('shadow root 안의 영상(MED 머리말: 모든 프레임의 미디어, 결정 0019)', () => {
+  // 영상 플레이어를 사용자 정의 요소로 만든 페이지처럼, 영상이 문서 트리가 아닌 shadow 트리에 있다.
+  function playerHost(mode: ShadowRootMode = 'open') {
+    const host = document.createElement('div');
+    const root = host.attachShadow({ mode });
+    return { host, root };
+  }
+
+  function videoInto(parent: ParentNode): HTMLVideoElement {
+    const video = document.createElement('video');
+    video.style.cssText = 'display: block; width: 320px; height: 180px';
+    parent.append(video);
+    return video;
+  }
+
+  // 문서에 붙이고, 시험이 끝나면 지운다.
+  function intoDocument(host: HTMLElement) {
+    document.body.append(host);
+    added.push(host);
+  }
+
+  const indicatorCount = () => document.querySelectorAll(hostTagName).length;
+
+  const box = (element: Element) => {
+    const { left, top, width, height } = element.getBoundingClientRect();
+    return { left, top, width, height };
+  };
+
+  // 영상마다 그 영상이 그려진 상자와 같은 자리·크기의 표시창 틀이 하나씩 있다.
+  function expectIndicatorsOn(videos: readonly HTMLVideoElement[]) {
+    const hosts = [...document.querySelectorAll(hostTagName)].map(box);
+    expect(hosts).toHaveLength(videos.length);
+    for (const video of videos) expect(hosts).toContainEqual(box(video));
+  }
+
+  it('처음부터 열린 shadow root 안에 있는 영상(겹친 root 안 포함)에 띄우고, 배속이 바뀌면 바꾼다', async () => {
+    const outer = playerHost();
+    intoDocument(outer.host);
+    const first = videoInto(outer.root);
+    const inner = playerHost();
+    outer.root.append(inner.host);
+    const second = videoInto(inner.root);
+    start(enabled);
+    await frames();
+    expectIndicatorsOn([first, second]);
+    second.playbackRate = 2;
+    await vi.waitFor(() => {
+      expect(labels().sort()).toEqual(['1×', '2×']);
+    });
+  });
+
+  it('나중에 생긴 영상에도 띄운다: 있던 root 안에 더해짐, 영상이 든 root를 가진 요소가 문서나 root 안에 더해짐', async () => {
+    const known = playerHost();
+    intoDocument(known.host);
+    start(enabled);
+    const a = videoInto(known.root);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(1);
+    });
+    // 영상이 든 root와, 그 안에 겹친 root와 영상을 가진 요소가 문서에 더해진다.
+    const outer = playerHost();
+    const b = videoInto(outer.root);
+    const nested = playerHost();
+    const c = videoInto(nested.root);
+    outer.root.append(nested.host);
+    intoDocument(outer.host);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(3);
+    });
+    // 영상이 든 root를 가진 요소가 있던 root 안에 더해진다.
+    const later = playerHost();
+    const d = videoInto(later.root);
+    known.root.append(later.host);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(4);
+    });
+    // 나중에 찾은 겹친 root 안에 더해진 영상도 본다.
+    const e = videoInto(nested.root);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(5);
+    });
+    await frames();
+    expectIndicatorsOn([a, b, c, d, e]);
+  });
+
+  it('제거 뒤 정리: root 안에서 지운 영상과 지운 요소의 root 안 영상(겹친 것 포함)의 표시창을 지우고, 다시 넣으면 다시 띄운다', async () => {
+    const outer = playerHost();
+    intoDocument(outer.host);
+    const first = videoInto(outer.root);
+    const nested = playerHost();
+    outer.root.append(nested.host);
+    const second = videoInto(nested.root);
+    start(enabled);
+    expect(indicatorCount()).toBe(2);
+    first.remove();
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(1);
+    });
+    outer.host.remove();
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(0);
+    });
+    // 문서에서 떼어 둔 동안 root 안에 더해진 영상에는 띄우지 않는다.
+    const whileDetached = videoInto(nested.root);
+    await frames();
+    expect(indicatorCount()).toBe(0);
+    // 다시 넣으면 그 안의 영상에 다시 띄우고, 그 뒤의 바뀜도 본다.
+    document.body.append(outer.host);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(2);
+    });
+    const third = videoInto(outer.root);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(3);
+    });
+    await frames();
+    expectIndicatorsOn([second, whileDetached, third]);
+  });
+
+  it('영상이 문서에서 shadow root 안으로 옮겨져도 표시창은 하나이고 그 영상을 따라간다', async () => {
+    const { host, root } = playerHost();
+    intoDocument(host);
+    const video = addVideo(320, 180);
+    start(enabled);
+    root.prepend(document.createElement('div'), video);
+    await frames();
+    expectIndicatorsOn([video]);
+  });
+
+  it('닫힌 shadow root 안의 영상에는 띄우지 않는다(지원 범위, 결정 0019)', async () => {
+    const { host, root } = playerHost('closed');
+    intoDocument(host);
+    videoInto(root);
+    start(enabled);
+    await frames();
+    expect(indicatorCount()).toBe(0);
+  });
+
+  it('quality 078 시작한 뒤에는 바뀐 부분(더해진 요소와 그 안의 shadow root)만 훑고 문서 전체를 다시 훑지 않는다', async () => {
+    // 무엇을 훑었는지는 밖에서 보이지 않아 훑는 도구(TreeWalker)를 만든 시작점을 본다.
+    const walk = vi.spyOn(Document.prototype, 'createTreeWalker');
+    const known = playerHost();
+    intoDocument(known.host);
+    start(enabled);
+    walk.mockClear();
+    const outer = playerHost();
+    videoInto(outer.root);
+    intoDocument(outer.host);
+    videoInto(known.root);
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(2);
+    });
+    outer.host.remove();
+    await vi.waitFor(() => {
+      expect(indicatorCount()).toBe(1);
+    });
+    const starts = walk.mock.calls.map(([root]) => root);
+    expect(starts).not.toContain(document);
+    expect(starts).not.toContain(document.documentElement);
+    expect(starts).not.toContain(document.body);
+    expect(starts).toEqual(expect.arrayContaining([outer.host, outer.root]));
   });
 });
 
