@@ -5,6 +5,13 @@ import { type AppError, type Result, appError, err, withTimeout } from '../share
 
 const defaultTimeoutMs = 5000;
 
+// 확장을 다시 불러오거나 업데이트하면 오가던 요청은 거절되는데("message channel closed before a response" 등),
+// 그 순간 옛 스크립트는 아직 연결된 것으로 보이고 몇 ms 뒤에야 끊긴 것으로 바뀐다(이슈 2, 2026-10-14 실험,
+// Chromium 156: 같은 판 다시 불러오기, 버전을 올린 업데이트, chrome.runtime.reload() 모두 5–8ms였고 브라우저 8개를
+// 함께 띄운 부하에서도 같았다). 그래서 거절되면 이만큼 기다린 뒤 연결을 다시 확인한다. 끊겼으면 disconnected라
+// 실행 틀이 문제를 알리지 않고 물러난다. 연결된 채면(서비스 워커만 멈춘 경우 등) 실제 실패라 platform이다.
+export const disconnectSettleMs = 500;
+
 export type Requester = <Payload, Value>(
   definition: RequestDefinition<string, Payload, Value>,
   payload: Payload,
@@ -28,6 +35,8 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
         chrome.runtime.sendMessage({ type: definition.type, payload }),
       );
       if (!response.done) {
+        // 기다리는 사이에 끊긴 옛 스크립트에는 응답이 오지 않는다(위 실험). 그것은 시간 초과가 아니라 끊김이다.
+        if (!isExtensionConnected()) return disconnected();
         return err(appError('timeout', '확장의 응답이 없다. 잠시 뒤 다시 한다.'));
       }
       const parsed = responseSchema(definition.value).safeParse(response.value);
@@ -38,6 +47,9 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
     } catch (error) {
       // 보내는 도중에 끊긴 경우도 끊김으로 본다.
       if (isDisconnected(error) || !isExtensionConnected()) return disconnected();
+      // 다시 불러오는 중이면 곧 끊긴 것으로 바뀐다(disconnectSettleMs). 거절 문구로 가리지 않는다.
+      await new Promise((resolve) => setTimeout(resolve, disconnectSettleMs));
+      if (!isExtensionConnected()) return disconnected();
       return err(appError('platform', '확장에 요청을 보내지 못했다.'));
     }
   };

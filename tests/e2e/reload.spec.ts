@@ -311,3 +311,44 @@ test('COM-7 결정 0008 quality 068 주 스레드가 붙잡힌 탭은 다른 탭
     expect.objectContaining({ featureId: null, kind: 'timeout' }),
   ]);
 });
+
+test('COM-5 COM-7 결정 0008 다시 불러오는 순간 오가던 옛 콘텐츠 스크립트의 요청이 끊겨도 문제로 기록하지 않는다', async ({
+  context,
+  extensionId,
+  profileDirectory,
+}) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureOrigin}/blank.html`);
+  await countRetireEvents(page.mainFrame());
+  const popup = await openPopup(context, extensionId);
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('서비스 워커가 없다.');
+  // 옛 서비스 워커의 주 스레드를 붙잡아, 그동안 보낸 요청이 응답을 받지 못하고 오가는 중이게 한다.
+  // 다시 불러오면 Chrome이 이 서비스 워커를 끝내므로 이 평가는 거절된다.
+  const busy = worker
+    .evaluate(() => {
+      const start = Date.now();
+      while (Date.now() - start < 10_000) {
+        // 붙잡는다.
+      }
+    })
+    .catch(() => undefined);
+  expect(
+    await Promise.race([
+      worker.evaluate(() => 'free'),
+      new Promise((resolve) => setTimeout(resolve, 500, 'busy')),
+    ]),
+  ).toBe('busy');
+  // 설정을 지우면 페이지의 콘텐츠 스크립트가 서비스 워커에 설정 준비(storage.ensureReady)를 부탁한다.
+  // 저장소는 서비스 워커를 거치지 않으므로 붙잡힌 동안에도 지울 수 있다.
+  await popup.evaluate(() => chrome.storage.local.remove('settings'));
+  await popup.close();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  await reloadExtension(profileDirectory, extensionId);
+
+  // 고치기 전에는 끊긴 요청이 platform으로 가려져, 그 문제 알림이 같은 id의 새 서비스 워커에 닿아 기록됐다(이슈 2).
+  await expect.poll(() => retireEvents(page.mainFrame())).not.toBe('0');
+  expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+  await busy;
+});

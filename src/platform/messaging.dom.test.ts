@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { storageEnsureReady } from '../contracts/index.ts';
-import { chromeRequester, isExtensionConnected, listenRequests } from './messaging.ts';
+import {
+  chromeRequester,
+  disconnectSettleMs,
+  isExtensionConnected,
+  listenRequests,
+} from './messaging.ts';
 
 // chrome.runtime 메시지 경계(결정 0006, 0008). 진짜 chrome 대신 시험이 만든 객체를 전역에 둔다.
 // 확장 주소의 출처 계산(URL)이 Node와 Chromium에서 달라 Chromium에서 돈다.
@@ -69,6 +74,53 @@ describe('요청 보내기(chromeRequester)', () => {
     const result = await chromeRequester()(storageEnsureReady, {});
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('platform');
+  });
+
+  // 확장을 다시 불러오거나 업데이트하면 오가던 요청은 거절되는데, 그 순간에는 아직 연결된 것으로 보이고 몇 ms 뒤에
+  // 끊긴 것으로 바뀐다(이슈 2, 실험: Chromium 156에서 5–8ms). 거절 문구는 실험에서 받은 것이다.
+  const channelClosed =
+    'A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received';
+
+  it('결정 0008 거절된 뒤 잠시 뒤에 연결이 끊긴 것으로 바뀌면(다시 불러오는 순간) platform이 아니라 disconnected다', async () => {
+    vi.useFakeTimers();
+    const { runtime } = fakeChrome(() => {
+      setTimeout(() => Reflect.deleteProperty(runtime, 'id'), 8);
+      return Promise.reject(new Error(channelClosed));
+    });
+    const pending = chromeRequester()(storageEnsureReady, {});
+    await vi.advanceTimersByTimeAsync(disconnectSettleMs);
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('disconnected');
+  });
+
+  it(`결정 0008 거절된 뒤에도 연결된 채면(서비스 워커만 멈춤) ${String(disconnectSettleMs)}ms를 기다려 확인한 뒤 platform이다`, async () => {
+    vi.useFakeTimers();
+    fakeChrome(() => Promise.reject(new Error(channelClosed)));
+    let settled = false;
+    const pending = chromeRequester()(storageEnsureReady, {}).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(disconnectSettleMs - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('platform');
+  });
+
+  it('결정 0008 응답을 기다리는 사이에 연결이 끊겼으면 제한 시간이 지나도 timeout이 아니라 disconnected다', async () => {
+    vi.useFakeTimers();
+    const { runtime } = fakeChrome(() => {
+      // 끊긴 옛 스크립트에는 응답이 오지 않는다(실험: 다시 불러온 뒤 보낸 요청은 끝나지 않음).
+      setTimeout(() => Reflect.deleteProperty(runtime, 'id'), 1000);
+      return new Promise(() => undefined);
+    });
+    const pending = chromeRequester()(storageEnsureReady, {});
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('disconnected');
   });
 
   it('결정 0008 "Extension context invalidated" 오류는 disconnected다', async () => {
