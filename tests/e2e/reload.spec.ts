@@ -186,15 +186,21 @@ test('COM-7.2 결정 0008 로딩이 끝나지 않은 문서도 끝나기를 기�
   expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
 });
 
-// 그 문서에서 페이지의 스크립트가 도는지. 시험이 넣은 스크립트 요소가 돌면 표식을 남긴다.
-function runsPageScripts(frame: Frame): Promise<boolean> {
-  return frame.evaluate(() => {
+// 페이지의 스크립트로 돌면 문서에 표식을 남긴다. 직렬화해 넣으므로 바깥의 이름을 쓰지 않는다.
+function markPageScriptRan(): void {
+  document.documentElement.dataset['pageScriptRan'] = 'yes';
+}
+
+// 그 문서에서 페이지의 스크립트가 도는지. frame.evaluate는 sandbox의 스크립트 막기를 받지 않으므로(2026-10-14 실험)
+// 타입 검사를 받는 함수(markPageScriptRan)를 직렬화해 스크립트 요소로 넣어 본다. 스크립트 요소는 그 문서의 규칙을 따른다.
+async function runsPageScripts(frame: Frame): Promise<boolean> {
+  return frame.evaluate((source) => {
     const script = document.createElement('script');
-    script.textContent = "document.documentElement.dataset.pageScriptRan = 'yes';";
+    script.textContent = source;
     document.documentElement.append(script);
     script.remove();
     return document.documentElement.dataset['pageScriptRan'] === 'yes';
-  });
+  }, `(${markPageScriptRan.toString()})();`);
 }
 
 test('COM-7.1 COM-7.2 결정 0008 스크립트 실행이 막힌 sandbox iframe(allow-scripts 없음)에서도 정리 함수가 끝까지 돌아 옛 요소를 지우고 문제로 기록하지 않는다', async ({

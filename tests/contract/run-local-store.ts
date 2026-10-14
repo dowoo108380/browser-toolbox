@@ -25,3 +25,11 @@ export async function run(): Promise<ContractResult[]> {
   }
   return results;
 }
+
+declare global {
+  // 이 파일을 묶어 서비스 워커에서 실으면 이 전역에 실행기를 둔다. 시험이 이 타입대로 부르므로 함수의 이름과 모양을
+  // 타입 검사가 본다(실행 코드를 문자열로 붙이지 않는다).
+  var localStoreContractRunner: { readonly run: typeof run } | undefined;
+}
+
+globalThis.localStoreContractRunner = { run };
