@@ -115,6 +115,44 @@ describe('결정 0014 페이지 쪽 자원 규칙', () => {
   });
 });
 
+describe('quality 054 실행 코드를 문자열로 쓰지 않는다', () => {
+  const isExecutableString = (restriction: Restriction) =>
+    restriction.message.includes('quality 054, 100');
+
+  it.each([
+    'tests/e2e/reload.spec.ts',
+    'tests/integration/retire-old-scripts.test.ts',
+    'src/features/media-speed/page.ts',
+    'src/background/router.ts',
+  ])('%s에 규칙이 걸린다', async (file) => {
+    expect((await restrictionsFor(file)).filter(isExecutableString)).not.toHaveLength(0);
+  });
+
+  it.each([
+    ['잡는다', "document.createElement('script');", true],
+    ['잡는다', "frame.contentDocument.createElement('SCRIPT');", true],
+    ['잡는다', "page.evaluate('document.title');", true],
+    ['잡는다', 'worker.evaluate(`${code}\\nrun()`);', true],
+    ['잡는다', "page.evaluate('run(' + value + ')');", true],
+    ['잡는다', "frame.evaluateHandle('window');", true],
+    ['잡는다', "page.addInitScript('window.x = 1');", true],
+    ['잡는다', "page.addInitScript({ content: 'window.x = 1' });", true],
+    ['잡는다', "page.addScriptTag({ path: 'a.js' });", true],
+    ['잡지 않는다', 'page.evaluate(() => document.title);', false],
+    ['잡지 않는다', "page.evaluate((value) => value, 'text');", false],
+    ['잡지 않는다', 'page.addInitScript(() => undefined);', false],
+    ['잡지 않는다', "page.$eval('p', (node) => node.textContent);", false],
+    ['잡지 않는다', "document.createElement('style');", false],
+    // 변수에 담은 문자열은 잡지 못한다(검토로 본다). 묶은 코드를 싣는 경우가 이렇다.
+    ['잡지 않는다', 'worker.evaluate(code);', false],
+  ])('%s: %s', async (_label, code, expected) => {
+    const restrictions = (await restrictionsFor('tests/e2e/reload.spec.ts')).filter(
+      isExecutableString,
+    );
+    expect(reported(restrictions, code) > 0).toBe(expected);
+  });
+});
+
 describe('결정 0006 외부 메시지를 받지 않는다', () => {
   const isExternal = (restriction: Restriction) => restriction.message.includes('결정 0006');
 

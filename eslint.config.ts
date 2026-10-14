@@ -35,8 +35,36 @@ const externalMessaging = [
   },
 ];
 
+// 실행 코드를 문자열로 쓰지 않는다. 문자열 안의 코드는 타입 검사와 린트를 거치지 않는다(quality 054, 100).
+// 페이지나 서비스 워커에서 돌릴 코드는 타입 검사를 받는 함수로 쓰고 Playwright의 evaluate 등에 함수로 넘긴다.
+// 페이지의 스크립트로 돌려야 하면 그 함수를 직렬화해 스크립트 요소로 넣고, 그 줄에서 이유와 함께 이 규칙을 끈다.
+// 문자열을 변수에 담아 넘기는 경우(예: 타입 검사를 받은 코드를 묶은 결과)는 문법으로 가릴 수 없어 검토로 본다.
+// 잡아야 하는 사례와 잡지 않아야 하는 사례는 tests/lint/restricted-syntax.test.ts에 있다.
+const executableStringMessage =
+  '실행 코드를 문자열로 쓰지 않는다. 타입 검사를 받는 함수로 쓴다(quality 054, 100).';
+const executableStrings = [
+  {
+    selector: "CallExpression[callee.property.name='createElement'][arguments.0.value=/^script$/i]",
+    message: executableStringMessage,
+  },
+  {
+    selector:
+      'CallExpression[callee.property.name=/^(evaluate|evaluateHandle|evaluateAll|addInitScript)$/][arguments.0.type=/^(Literal|TemplateLiteral|BinaryExpression|ObjectExpression)$/]',
+    message: executableStringMessage,
+  },
+  {
+    selector: "CallExpression[callee.property.name='addScriptTag']",
+    message: executableStringMessage,
+  },
+];
+
 // 모든 파일에 거는 문법 제한.
-const baseRestrictions = [...htmlInjection, ...classInheritance, ...externalMessaging];
+const baseRestrictions = [
+  ...htmlInjection,
+  ...classInheritance,
+  ...externalMessaging,
+  ...executableStrings,
+];
 
 // 웹 페이지에서 도는 기능 코드는 이벤트 듣기, 관찰, 타이머를 자원 범위(scope)로만 만든다(결정 0014).
 // 직접 만들면 시작 도중 실패할 때 남고, 콜백의 예외가 그 기능의 정리와 기록으로 이어지지 않는다.

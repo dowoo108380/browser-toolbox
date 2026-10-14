@@ -195,6 +195,7 @@ function markPageScriptRan(): void {
 // 타입 검사를 받는 함수(markPageScriptRan)를 직렬화해 스크립트 요소로 넣어 본다. 스크립트 요소는 그 문서의 규칙을 따른다.
 async function runsPageScripts(frame: Frame): Promise<boolean> {
   return frame.evaluate((source) => {
+    // eslint-disable-next-line no-restricted-syntax -- 페이지의 스크립트로 돌려야 한다. 넣는 코드는 위의 함수를 직렬화한 것이다.
     const script = document.createElement('script');
     script.textContent = source;
     document.documentElement.append(script);
