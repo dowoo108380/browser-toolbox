@@ -22,10 +22,9 @@ startBackground({
     }),
   listenRequests,
   onInstalled: listenInstalled,
-  retireOldScripts: () =>
-    retireInAllFrames({
-      eventName: retireEventName,
-      elementAttribute: pageElementAttribute,
-      claimAttribute,
-    }),
+  retireOldScripts: (report) =>
+    retireInAllFrames(
+      { eventName: retireEventName, elementAttribute: pageElementAttribute, claimAttribute },
+      report,
+    ),
 });

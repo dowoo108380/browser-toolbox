@@ -6,7 +6,7 @@ import {
   storageEnsureReady,
 } from '../contracts/index.ts';
 import type { LocalStore, Sender } from '../platform/index.ts';
-import { type AppError, ok } from '../shared/index.ts';
+import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
 import { createProblemLog } from './problems.ts';
 import { createRepairNoticeLog } from './repair-notice.ts';
@@ -24,8 +24,9 @@ export interface BackgroundDeps {
     handle: (message: unknown, sender: Sender) => Promise<unknown>,
   ) => unknown;
   readonly onInstalled: (listener: () => void) => void;
-  // 열린 탭의 옛 스크립트에게 물러나라고 알린다(결정 0008). 넣을 수 없는 탭이 아닌데 실패한 것을 돌려준다.
-  readonly retireOldScripts: () => Promise<readonly AppError[]>;
+  // 열린 탭의 옛 스크립트에게 물러나라고 알린다(결정 0008). 넣을 수 없는 탭이 아닌데 실패한 것을 탭마다 끝나는 대로
+  // report로 알리고, 모든 탭이 끝나거나 제한 시간을 넘기면 끝난다.
+  readonly retireOldScripts: (report: (problem: AppError) => void) => Promise<void>;
 }
 
 export function startBackground(deps: BackgroundDeps): void {
@@ -60,13 +61,14 @@ export function startBackground(deps: BackgroundDeps): void {
   );
   deps.listenRequests(router);
   deps.onInstalled(() => {
+    // 탭이 많아도 문제 기록(최근 100개)을 채우지 않게 종류마다 처음 한 번만 남긴다(quality 067). 알리는 대로 바로 남겨,
+    // 늦은 탭을 기다리는 사이 서비스 워커가 멈춰도 앞의 기록은 남는다.
+    const recorded = new Set<ErrorKind>();
     deps
-      .retireOldScripts()
-      .then((errors) => {
-        // 탭이 많아도 문제 기록(최근 100개)을 채우지 않게 종류마다 한 번 남긴다(quality 067).
-        for (const kind of new Set(errors.map((error) => error.kind))) {
-          record({ featureId: null, kind });
-        }
+      .retireOldScripts((problem) => {
+        if (recorded.has(problem.kind)) return;
+        recorded.add(problem.kind);
+        record({ featureId: null, kind: problem.kind });
       })
       .catch(() => {
         record({ featureId: null, kind: 'platform' });

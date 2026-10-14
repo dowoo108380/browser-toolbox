@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { retireInAllFrames } from './scripting.ts';
+import type { AppError } from '../shared/index.ts';
+import { retireInAllFrames, retireTimeoutMs } from './scripting.ts';
 
 // 새 판이 열린 탭의 모든 프레임에 정리 함수를 넣는 일(결정 0008)의 Chrome 경계. 진짜 chrome 대신 시험이 만든 객체를 전역에 둔다.
 // 오류 문구와 결과의 모양은 Chromium 156에서 실제로 받은 것이다(결정 0008 고친 기록 2026-10-14, 실험).
@@ -19,6 +20,7 @@ interface ScriptInjection {
     readonly documentIds?: readonly string[];
   };
   readonly args?: readonly unknown[];
+  readonly injectImmediately?: boolean;
 }
 
 interface FrameResult {
@@ -39,10 +41,30 @@ function fakeChrome(
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-const kinds = async () => (await retireInAllFrames(markers)).map((error) => error.kind);
+// 정리를 시작한다. reported에는 알린 문제의 종류가 알린 차례대로 쌓인다.
+function startRetire() {
+  const reported: string[] = [];
+  let finished = false;
+  const done = retireInAllFrames(markers, (problem: AppError) => {
+    reported.push(problem.kind);
+  }).then(() => {
+    finished = true;
+  });
+  return { reported, done, finished: () => finished };
+}
+
+// 정리가 끝난 뒤 알린 문제의 종류들.
+const kinds = async () => {
+  const { reported, done } = startRetire();
+  await done;
+  return reported;
+};
+
+const never = () => new Promise<never>(() => undefined);
 
 // 최상위(top)와 iframe(child) 문서가 있는 탭. 처음 넣을 때 iframe의 결과를 first로, 그 문서에 다시 넣을 때를 again으로 준다.
 function tabWithChild(first: unknown, again: () => Promise<readonly FrameResult[]>) {
@@ -130,10 +152,79 @@ describe('열린 탭의 옛 스크립트 정리(retireInAllFrames)', () => {
     const executeScript = fakeChrome([{ id: 1 }, { id: 2 }], () =>
       Promise.resolve([{ documentId: 'top', result: true }]),
     );
-    await retireInAllFrames(markers);
+    await kinds();
     const tokens = executeScript.mock.calls.map(([injection]) => injection.args?.[3]);
     expect(tokens).toHaveLength(2);
     expect(typeof tokens[0]).toBe('string');
     expect(tokens[0]).not.toBe(tokens[1]);
+  });
+
+  it('결정 0008 문서가 다 실리기를 기다리지 않게 처음 넣을 때와 다시 넣을 때 모두 바로 넣는다(injectImmediately)', async () => {
+    const executeScript = tabWithChild(null, () =>
+      Promise.resolve([{ documentId: 'child', result: true }]),
+    );
+    await kinds();
+    expect(executeScript.mock.calls.map(([injection]) => injection.injectImmediately)).toEqual([
+      true,
+      true,
+    ]);
+  });
+});
+
+describe('열린 탭의 옛 스크립트 정리의 기다림(아키텍처 7장 "비동기, 제한 시간, 취소")', () => {
+  it('quality 067 탭의 문제는 그 탭이 끝나는 대로 알린다(응답하지 않는 다른 탭을 기다리지 않는다)', async () => {
+    fakeChrome([{ id: 1 }, { id: 2 }], (target) =>
+      target.tabId === 1 ? never() : Promise.reject(new Error('예상하지 못한 실패')),
+    );
+    const retire = startRetire();
+    await vi.waitFor(() => {
+      expect(retire.reported).toEqual(['platform']);
+    });
+    expect(retire.finished()).toBe(false);
+  });
+
+  it(`quality 068 탭마다 ${String(retireTimeoutMs)}ms 안에 끝나지 않으면 그 탭을 timeout으로 알리고, 모든 탭을 알리면 끝난다`, async () => {
+    vi.useFakeTimers();
+    // 탭 1과 2는 응답하지 않고, 탭 3은 제한 시간 1ms 전에 끝까지 돈다.
+    fakeChrome([{ id: 1 }, { id: 2 }, { id: 3 }], (target) =>
+      target.tabId === 3
+        ? new Promise((resolve) =>
+            setTimeout(() => {
+              resolve([{ documentId: 'top', result: true }]);
+            }, retireTimeoutMs - 1),
+          )
+        : never(),
+    );
+    const retire = startRetire();
+    await vi.advanceTimersByTimeAsync(retireTimeoutMs - 1);
+    expect(retire.reported).toEqual([]);
+    expect(retire.finished()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    // 기록을 줄이는 것은 부르는 쪽이 한다(종류마다 한 번). 여기서는 탭마다 알린다.
+    expect(retire.reported).toEqual(['timeout', 'timeout']);
+    expect(retire.finished()).toBe(true);
+  });
+
+  it('quality 068 제한 시간을 넘긴 탭은 늦게 끝나도 다시 넣지 않고 그 결과를 알리지 않는다', async () => {
+    vi.useFakeTimers();
+    const executeScript = tabWithChild(
+      null,
+      // 다시 넣으면 끝까지 돌지 못했다고 답한다. 넣지 않아야 한다.
+      () => Promise.resolve([{ documentId: 'child', result: null }]),
+    );
+    // 처음 넣기가 제한 시간 뒤에 끝난다.
+    const firstInjection = executeScript.getMockImplementation();
+    executeScript.mockImplementationOnce(
+      (injection) =>
+        new Promise<readonly FrameResult[]>((resolve) => {
+          setTimeout(() => {
+            resolve(firstInjection?.(injection) ?? []);
+          }, retireTimeoutMs + 100);
+        }),
+    );
+    const retire = startRetire();
+    await vi.advanceTimersByTimeAsync(retireTimeoutMs + 200);
+    expect(retire.reported).toEqual(['timeout']);
+    expect(executeScript).toHaveBeenCalledTimes(1);
   });
 });

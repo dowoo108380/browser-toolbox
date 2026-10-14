@@ -1,6 +1,6 @@
 // 확장을 설치·갱신·다시 로드한 뒤, 열린 탭의 모든 프레임에서 옛 스크립트를 정리한다(결정 0008).
 
-import { type AppError, appError } from '../shared/index.ts';
+import { type AppError, appError, withTimeout } from '../shared/index.ts';
 
 interface RetireMarkers {
   readonly eventName: string;
@@ -76,6 +76,9 @@ async function inject(
       target,
       func: retireInFrame,
       args: [...args],
+      // 정리 함수는 문서가 다 실리기를 기다릴 이유가 없다. 이것이 없으면 Chrome은 document_idle까지 기다리는데,
+      // 응답이 끝나지 않는 문서는 그때가 오지 않는다(2026-10-14 확장 전체 시험으로 확인, 결정 0008 고친 기록).
+      injectImmediately: true,
     });
     return {
       status: 'ran',
@@ -92,7 +95,11 @@ async function inject(
   }
 }
 
-async function retireInTab(tabId: number, markers: RetireMarkers): Promise<AppError | null> {
+async function retireInTab(
+  tabId: number,
+  markers: RetireMarkers,
+  signal: AbortSignal,
+): Promise<AppError | null> {
   // 탭마다 새 토큰. 서비스 워커는 확장의 출처라 늘 보안 문맥이다.
   const args = [
     markers.eventName,
@@ -106,6 +113,8 @@ async function retireInTab(tabId: number, markers: RetireMarkers): Promise<AppEr
   // 끝까지 돌지 못한 문서는 함수가 예외를 냈거나, 넣는 사이에 그 문서가 이동·삭제된 것이다(부하에서 봄, 둘 다 결과가 null).
   // 그 문서에만 한 번 더 넣어 가린다. 사라졌으면 Chrome이 거절하고, 남아 있는데 또 끝까지 돌지 못하면 함수의 실패다.
   for (const documentId of first.unfinished) {
+    // 제한 시간을 넘긴 탭은 이미 timeout으로 알렸다. 더 넣지 않는다.
+    if (signal.aborted) return null;
     const again = await inject({ tabId, documentIds: [documentId] }, args);
     if (again.status === 'failed') return again.error;
     if (again.status === 'ran' && again.unfinished.length > 0) {
@@ -118,14 +127,37 @@ async function retireInTab(tabId: number, markers: RetireMarkers): Promise<AppEr
   return null;
 }
 
-// 탭마다의 문제를 모아 돌려준다. 한 탭의 실패가 다른 탭의 정리를 막지 않는다.
-export async function retireInAllFrames(markers: RetireMarkers): Promise<readonly AppError[]> {
+// 한 탭을 정리하는 기다림의 제한 시간(아키텍처 7장 "비동기, 제한 시간, 취소"). 바로 넣으므로 보통 곧 끝난다. 그 탭의
+// 페이지가 주 스레드를 붙잡고 있으면 Chrome은 풀릴 때까지 함수를 돌리지 못하고 기다린다(2026-10-14 확장 전체 시험).
+// 메시지의 기본 제한 시간과 같게 둔다.
+export const retireTimeoutMs = 5000;
+
+// 탭마다 동시에 정리하고, 탭의 문제는 그 탭이 끝나는 대로 report로 알린다. 응답하지 않는 탭이 다른 탭의 문제를 붙잡지
+// 않으므로, 부르는 쪽이 알리는 대로 기록하면 그 사이 서비스 워커가 멈춰도 앞의 기록은 남는다. 한 탭의 실패가 다른 탭의
+// 정리를 막지 않는다. 모든 탭이 끝나거나 제한 시간을 넘기면 끝난다.
+export async function retireInAllFrames(
+  markers: RetireMarkers,
+  report: (problem: AppError) => void,
+): Promise<void> {
   const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
-  const outcomes = await Promise.all(
-    tabs.map((tab) =>
+  await Promise.all(
+    tabs.map(async ({ id, discarded }) => {
       // 버려진(discarded) 탭은 문서가 내려가 돌던 스크립트가 없다.
-      tab.id === undefined || tab.discarded ? Promise.resolve(null) : retireInTab(tab.id, markers),
-    ),
+      if (id === undefined || discarded) return;
+      const outcome = await withTimeout(retireTimeoutMs, (signal) =>
+        retireInTab(id, markers, signal),
+      );
+      if (!outcome.done) {
+        // 늦게 끝나도 결과는 버린다. 이 탭은 여기서 알렸다.
+        report(
+          appError(
+            'timeout',
+            '옛 스크립트를 정리하는 동안 어떤 탭이 제한 시간 안에 응답하지 않았다.',
+          ),
+        );
+      } else if (outcome.value !== null) {
+        report(outcome.value);
+      }
+    }),
   );
-  return outcomes.filter((outcome) => outcome !== null);
 }

@@ -29,10 +29,24 @@ async function reloadExtension(profileDirectory: string, extensionId: string) {
   }
 }
 
-// 다시 불러온 판의 서비스 워커가 정리를 마치고 남긴 문제 기록(COM-5). 정리가 끝났다는 신호가 없어, 정리가 페이지에
-// 닿은 것을 본 뒤 기록이 남을 틈(1.5초)을 두고 읽는다.
-async function problemsAfterRetire(context: BrowserContext, extensionId: string) {
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+// 처음 설치한 서비스 워커가 기본 설정을 다 쓸 때까지 기다린다. 그 전에 연 페이지의 콘텐츠 스크립트는 설정 준비를
+// 부탁하는데, 그 요청이 오가는 사이에 확장을 다시 불러오면 옛 스크립트가 끊긴 요청을 platform 문제로 남긴다(부하에서 봄,
+// https://github.com/dowoo108380/browser-toolbox/issues/2). 이 파일의 시험이 보려는 것과 다른 문제라, 페이지를 열자마자
+// 다시 불러오는 시험은 먼저 이것을 기다린다.
+async function settingsWritten(context: BrowserContext) {
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('서비스 워커가 없다.');
+  await expect
+    .poll(() =>
+      worker.evaluate(
+        async () => (await chrome.storage.local.get('settings'))['settings'] !== undefined,
+      ),
+    )
+    .toBe(true);
+}
+
+// 지금의 문제 기록(COM-5).
+async function readProblems(context: BrowserContext, extensionId: string): Promise<unknown> {
   const page = await openPopup(context, extensionId);
   try {
     return await page.evaluate(async (): Promise<unknown> => {
@@ -42,6 +56,13 @@ async function problemsAfterRetire(context: BrowserContext, extensionId: string)
   } finally {
     await page.close();
   }
+}
+
+// 다시 불러온 판의 서비스 워커가 정리를 마치고 남긴 문제 기록. 정리가 끝났다는 신호가 없어, 정리가 페이지에
+// 닿은 것을 본 뒤 기록이 남을 틈(1.5초)을 두고 읽는다.
+async function problemsAfterRetire(context: BrowserContext, extensionId: string) {
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return readProblems(context, extensionId);
 }
 
 // 문서에 물러남 이벤트가 닿은 횟수를 페이지 쪽에서 센다(결정 0008의 주된 방법).
@@ -57,6 +78,16 @@ async function countRetireEvents(frame: Frame) {
 
 const retireEvents = (frame: Frame) =>
   frame.evaluate(() => document.documentElement.dataset['retireEvents']);
+
+// 다시 로드 뒤 코드가 더 돌지 않는 옛 세계가 남긴 요소를 흉내 낸다(결정 0008 고친 기록, 드러난 것 1).
+// 그런 세계는 iframe에서 자주 생기지만 늘 생기지는 않는다. 이 요소는 새 판의 정리 함수만 지울 수 있다.
+async function addStaleElement(frame: Frame) {
+  await frame.evaluate(() => {
+    const stale = document.createElement('browser-toolbox-ui');
+    stale.setAttribute('data-browser-toolbox', 'stale');
+    document.documentElement.append(stale);
+  });
+}
 
 const origins = [
   { label: '루프백 출처(보안 문맥)', origin: fixtureOrigin, secure: true },
@@ -93,14 +124,8 @@ for (const { label, origin, secure } of origins) {
       if (video) video.playbackRate = 2;
     });
     await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '2×']);
-    // 다시 로드 뒤 코드가 더 돌지 않는 옛 세계가 남긴 요소를 흉내 낸다(결정 0008 고친 기록, 드러난 것 1).
-    // 그런 세계는 iframe에서 자주 생기지만 늘 생기지는 않는다. 이 요소는 새 판의 정리 함수만 지울 수 있다.
     for (const frame of frames) {
-      await frame.evaluate(() => {
-        const stale = document.createElement('browser-toolbox-ui');
-        stale.setAttribute('data-browser-toolbox', 'stale');
-        document.documentElement.append(stale);
-      });
+      await addStaleElement(frame);
       expect(await hostCount(frame)).toBe(2);
     }
 
@@ -118,11 +143,48 @@ for (const { label, origin, secure } of origins) {
   });
 }
 
+test('COM-7.2 결정 0008 로딩이 끝나지 않은 문서도 끝나기를 기다리지 않고 정리하며 문제로 기록하지 않는다', async ({
+  context,
+  extensionId,
+  profileDirectory,
+}) => {
+  await settingsWritten(context);
+  // 응답이 끝나지 않는 최상위 문서와, 그 안의 응답이 끝나지 않는 iframe(tests/server.ts의 /loading/).
+  const page = await context.newPage();
+  await page.goto(`${fixtureOrigin}/loading/blank.html`, { waitUntil: 'commit' });
+  await expect(page.locator('p')).toHaveCount(1);
+  await page.evaluate((src) => {
+    const frame = document.createElement('iframe');
+    frame.src = src;
+    document.body.append(frame);
+  }, `${fixtureOrigin}/loading/blank.html`);
+  await expect(page.frameLocator('iframe').locator('p')).toHaveCount(1);
+  const childFrame = page.frames().find((frame) => frame !== page.mainFrame());
+  if (childFrame === undefined) throw new Error('iframe을 찾지 못했다.');
+  const frames: readonly Frame[] = [page.mainFrame(), childFrame];
+  for (const frame of frames) {
+    expect(await frame.evaluate(() => document.readyState)).toBe('loading');
+    await countRetireEvents(frame);
+    await addStaleElement(frame);
+  }
+
+  await reloadExtension(profileDirectory, extensionId);
+
+  for (const frame of frames) {
+    await expect.poll(() => retireEvents(frame)).not.toBe('0');
+    await expect.poll(() => hostCount(frame)).toBe(0);
+    // 정리하는 동안 두 문서 모두 로딩 중이었다.
+    expect(await frame.evaluate(() => document.readyState)).toBe('loading');
+  }
+  expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+});
+
 test('COM-7 결정 0008 다시 불러올 때 스크립트를 넣을 수 없는 탭(오류 페이지, 버려진 탭)은 문제로 기록하지 않는다', async ({
   context,
   extensionId,
   profileDirectory,
 }) => {
+  await settingsWritten(context);
   const page = await context.newPage();
   await page.goto(`${fixtureOrigin}/blank.html`);
   await countRetireEvents(page.mainFrame());
@@ -149,4 +211,46 @@ test('COM-7 결정 0008 다시 불러올 때 스크립트를 넣을 수 없는 �
   // 넣을 수 있는 탭에는 정리가 닿았고, 넣을 수 없는 두 탭의 거절은 문제 기록에 남지 않는다.
   await expect.poll(() => retireEvents(page.mainFrame())).not.toBe('0');
   expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+});
+
+test('COM-7 결정 0008 quality 068 주 스레드가 붙잡힌 탭은 다른 탭의 정리를 붙잡지 않고, 5초가 지나면 timeout으로 기록한다', async ({
+  context,
+  extensionId,
+  profileDirectory,
+}) => {
+  await settingsWritten(context);
+  // 붙잡을 탭은 일반 http 출처로 연다. 정리할 탭과 사이트가 달라 다른 프로세스에 뜬다(같은 프로세스면 함께 붙잡힌다).
+  const busyPage = await context.newPage();
+  await busyPage.goto(`${insecureFixtureOrigin}/blank.html`);
+  const page = await context.newPage();
+  await page.goto(`${fixtureOrigin}/blank.html`);
+  await countRetireEvents(page.mainFrame());
+  await addStaleElement(page.mainFrame());
+  // 주 스레드를 12초 붙잡는다. 그동안 Chrome은 그 탭에 정리 함수를 돌리지 못한다(2026-10-14 실험).
+  const busy = busyPage.evaluate((ms) => {
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+      // 붙잡는다.
+    }
+    return Date.now();
+  }, 12_000);
+  // 붙잡혔는지 확인한다. 페이지의 실행은 차례로 하므로 붙잡혀 있으면 다음 실행이 0.5초 안에 돌아오지 않는다.
+  expect(
+    await Promise.race([
+      busyPage.evaluate(() => 'free'),
+      new Promise((resolve) => setTimeout(resolve, 500, 'busy')),
+    ]),
+  ).toBe('busy');
+
+  await reloadExtension(profileDirectory, extensionId);
+
+  // 다른 탭은 붙잡힌 탭을 기다리지 않고 정리한다.
+  await expect.poll(() => retireEvents(page.mainFrame())).not.toBe('0');
+  await expect.poll(() => hostCount(page)).toBe(0);
+  // 붙잡힌 탭은 제한 시간이 지나면 timeout으로 기록한다. 그 탭이 풀리기를 기다리지 않는다.
+  await expect
+    .poll(() => readProblems(context, extensionId), { timeout: 10_000 })
+    .toEqual([expect.objectContaining({ featureId: null, kind: 'timeout' })]);
+  const seenAt = Date.now();
+  expect(seenAt).toBeLessThan(await busy);
 });

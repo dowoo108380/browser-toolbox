@@ -12,14 +12,20 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
-          include: ['src/**/*.test.ts', 'scripts/**/*.test.ts', 'tests/lint/**/*.test.ts'],
-          exclude: ['src/**/*.dom.test.{ts,tsx}'],
+          // tests/integration은 실제 모듈끼리 연결한 시험이다. 가짜는 Chrome 경계(저장소, 메시지 통로 등)뿐이다.
+          // 서비스 워커 쪽만 연결한 것은 여기서, 화면이나 페이지가 들어간 것(.dom.test)은 아래에서 돈다.
+          include: [
+            'src/**/*.test.ts',
+            'scripts/**/*.test.ts',
+            'tests/lint/**/*.test.ts',
+            'tests/integration/**/*.test.ts',
+          ],
+          exclude: ['**/*.dom.test.{ts,tsx}'],
         },
       },
       {
         test: {
           name: 'dom',
-          // tests/integration은 실제 모듈끼리 연결한 시험이다. 가짜는 Chrome 경계(저장소, 메시지 통로)뿐이다.
           include: ['src/**/*.dom.test.{ts,tsx}', 'tests/integration/**/*.dom.test.{ts,tsx}'],
           browser: {
             enabled: true,

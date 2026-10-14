@@ -11,7 +11,7 @@ import { startBackground } from './index.ts';
 // 돌려준 함수를 부르면 설치·갱신 이벤트가 온 것처럼 한다.
 function start(
   store: LocalStore,
-  retire: () => Promise<readonly AppError[]> = () => Promise.resolve([]),
+  retire: (report: (problem: AppError) => void) => Promise<void> = () => Promise.resolve(),
 ) {
   const clock = { time: 1_790_000_000_000 };
   let installed: () => void = () => undefined;
@@ -87,20 +87,35 @@ describe('서비스 워커 시작', () => {
 describe('설치·갱신 때 옛 스크립트 정리(결정 0008)', () => {
   it('quality 067 정리가 알린 문제를 종류마다 한 번 기록한다(탭이 많아도 문제 기록을 채우지 않게)', async () => {
     const store = createFakeLocalStore();
-    const install = start(store, () =>
-      Promise.resolve([
-        appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'),
-        appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'),
-        appError('platform', '넣지 못했다.'),
-      ]),
-    );
+    const install = start(store, async (report) => {
+      report(appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'));
+      report(appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'));
+      report(appError('platform', '넣지 못했다.'));
+      // 늦게 끝난 탭이 같은 종류를 다시 알려도 남기지 않는다.
+      await settle();
+      report(appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'));
+      report(appError('timeout', '응답하지 않았다.'));
+    });
     await settle();
     install();
     await vi.waitFor(() => {
-      expect(recordedKinds(store)).toEqual(['unexpected', 'platform']);
+      expect(recordedKinds(store)).toEqual(['unexpected', 'platform', 'timeout']);
     });
     await settle();
-    expect(recordedKinds(store)).toEqual(['unexpected', 'platform']);
+    expect(recordedKinds(store)).toEqual(['unexpected', 'platform', 'timeout']);
+  });
+
+  it('quality 067 알린 문제는 정리 전체가 끝나기를 기다리지 않고 기록한다(그 사이 서비스 워커가 멈춰도 남게)', async () => {
+    const store = createFakeLocalStore();
+    const install = start(store, (report) => {
+      report(appError('platform', '넣지 못했다.'));
+      return new Promise(() => undefined);
+    });
+    await settle();
+    install();
+    await vi.waitFor(() => {
+      expect(recordedKinds(store)).toEqual(['platform']);
+    });
   });
 
   it('알린 문제가 없으면 기록하지 않고, 정리 자체가 실패하면 platform을 기록한다', async () => {
