@@ -28,18 +28,10 @@ export interface Scope {
   readonly mutationObserver: (
     callback: (records: MutationRecord[]) => void | Promise<void>,
   ) => ScopedMutationObserver;
-  readonly resizeObserver: (
-    callback: (entries: ResizeObserverEntry[]) => void | Promise<void>,
-  ) => ScopedResizeObserver;
 }
 
 interface ScopedMutationObserver {
   readonly observe: (target: Node, options?: MutationObserverInit) => void;
-}
-
-interface ScopedResizeObserver {
-  readonly observe: (target: Element, options?: ResizeObserverOptions) => void;
-  readonly unobserve: (target: Element) => void;
 }
 
 interface ScopeHooks {
@@ -135,23 +127,6 @@ function makeScope({ onError, isLive }: ScopeHooks, detachFromParent: (() => voi
       return {
         observe: (target, options) => {
           if (!closed) observer.observe(target, options);
-        },
-      };
-    },
-    resizeObserver: (callback) => {
-      const guarded = guard(callback);
-      const observer = new ResizeObserver((entries) => {
-        guarded(entries);
-      });
-      defer(() => {
-        observer.disconnect();
-      });
-      return {
-        observe: (target, options) => {
-          if (!closed) observer.observe(target, options);
-        },
-        unobserve: (target) => {
-          observer.unobserve(target);
         },
       };
     },

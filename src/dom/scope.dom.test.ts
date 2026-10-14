@@ -139,22 +139,13 @@ describe('자원 범위', () => {
       expect(registered).not.toHaveBeenCalled();
     });
 
-    it('ResizeObserver', () => {
-      const { scope } = setup();
-      const observer = scope.resizeObserver(() => undefined);
-      scope.close();
-      const registered = vi.spyOn(ResizeObserver.prototype, 'observe');
-      observer.observe(document.body);
-      expect(registered).not.toHaveBeenCalled();
-    });
-
     it('안쪽 범위가 닫힌 뒤에도(바깥은 열려 있음)', () => {
       const { scope } = setup();
       const inner = scope.child();
-      const observer = inner.resizeObserver(() => undefined);
+      const observer = inner.mutationObserver(() => undefined);
       inner.close();
-      const registered = vi.spyOn(ResizeObserver.prototype, 'observe');
-      observer.observe(document.body);
+      const registered = vi.spyOn(MutationObserver.prototype, 'observe');
+      observer.observe(document.body, { childList: true });
       expect(registered).not.toHaveBeenCalled();
     });
 
