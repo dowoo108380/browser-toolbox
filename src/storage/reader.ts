@@ -101,6 +101,6 @@ export function settingsOf<S extends ToggleSettings>(
 ): S {
   const value = snapshot.features.get(definition.id);
   if (value === undefined) return definition.settings.defaults;
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- receive가 이 정의의 스키마로 검증한 값만 이 맵에 넣는다(checkFeatureItems).
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- receive가 읽는 쪽에 준 정의마다 그 스키마로 검증한 값만 이 맵에 넣는다(items.ts의 checkItems). 같은 기능 목록의 정의로 부르고 기능 id는 겹치지 않는다.
   return value as S;
 }
