@@ -45,9 +45,12 @@ describe('요청 보내기(chromeRequester)', () => {
     expect(await chromeRequester()(storageEnsureReady, {})).toEqual({ ok: true, value: null });
   });
 
-  it('응답 형식이 틀리면 unexpected다', async () => {
+  it('응답 형식이 틀리면 연결된 채인지 확인한 뒤 unexpected다', async () => {
+    vi.useFakeTimers();
     fakeChrome(() => Promise.resolve({ ok: true, value: 3 }));
-    const result = await chromeRequester()(storageEnsureReady, {});
+    const pending = chromeRequester()(storageEnsureReady, {});
+    await vi.advanceTimersByTimeAsync(disconnectSettleMs);
+    const result = await pending;
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('unexpected');
   });
@@ -107,6 +110,20 @@ describe('요청 보내기(chromeRequester)', () => {
     const result = await pending;
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('platform');
+  });
+
+  it('결정 0008 다시 불러오는 순간 요청이 응답 없이(undefined) 끝나고 잠시 뒤 끊기면 unexpected가 아니라 disconnected다', async () => {
+    vi.useFakeTimers();
+    // 확장 전체 시험의 부하에서 본 모양: 다시 불러온 뒤 17–18ms에 오가던 설정 준비 요청이 undefined로 끝났다.
+    const { runtime } = fakeChrome(() => {
+      setTimeout(() => Reflect.deleteProperty(runtime, 'id'), 8);
+      return Promise.resolve(undefined);
+    });
+    const pending = chromeRequester()(storageEnsureReady, {});
+    await vi.advanceTimersByTimeAsync(disconnectSettleMs);
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('disconnected');
   });
 
   it('결정 0008 응답을 기다리는 사이에 연결이 끊겼으면 제한 시간이 지나도 timeout이 아니라 disconnected다', async () => {
