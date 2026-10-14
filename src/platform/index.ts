@@ -6,5 +6,5 @@ export {
   isExtensionConnected,
   listenRequests,
 } from './messaging.ts';
-export { retireInAllFrames, retireInFrame } from './scripting.ts';
+export { retireInAllFrames, retireInFrame, retireTimeoutMs } from './scripting.ts';
 export { listenInstalled } from './runtime.ts';

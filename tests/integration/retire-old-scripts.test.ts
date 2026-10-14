@@ -8,8 +8,16 @@ import { settingsKey } from '../../src/storage/index.ts';
 // chrome.scripting.executeScript. 시계는 가짜라 제한 시간을 시험이 정한 때에 넘긴다.
 
 interface Injection {
-  readonly target: { readonly tabId: number };
+  readonly target: { readonly tabId: number; readonly documentIds?: readonly string[] };
 }
+
+// ms 뒤에 value로 끝나는 응답.
+const after = <T>(ms: number, value: T) =>
+  new Promise<T>((resolve) => {
+    setTimeout(() => {
+      resolve(value);
+    }, ms);
+  });
 
 function fakeChrome(
   store: FakeLocalStore,
@@ -91,5 +99,29 @@ describe('설치·갱신 때 옛 스크립트 정리의 기다림(결정 0008, a
     // 그 탭을 기다리기 시작한 지 5초.
     await vi.advanceTimersByTimeAsync(1);
     expect(recordedKinds(store)).toEqual(['platform', 'timeout']);
+  });
+
+  it('quality 067 1.5초보다 늦게 끝난 탭의 실패도 제한 시간 안이면 기록한다(끝까지 돌지 못한 문서에 다시 넣은 뒤)', async () => {
+    const store = createFakeLocalStore();
+    // 처음 넣기는 2초 뒤에 iframe이 끝까지 돌지 못했다고 답하고, 그 문서에 다시 넣으면 0.2초 뒤에 또 그렇게 답한다.
+    const { install } = fakeChrome(store, [{ id: 1 }], (injection) =>
+      injection.target.documentIds === undefined
+        ? after(2000, [
+            { documentId: 'top', result: true },
+            { documentId: 'child', result: null },
+          ])
+        : after(200, [{ documentId: 'child', result: null }]),
+    );
+    await import('../../src/entries/sw.ts');
+    await vi.advanceTimersByTimeAsync(10);
+    install();
+    // 확장 전체 시험이 예전에 기록을 읽던 때(1.5초)에는 아직 없다.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(recordedKinds(store)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(700);
+    expect(recordedKinds(store)).toEqual(['unexpected']);
+    // 제한 시간이 지나도 더 남지 않는다(이 탭은 이미 끝났다).
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(recordedKinds(store)).toEqual(['unexpected']);
   });
 });

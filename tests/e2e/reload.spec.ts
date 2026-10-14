@@ -1,4 +1,5 @@
 import type { BrowserContext, Frame } from '@playwright/test';
+import { retireTimeoutMs } from '../../src/platform/index.ts';
 import { connectBrowserCdp } from './support/browser-cdp.ts';
 import {
   distPath,
@@ -58,10 +59,16 @@ async function readProblems(context: BrowserContext, extensionId: string): Promi
   }
 }
 
-// 다시 불러온 판의 서비스 워커가 정리를 마치고 남긴 문제 기록. 정리가 끝났다는 신호가 없어, 정리가 페이지에
-// 닿은 것을 본 뒤 기록이 남을 틈(1.5초)을 두고 읽는다.
+// 정리가 알린 문제를 서비스 워커가 문제 기록에 다 쓰는 데 주는 여유.
+const recordMarginMs = 1000;
+
+// 다시 불러온 판의 서비스 워커가 정리를 마치고 남긴 문제 기록. 정리가 페이지에 닿은 것을 본 뒤 바로 부른다.
+// 정리가 끝났다는 신호는 없다(시험만을 위한 신호를 제품에 두지 않는다). 대신 설계가 보장하는 상한까지 기다린다:
+// 모든 탭의 기다림은 탭 목록을 얻은 직후 함께 시작하고(정리가 페이지에 닿은 것은 그 뒤다), 탭마다 retireTimeoutMs 안에
+// 끝나거나 timeout으로 알린다. 그 뒤에 온 결과는 버린다(결정 0008). 끝까지 돌지 못한 문서에 다시 넣은 뒤의 기록처럼
+// 늦게 남는 것도 이 안에 든다.
 async function problemsAfterRetire(context: BrowserContext, extensionId: string) {
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await new Promise((resolve) => setTimeout(resolve, retireTimeoutMs + recordMarginMs));
   return readProblems(context, extensionId);
 }
 
@@ -292,4 +299,8 @@ test('COM-7 결정 0008 quality 068 주 스레드가 붙잡힌 탭은 다른 탭
     .toEqual([expect.objectContaining({ featureId: null, kind: 'timeout' })]);
   const seenAt = Date.now();
   expect(seenAt).toBeLessThan(await busy);
+  // 그 탭이 풀린 때(12초)는 정리의 상한(다시 불러온 뒤 retireTimeoutMs와 여유)이 지난 뒤다. 그 사이 더 남은 기록이 없다.
+  expect(await readProblems(context, extensionId)).toEqual([
+    expect.objectContaining({ featureId: null, kind: 'timeout' }),
+  ]);
 });
