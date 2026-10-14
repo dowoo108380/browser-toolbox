@@ -72,7 +72,7 @@ scripts/       빌드, 등록 목록 생성, 패키징
 tests/         확장 전체 테스트(e2e), 실제 모듈끼리 연결한 시험(integration), 시험 페이지
 ```
 
-- 층은 위에서 아래로만 가져다 쓴다. 기능끼리는 서로 가져오지 않는다. 규칙은 `.dependency-cruiser.json`에 있고 `pnpm verify`가 검사한다.
+- 위 목록에서 아래에 있는 층이 위에 있는 기반 층을 가져다 쓴다. 거꾸로는 쓰지 않는다. 예: `contracts` → `shared`, `storage` → `shared`·`contracts`·`platform`, `page`·`background`·`ui` → `storage`, `entries` → 모두. 위의 층을 모두 쓰는 것은 아니다(`dom`은 `shared`만 쓴다). 기능끼리는 서로 가져오지 않는다. 규칙은 `.dependency-cruiser.json`에 있고 `pnpm verify`가 검사한다.
 - 설정은 `chrome.storage.local`의 `settings` 키 하나에 둔다. 쓰는 곳은 서비스 워커 하나다.
 - 저장된 설정을 읽을 수 없어 기본값으로 고쳐 쓰면, 서비스 워커가 무엇을 바꿨는지 `repairNotice` 키에 먼저 남기고 팝업이 사용자가 확인할 때까지 보인다.
 
