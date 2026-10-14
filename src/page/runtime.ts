@@ -75,7 +75,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       const key = JSON.stringify(snapshot.features.get(part.featureId) ?? null);
       if (running.get(part.featureId)?.key === key) continue;
       stop(part.featureId);
-      const scope: Scope = createScope(deps.context.window, {
+      const scope: Scope = createScope({
         onError: () => {
           fail(part.featureId, scope);
         },

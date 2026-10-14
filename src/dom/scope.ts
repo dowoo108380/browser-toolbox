@@ -31,8 +31,6 @@ export interface Scope {
   readonly resizeObserver: (
     callback: (entries: ResizeObserverEntry[]) => void | Promise<void>,
   ) => ScopedResizeObserver;
-  // 다음 화면 그리기 전에 한 번 부른다.
-  readonly animationFrame: (callback: () => void | Promise<void>) => () => void;
 }
 
 interface ScopedMutationObserver {
@@ -52,15 +50,11 @@ interface ScopeHooks {
   readonly isLive: () => boolean;
 }
 
-export function createScope(window: Window, hooks: ScopeHooks): Scope {
-  return makeScope(window, hooks, null);
+export function createScope(hooks: ScopeHooks): Scope {
+  return makeScope(hooks, null);
 }
 
-function makeScope(
-  window: Window,
-  { onError, isLive }: ScopeHooks,
-  detachFromParent: (() => void) | null,
-): Scope {
+function makeScope({ onError, isLive }: ScopeHooks, detachFromParent: (() => void) | null): Scope {
   let closed = false;
   // Set은 넣은 순서를 지킨다. 닫을 때 거꾸로 돈다.
   const cleanups = new Set<() => void>();
@@ -111,7 +105,7 @@ function makeScope(
 
   const child = (): Scope => {
     let detach = (): void => undefined;
-    const inner = makeScope(window, { onError, isLive }, () => {
+    const inner = makeScope({ onError, isLive }, () => {
       detach();
     });
     detach = defer(inner.close);
@@ -160,19 +154,6 @@ function makeScope(
           observer.unobserve(target);
         },
       };
-    },
-    animationFrame: (callback) => {
-      const guarded = guard(callback);
-      let cancel = (): void => undefined;
-      const id = window.requestAnimationFrame(() => {
-        // 불렸으니 닫을 때 취소할 것이 없다. 범위에서 먼저 빼고 부른다.
-        cancel();
-        guarded();
-      });
-      cancel = defer(() => {
-        window.cancelAnimationFrame(id);
-      });
-      return cancel;
     },
   };
 }

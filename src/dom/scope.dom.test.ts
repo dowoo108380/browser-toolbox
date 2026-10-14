@@ -7,7 +7,7 @@ import { createScope } from './scope.ts';
 function setup() {
   const errors: unknown[] = [];
   const state = { live: true };
-  const scope = createScope(window, {
+  const scope = createScope({
     onError: (error) => errors.push(error),
     isLive: () => state.live,
   });
@@ -122,21 +122,6 @@ describe('자원 범위', () => {
     target.dispatchEvent(new Event('ping'));
     expect(plain).toHaveBeenCalledTimes(1);
     expect(captured).toHaveBeenCalledTimes(1);
-  });
-
-  it('화면 그리기 예약은 한 번 부르고, 닫으면 취소된다', async () => {
-    const { scope } = setup();
-    const fired = vi.fn();
-    scope.animationFrame(fired);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    expect(fired).toHaveBeenCalledTimes(1);
-    const cancelled = vi.fn();
-    scope.animationFrame(cancelled);
-    scope.close();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    expect(cancelled).not.toHaveBeenCalled();
   });
 
   describe('닫힌 범위에서는 관찰을 새로 시작하지 않는다', () => {

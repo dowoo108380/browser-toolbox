@@ -99,7 +99,6 @@ describe('결정 0014 페이지 쪽 자원 규칙', () => {
 
   const mustNotReport = [
     "scope.listen(window, 'resize', f);",
-    'scope.animationFrame(f);',
     'scope.mutationObserver(f).observe(document, { childList: true });',
     'scope.resizeObserver(f).observe(video);',
     "video.removeEventListener('ratechange', f);",

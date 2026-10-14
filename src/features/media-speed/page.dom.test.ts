@@ -69,7 +69,7 @@ async function frames() {
 // 실행 틀 없이 기능만 시작한다. 돌려준 close가 실행 틀이 기능을 끌 때 하는 일이다.
 function start(snapshot: Snapshot) {
   const errors: unknown[] = [];
-  const scope = createScope(window, {
+  const scope = createScope({
     onError: (error) => errors.push(error),
     isLive: () => true,
   });
