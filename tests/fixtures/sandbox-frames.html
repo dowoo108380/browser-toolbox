@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청(404)이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>스크립트 실행이 막힌 sandbox iframe이 있는 페이지</title>
+    <style>
+      iframe {
+        width: 400px;
+        height: 240px;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 셋 모두 sandbox에 allow-scripts가 없어 그 문서의 스크립트는 돌지 않는다. -->
+    <!-- 출처가 불투명(null)한 다른 포트의 문서. -->
+    <iframe
+      id="opaque"
+      title="sandbox만 둔 iframe"
+      sandbox
+      src="http://127.0.0.1:4174/video-only.html"
+    ></iframe>
+    <!-- 출처는 그대로인 같은 포트의 문서. -->
+    <iframe
+      id="same-origin"
+      title="allow-same-origin만 둔 iframe"
+      sandbox="allow-same-origin"
+      src="/video-only.html"
+    ></iframe>
+    <!-- 출처가 불투명한 about:srcdoc 문서. -->
+    <iframe
+      id="srcdoc"
+      title="sandbox만 둔 srcdoc iframe"
+      sandbox
+      srcdoc="<video style='display: block; width: 320px; height: 180px'></video>"
+    ></iframe>
+  </body>
+</html>

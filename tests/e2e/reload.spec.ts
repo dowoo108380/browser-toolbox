@@ -179,6 +179,45 @@ test('COM-7.2 결정 0008 로딩이 끝나지 않은 문서도 끝나기를 기�
   expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
 });
 
+// 그 문서에서 페이지의 스크립트가 도는지. 시험이 넣은 스크립트 요소가 돌면 표식을 남긴다.
+function runsPageScripts(frame: Frame): Promise<boolean> {
+  return frame.evaluate(() => {
+    const script = document.createElement('script');
+    script.textContent = "document.documentElement.dataset.pageScriptRan = 'yes';";
+    document.documentElement.append(script);
+    script.remove();
+    return document.documentElement.dataset['pageScriptRan'] === 'yes';
+  });
+}
+
+test('COM-7.1 COM-7.2 결정 0008 스크립트 실행이 막힌 sandbox iframe(allow-scripts 없음)에서도 정리 함수가 끝까지 돌아 옛 요소를 지우고 문제로 기록하지 않는다', async ({
+  context,
+  extensionId,
+  profileDirectory,
+}) => {
+  await settingsWritten(context);
+  const page = await context.newPage();
+  await page.goto(`${fixtureOrigin}/sandbox-frames.html`);
+  const sandboxed = page.frames().filter((frame) => frame !== page.mainFrame());
+  expect(sandboxed).toHaveLength(3);
+  // 이 시험이 보려는 문서인지 먼저 확인한다. 최상위에서는 페이지의 스크립트가 돌고, 세 iframe에서는 돌지 않는다.
+  expect(await runsPageScripts(page.mainFrame())).toBe(true);
+  for (const frame of sandboxed) expect(await runsPageScripts(frame)).toBe(false);
+  // 그래도 콘텐츠 스크립트는 세 iframe에서 돈다(2026-10-14 실험, Chromium 156). 그래서 정리할 옛 스크립트가 있다.
+  const popup = await openPopup(context, extensionId);
+  await popup.getByRole('switch', { name: '미디어 배속' }).check();
+  await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×', '1×']);
+  const frames: readonly Frame[] = [page.mainFrame(), ...sandboxed];
+  for (const frame of frames) await addStaleElement(frame);
+
+  await reloadExtension(profileDirectory, extensionId);
+
+  // 흉내 낸 요소는 새 판의 정리 함수만 지운다. 네 문서 모두에서 지워졌으면 함수가 그 문서에서 돌았다.
+  for (const frame of frames) await expect.poll(() => hostCount(frame)).toBe(0);
+  // 함수가 끝까지 돌았다는 값을 돌려줬다. 결과가 null이었으면 다시 넣어도 null이라 unexpected가 남는다.
+  expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+});
+
 test('COM-7 결정 0008 다시 불러올 때 스크립트를 넣을 수 없는 탭(오류 페이지, 버려진 탭)은 문제로 기록하지 않는다', async ({
   context,
   extensionId,
