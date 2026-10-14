@@ -30,22 +30,6 @@ async function reloadExtension(profileDirectory: string, extensionId: string) {
   }
 }
 
-// 처음 설치한 서비스 워커가 기본 설정을 다 쓸 때까지 기다린다. 그 전에 연 페이지의 콘텐츠 스크립트는 설정 준비를
-// 부탁하는데, 그 요청이 오가는 사이에 확장을 다시 불러오면 옛 스크립트가 끊긴 요청을 platform 문제로 남긴다(부하에서 봄,
-// https://github.com/dowoo108380/browser-toolbox/issues/2). 이 파일의 시험이 보려는 것과 다른 문제라, 페이지를 열자마자
-// 다시 불러오는 시험은 먼저 이것을 기다린다.
-async function settingsWritten(context: BrowserContext) {
-  const worker = context.serviceWorkers()[0];
-  if (worker === undefined) throw new Error('서비스 워커가 없다.');
-  await expect
-    .poll(() =>
-      worker.evaluate(
-        async () => (await chrome.storage.local.get('settings'))['settings'] !== undefined,
-      ),
-    )
-    .toBe(true);
-}
-
 // 지금의 문제 기록(COM-5).
 async function readProblems(context: BrowserContext, extensionId: string): Promise<unknown> {
   const page = await openPopup(context, extensionId);
@@ -155,7 +139,6 @@ test('COM-7.2 결정 0008 로딩이 끝나지 않은 문서도 끝나기를 기�
   extensionId,
   profileDirectory,
 }) => {
-  await settingsWritten(context);
   // 응답이 끝나지 않는 최상위 문서와, 그 안의 응답이 끝나지 않는 iframe(tests/server.ts의 /loading/).
   const page = await context.newPage();
   await page.goto(`${fixtureOrigin}/loading/blank.html`, { waitUntil: 'commit' });
@@ -209,7 +192,6 @@ test('COM-7.1 COM-7.2 결정 0008 스크립트 실행이 막힌 sandbox iframe(a
   extensionId,
   profileDirectory,
 }) => {
-  await settingsWritten(context);
   const page = await context.newPage();
   await page.goto(`${fixtureOrigin}/sandbox-frames.html`);
   const sandboxed = page.frames().filter((frame) => frame !== page.mainFrame());
@@ -237,7 +219,6 @@ test('COM-7 결정 0008 다시 불러올 때 스크립트를 넣을 수 없는 �
   extensionId,
   profileDirectory,
 }) => {
-  await settingsWritten(context);
   const page = await context.newPage();
   await page.goto(`${fixtureOrigin}/blank.html`);
   await countRetireEvents(page.mainFrame());
@@ -271,7 +252,6 @@ test('COM-7 결정 0008 quality 068 주 스레드가 붙잡힌 탭은 다른 탭
   extensionId,
   profileDirectory,
 }) => {
-  await settingsWritten(context);
   // 붙잡을 탭은 일반 http 출처로 연다. 정리할 탭과 사이트가 달라 다른 프로세스에 뜬다(같은 프로세스면 함께 붙잡힌다).
   const busyPage = await context.newPage();
   await busyPage.goto(`${insecureFixtureOrigin}/blank.html`);
