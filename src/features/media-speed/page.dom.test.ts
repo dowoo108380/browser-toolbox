@@ -59,9 +59,15 @@ function labelAt(index: number): HTMLElement {
   return label;
 }
 
+// 표시창이 그려지는 상태인지(display: none이 아닌지). 스크롤 컨테이너에 가려져 숨는 것(position-visibility)은
+// 이것으로 알 수 없다(checkVisibility가 그대로 참이다).
+function shown(index: number): boolean {
+  return labelAt(index).checkVisibility();
+}
+
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
-// 몇 프레임 기다린다. 시작 직후 크기 관찰의 첫 알림은 첫 프레임의 requestAnimationFrame 뒤에 온다.
+// 몇 프레임 기다린다. 시작 직후 화면 그리기에 걸쳐 일어나는 일(관찰자의 첫 알림 등)이 끝난 뒤를 본다.
 async function frames() {
   for (let frame = 0; frame < 5; frame += 1) await nextFrame();
 }
@@ -115,21 +121,72 @@ describe('배속 표시창(05단계 뼈대)', () => {
     addVideo(100, 100);
     start(enabled);
     await frames();
-    expect([0, 1, 2].map((index) => labelAt(index).hidden)).toEqual([true, true, false]);
+    expect([0, 1, 2].map(shown)).toEqual([false, false, true]);
+  });
+
+  describe('크기는 화면에 그려진 크기로 정한다(transform으로 확대·축소된 영상)', () => {
+    // 영상을 감싼 요소. 감싼 요소나 영상 자체에 준 transform은 레이아웃 크기를 바꾸지 않아 크기 관찰 알림이 오지 않는다.
+    function wrap(video: HTMLVideoElement): HTMLElement {
+      const wrapper = document.createElement('div');
+      wrapper.style.transformOrigin = '0 0';
+      video.before(wrapper);
+      wrapper.append(video);
+      added.push(wrapper);
+      return wrapper;
+    }
+
+    it('처음부터 확대·축소된 경우', async () => {
+      // 200×200을 감싼 요소에서 0.4배(80×80으로 그려짐), 80×80을 영상 자체에서 2배(160×160), 200×200을 0.5배(100×100).
+      wrap(addVideo(200, 200)).style.transform = 'scale(0.4)';
+      const enlarged = addVideo(80, 80);
+      enlarged.style.transformOrigin = '0 0';
+      enlarged.style.transform = 'scale(2)';
+      wrap(addVideo(200, 200)).style.transform = 'scale(0.5)';
+      start(enabled);
+      await frames();
+      expect([0, 1, 2].map(shown)).toEqual([false, true, true]);
+    });
+
+    it('실행 중에 배율만 바뀌는 경우', async () => {
+      const video = addVideo(200, 200);
+      const wrapper = wrap(video);
+      start(enabled);
+      await frames();
+      expect(shown(0)).toBe(true);
+      wrapper.style.transform = 'scale(0.4)';
+      await vi.waitFor(() => {
+        expect(shown(0)).toBe(false);
+      });
+      wrapper.style.transform = '';
+      await vi.waitFor(() => {
+        expect(shown(0)).toBe(true);
+      });
+      // 영상 자체의 배율이 바뀌어 작은 영상이 커지는 경우.
+      video.style.width = '80px';
+      video.style.height = '80px';
+      await vi.waitFor(() => {
+        expect(shown(0)).toBe(false);
+      });
+      video.style.transformOrigin = '0 0';
+      video.style.transform = 'scale(1.5)';
+      await vi.waitFor(() => {
+        expect(shown(0)).toBe(true);
+      });
+    });
   });
 
   it('영상이 display: none이 되면 숨고, 다시 나타나면 보인다', async () => {
     const video = addVideo(320, 180);
     start(enabled);
     await frames();
-    expect(labelAt(0).hidden).toBe(false);
+    expect(shown(0)).toBe(true);
     video.style.display = 'none';
     await vi.waitFor(() => {
-      expect(labelAt(0).hidden).toBe(true);
+      expect(shown(0)).toBe(false);
     });
     video.style.display = 'block';
     await vi.waitFor(() => {
-      expect(labelAt(0).hidden).toBe(false);
+      expect(shown(0)).toBe(true);
     });
   });
 
@@ -138,17 +195,17 @@ describe('배속 표시창(05단계 뼈대)', () => {
     video.style.display = 'none';
     start(enabled);
     await frames();
-    expect(labelAt(0).hidden).toBe(true);
+    expect(shown(0)).toBe(false);
   });
 
-  it('표시창의 틀은 표시창 크기만 차지하고 영상 위의 클릭을 가로채지 않는다', async () => {
+  it('표시창의 틀은 영상이 그려진 상자와 같고 영상 위의 클릭을 가로채지 않는다', async () => {
     const video = addVideo(320, 180);
     start(enabled);
     await frames();
     const host = document.querySelector(hostTagName)?.getBoundingClientRect();
     const label = labelAt(0).getBoundingClientRect();
     const box = ({ left, top, width, height }: DOMRect) => ({ left, top, width, height });
-    expect(host && box(host)).toEqual(box(label));
+    expect(host && box(host)).toEqual(box(video.getBoundingClientRect()));
     const center = video.getBoundingClientRect();
     expect(
       document.elementFromPoint(center.left + center.width / 2, center.top + center.height / 2),
@@ -165,14 +222,14 @@ describe('배속 표시창(05단계 뼈대)', () => {
       const label = labelAt(0);
       const from = video.getBoundingClientRect();
       const at = label.getBoundingClientRect();
-      expect(label.hidden).toBe(false);
+      expect(label.checkVisibility()).toBe(true);
       expect(at.left - from.left).toBeCloseTo(8, 0);
       expect(at.top - from.top).toBeCloseTo(8, 0);
       return from.top;
     }
 
-    // 시작 직후의 알림(크기 관찰의 첫 알림과 그에 따른 일)이 모두 끝난 뒤에 바꾼다.
-    // 그러지 않으면 바꾼 뒤에 온 첫 알림이 우연히 새 위치를 반영해 결함을 가린다.
+    // 시작 직후의 일이 모두 끝난 뒤에 바꾼다. 그러지 않으면 바꾼 뒤에 온 시작 직후의 알림이 우연히 새 위치를
+    // 반영해 결함을 가린다(크기 관찰로 다시 놓던 05단계 뼈대에서 그랬다).
     async function settled(video: HTMLVideoElement) {
       await frames();
       return indicatorOn(video);
@@ -307,24 +364,6 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
       },
     });
     expect(() => video.dispatchEvent(new Event('ratechange'))).not.toThrow();
-    expectOnlyIndicatorStopped(reports, before);
-  });
-
-  it('크기 관찰 뒤 보일지 정하다가 예외가 나도 그 기능만 멈추고 기록한다', async () => {
-    const video = addVideo(320, 180);
-    const before = document.documentElement.outerHTML;
-    const reports = startRuntime();
-    await frames();
-    // 표시창을 숨기거나 보이다가 예외가 나는 경우를 흉내 낸다.
-    const hiding = vi.spyOn(HTMLElement.prototype, 'hidden', 'set').mockImplementation(() => {
-      throw new Error('표시창을 숨기지 못함');
-    });
-    video.style.width = '80px';
-    await vi.waitFor(() => {
-      expect(reports).toHaveLength(1);
-    });
-    hiding.mockRestore();
-    video.style.width = '320px';
     expectOnlyIndicatorStopped(reports, before);
   });
 });

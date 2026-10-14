@@ -53,22 +53,29 @@ test('MED-3 팝업에서 켜면 최상위와 iframe의 영상에 실제 배속�
   await expect.poll(() => hostCount(childFrame)).toBe(1);
   await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×']);
 
-  // 표시창은 영상의 왼쪽 위에 있고, 영상 앞에 내용이 더해져 영상만 옮겨져도 따라간다(결정 0018).
-  // 콘텐츠 스크립트(격리된 세계)가 연 popover에서도 source로 준 영상이 앵커가 되는지 본다.
-  const offset = () =>
+  // 표시창의 틀(host)은 영상이 그려진 상자와 같은 자리, 같은 크기이고, 영상 앞에 내용이 더해져 영상만 옮겨져도
+  // 따라간다(결정 0018). 콘텐츠 스크립트(격리된 세계)가 연 popover에서도 source로 준 영상이 앵커가 되는지 본다.
+  // 두 상자의 자리와 크기 가운데 가장 큰 차이(px). 맞으면 0이다.
+  const difference = () =>
     page.evaluate(() => {
       const video = document.querySelector('video')?.getBoundingClientRect();
       const host = document.querySelector('browser-toolbox-ui')?.getBoundingClientRect();
       if (video === undefined || host === undefined) return null;
-      return { x: Math.round(host.left - video.left), y: Math.round(host.top - video.top) };
+      const gaps = [
+        host.left - video.left,
+        host.top - video.top,
+        host.width - video.width,
+        host.height - video.height,
+      ];
+      return Math.round(Math.max(...gaps.map((gap) => Math.abs(gap))));
     });
-  await expect.poll(offset).toEqual({ x: 8, y: 8 });
+  await expect.poll(difference).toBe(0);
   await page.evaluate(() => {
     const block = document.createElement('div');
     block.style.height = '150px';
     document.body.prepend(block);
   });
-  await expect.poll(offset).toEqual({ x: 8, y: 8 });
+  await expect.poll(difference).toBe(0);
 
   // MED-3.1 배속을 바꾸면 표시창의 값이 실제 배속으로 바뀐다.
   await childFrame.evaluate(() => {
