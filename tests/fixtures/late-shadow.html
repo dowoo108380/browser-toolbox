@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청(404)이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>이미 파싱된 요소에 나중에 shadow root가 붙는 페이지</title>
+    <style>
+      test-player,
+      #plain-player {
+        display: block;
+      }
+      video {
+        display: block;
+        width: 320px;
+        height: 180px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- HTML에 쓴 사용자 정의 요소. 사이트에서는 보통 모듈 스크립트가 나중에 정의해, 업그레이드하며 shadow root를 단다.
+         시험(tests/e2e/late-shadow.spec.ts)이 정의한다. -->
+    <test-player id="custom-player"></test-player>
+    <!-- 요소 뒤에 오는 스크립트가 shadow root를 다는 경우. 시험이 단다. -->
+    <div id="plain-player"></div>
+    <!-- 앞의 두 요소 뒤에 있는 보통 영상. 이 영상에 표시창이 뜨면 확장이 앞의 두 요소도 이미 훑었다. -->
+    <video id="light"></video>
+  </body>
+</html>
