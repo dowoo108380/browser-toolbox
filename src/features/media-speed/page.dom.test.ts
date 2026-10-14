@@ -60,7 +60,8 @@ function labelAt(index: number): HTMLElement {
 }
 
 // 표시창이 그려지는 상태인지(display: none이 아닌지). 스크롤 컨테이너에 가려져 숨는 것(position-visibility)은
-// 이것으로 알 수 없다(checkVisibility가 그대로 참이다).
+// 이것으로 알 수 없어(checkVisibility가 그대로 참이다) 확장 전체 시험이 화면의 픽셀로 본다
+// (tests/e2e/indicator-visibility.spec.ts).
 function shown(index: number): boolean {
   return labelAt(index).checkVisibility();
 }

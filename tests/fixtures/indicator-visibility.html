@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청(404)이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>표시창이 실제로 보이는지 보는 페이지</title>
+    <style>
+      /* 모든 자리를 고정해, 표시창이 그려졌는지를 정해진 자리의 픽셀 색으로 판정한다(결정 0018). */
+      body {
+        margin: 0;
+        background: rgb(255 255 255);
+      }
+      video {
+        position: absolute;
+        width: 320px;
+        height: 180px;
+        background: rgb(0 255 0);
+      }
+      #plain {
+        left: 20px;
+        top: 20px;
+      }
+      #hidden-later {
+        left: 20px;
+        top: 260px;
+      }
+      /* 스크롤 컨테이너 위의 회색 판. 영상이 컨테이너 안에서 위로 완전히 가려지면 표시창 자리가 이 판 위에 온다. */
+      #above {
+        position: absolute;
+        left: 400px;
+        top: 0;
+        width: 380px;
+        height: 300px;
+        background: rgb(200 200 200);
+      }
+      #scroller {
+        position: absolute;
+        left: 400px;
+        top: 300px;
+        width: 380px;
+        height: 200px;
+        overflow: auto;
+      }
+      #scroller video {
+        position: static;
+        display: block;
+        margin-top: 40px;
+      }
+      #scroller .rest {
+        height: 600px;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="plain"></video>
+    <video id="hidden-later"></video>
+    <div id="above"></div>
+    <div id="scroller">
+      <video id="clipped"></video>
+      <div class="rest"></div>
+    </div>
+  </body>
+</html>
