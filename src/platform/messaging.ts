@@ -1,5 +1,5 @@
 import { type RequestDefinition, responseSchema } from '../contracts/index.ts';
-import { type AppError, type Result, appError, err } from '../shared/index.ts';
+import { type AppError, type Result, appError, err, withTimeout } from '../shared/index.ts';
 
 // chrome.runtime 메시지를 감싼다. 요청과 응답은 contracts의 정의로 검증한다(결정 0006).
 
@@ -23,21 +23,14 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
     // 연결이 끊긴 옛 스크립트에서는 chrome.runtime 자체가 없어지기도 한다(결정 0008 고친 기록).
     // 그때 부르면 TypeError가 나므로 먼저 확인한다.
     if (!isExtensionConnected()) return disconnected();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<'timeout'>((resolve) => {
-      timer = setTimeout(() => {
-        resolve('timeout');
-      }, timeoutMs);
-    });
     try {
-      const response: unknown = await Promise.race([
+      const response = await withTimeout(timeoutMs, (): Promise<unknown> =>
         chrome.runtime.sendMessage({ type: definition.type, payload }),
-        timeout,
-      ]);
-      if (response === 'timeout') {
+      );
+      if (!response.done) {
         return err(appError('timeout', '확장의 응답이 없다. 잠시 뒤 다시 한다.'));
       }
-      const parsed = responseSchema(definition.value).safeParse(response);
+      const parsed = responseSchema(definition.value).safeParse(response.value);
       if (!parsed.success) {
         return err(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
       }
@@ -46,8 +39,6 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
       // 보내는 도중에 끊긴 경우도 끊김으로 본다.
       if (isDisconnected(error) || !isExtensionConnected()) return disconnected();
       return err(appError('platform', '확장에 요청을 보내지 못했다.'));
-    } finally {
-      clearTimeout(timer);
     }
   };
 }
