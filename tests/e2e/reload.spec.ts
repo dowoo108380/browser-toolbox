@@ -1,4 +1,4 @@
-import type { Frame } from '@playwright/test';
+import type { BrowserContext, Frame } from '@playwright/test';
 import { connectBrowserCdp } from './support/browser-cdp.ts';
 import {
   distPath,
@@ -17,6 +17,46 @@ import {
 // 보안 문맥에서만 있는 API가 없으므로, 루프백 출처(보안 문맥)와 일반 http 출처에서 같은 일을 확인한다.
 
 test.use({ browserDebugging: true });
+
+async function reloadExtension(profileDirectory: string, extensionId: string) {
+  const cdp = await connectBrowserCdp(profileDirectory);
+  try {
+    expect(await cdp.send('Extensions.loadUnpacked', { path: distPath })).toEqual({
+      id: extensionId,
+    });
+  } finally {
+    cdp.close();
+  }
+}
+
+// 다시 불러온 판의 서비스 워커가 정리를 마치고 남긴 문제 기록(COM-5). 정리가 끝났다는 신호가 없어, 정리가 페이지에
+// 닿은 것을 본 뒤 기록이 남을 틈(1.5초)을 두고 읽는다.
+async function problemsAfterRetire(context: BrowserContext, extensionId: string) {
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const page = await openPopup(context, extensionId);
+  try {
+    return await page.evaluate(async (): Promise<unknown> => {
+      const items: Record<string, unknown> = await chrome.storage.local.get('problems');
+      return items['problems'] ?? [];
+    });
+  } finally {
+    await page.close();
+  }
+}
+
+// 문서에 물러남 이벤트가 닿은 횟수를 페이지 쪽에서 센다(결정 0008의 주된 방법).
+async function countRetireEvents(frame: Frame) {
+  await frame.evaluate(() => {
+    document.documentElement.dataset['retireEvents'] = '0';
+    document.addEventListener('browser-toolbox:retire', () => {
+      const count = Number(document.documentElement.dataset['retireEvents']);
+      document.documentElement.dataset['retireEvents'] = String(count + 1);
+    });
+  });
+}
+
+const retireEvents = (frame: Frame) =>
+  frame.evaluate(() => document.documentElement.dataset['retireEvents']);
 
 const origins = [
   { label: '루프백 출처(보안 문맥)', origin: fixtureOrigin, secure: true },
@@ -43,16 +83,7 @@ for (const { label, origin, secure } of origins) {
     for (const frame of frames) {
       expect(await frame.evaluate(() => isSecureContext)).toBe(secure);
     }
-    // 새 버전이 보낸 물러남 이벤트가 각 문서에 닿는지 페이지 쪽에서 센다(결정 0008의 주된 방법).
-    for (const frame of frames) {
-      await frame.evaluate(() => {
-        document.documentElement.dataset['retireEvents'] = '0';
-        document.addEventListener('browser-toolbox:retire', () => {
-          const count = Number(document.documentElement.dataset['retireEvents']);
-          document.documentElement.dataset['retireEvents'] = String(count + 1);
-        });
-      });
-    }
+    for (const frame of frames) await countRetireEvents(frame);
 
     const popup = await openPopup(context, extensionId);
     await popup.getByRole('switch', { name: '미디어 배속' }).check();
@@ -73,21 +104,49 @@ for (const { label, origin, secure } of origins) {
       expect(await hostCount(frame)).toBe(2);
     }
 
-    const cdp = await connectBrowserCdp(profileDirectory);
-    try {
-      const result = await cdp.send('Extensions.loadUnpacked', { path: distPath });
-      expect(result).toEqual({ id: extensionId });
-    } finally {
-      cdp.close();
-    }
+    await reloadExtension(profileDirectory, extensionId);
 
     for (const frame of frames) {
-      await expect
-        .poll(() => frame.evaluate(() => document.documentElement.dataset['retireEvents']))
-        .not.toBe('0');
+      await expect.poll(() => retireEvents(frame)).not.toBe('0');
       await expect.poll(() => hostCount(frame)).toBe(0);
     }
     expect(await page.evaluate(() => document.querySelector('video')?.playbackRate)).toBe(2);
     expect(pageErrors).toEqual([]);
+    // 정리 함수가 모든 프레임에서 끝까지 돌았으면 새 판은 문제를 기록하지 않는다. 함수가 페이지에서 예외를 내면
+    // 여기에 unexpected가 남는다(quality 067, 2026-10-14 전에는 흔적 없이 지나갔다).
+    expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
   });
 }
+
+test('COM-7 결정 0008 다시 불러올 때 스크립트를 넣을 수 없는 탭(오류 페이지, 버려진 탭)은 문제로 기록하지 않는다', async ({
+  context,
+  extensionId,
+  profileDirectory,
+}) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureOrigin}/blank.html`);
+  await countRetireEvents(page.mainFrame());
+  // 연결이 거부되는 주소. Chrome이 오류 페이지를 보이고 주소는 http 그대로라 정리할 탭 목록에 든다.
+  const errorPage = await context.newPage();
+  await errorPage.goto('http://127.0.0.1:9/').catch(() => undefined);
+  // 버려진(discarded) 탭. 보고 있는 탭은 버릴 수 없어 다른 탭을 앞에 둔다.
+  const discardUrl = `${fixtureOrigin}/video-only.html`;
+  const toDiscard = await context.newPage();
+  await toDiscard.goto(discardUrl);
+  await page.bringToFront();
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('서비스 워커가 없다.');
+  expect(
+    await worker.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((candidate) => candidate.url === url);
+      if (tab?.id === undefined) return false;
+      return (await chrome.tabs.discard(tab.id))?.discarded ?? false;
+    }, discardUrl),
+  ).toBe(true);
+
+  await reloadExtension(profileDirectory, extensionId);
+
+  // 넣을 수 있는 탭에는 정리가 닿았고, 넣을 수 없는 두 탭의 거절은 문제 기록에 남지 않는다.
+  await expect.poll(() => retireEvents(page.mainFrame())).not.toBe('0');
+  expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+});

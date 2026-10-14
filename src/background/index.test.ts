@@ -2,13 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { specs, stored } from '../../tests/support/settings.ts';
 import { createFakeLocalStore } from '../platform/fake.ts';
 import type { LocalStore } from '../platform/index.ts';
+import { type AppError, appError } from '../shared/index.ts';
 import { settingsFormat, settingsKey } from '../storage/index.ts';
 import { startBackground } from './index.ts';
 
 // 서비스 워커가 시작할 때 하는 일(결정 0011 "형식 이전과 고쳐 쓰기", quality 067).
 
-function start(store: LocalStore) {
+// 돌려준 함수를 부르면 설치·갱신 이벤트가 온 것처럼 한다.
+function start(
+  store: LocalStore,
+  retire: () => Promise<readonly AppError[]> = () => Promise.resolve([]),
+) {
   const clock = { time: 1_790_000_000_000 };
+  let installed: () => void = () => undefined;
   startBackground({
     features: specs,
     format: settingsFormat,
@@ -19,9 +25,14 @@ function start(store: LocalStore) {
       return Promise.resolve();
     },
     listenRequests: () => undefined,
-    onInstalled: () => undefined,
-    retireOldScripts: () => Promise.resolve(),
+    onInstalled: (listener) => {
+      installed = listener;
+    },
+    retireOldScripts: retire,
   });
+  return () => {
+    installed();
+  };
 }
 
 // 문제 기록에 남은 종류들.
@@ -70,5 +81,37 @@ describe('서비스 워커 시작', () => {
     await settle();
     expect(recordedKinds(store)).toEqual(['unexpected']);
     expect(store.peek(settingsKey)).toEqual(value);
+  });
+});
+
+describe('설치·갱신 때 옛 스크립트 정리(결정 0008)', () => {
+  it('quality 067 정리가 알린 문제를 종류마다 한 번 기록한다(탭이 많아도 문제 기록을 채우지 않게)', async () => {
+    const store = createFakeLocalStore();
+    const install = start(store, () =>
+      Promise.resolve([
+        appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'),
+        appError('unexpected', '정리 함수가 끝까지 돌지 못했다.'),
+        appError('platform', '넣지 못했다.'),
+      ]),
+    );
+    await settle();
+    install();
+    await vi.waitFor(() => {
+      expect(recordedKinds(store)).toEqual(['unexpected', 'platform']);
+    });
+    await settle();
+    expect(recordedKinds(store)).toEqual(['unexpected', 'platform']);
+  });
+
+  it('알린 문제가 없으면 기록하지 않고, 정리 자체가 실패하면 platform을 기록한다', async () => {
+    const quiet = createFakeLocalStore();
+    start(quiet)();
+    await settle();
+    expect(recordedKinds(quiet)).toEqual([]);
+    const failing = createFakeLocalStore();
+    start(failing, () => Promise.reject(new Error('tabs.query 실패')))();
+    await vi.waitFor(() => {
+      expect(recordedKinds(failing)).toEqual(['platform']);
+    });
   });
 });

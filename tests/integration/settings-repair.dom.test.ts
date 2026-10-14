@@ -62,7 +62,7 @@ function startServiceWorker(store: LocalStore) {
       handle = listener;
     },
     onInstalled: () => undefined,
-    retireOldScripts: () => Promise.resolve(),
+    retireOldScripts: () => Promise.resolve([]),
   });
   const held = new Set<string>();
   const requests = gate();

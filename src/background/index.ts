@@ -6,7 +6,7 @@ import {
   storageEnsureReady,
 } from '../contracts/index.ts';
 import type { LocalStore, Sender } from '../platform/index.ts';
-import { ok } from '../shared/index.ts';
+import { type AppError, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
 import { createProblemLog } from './problems.ts';
 import { createRepairNoticeLog } from './repair-notice.ts';
@@ -24,8 +24,8 @@ export interface BackgroundDeps {
     handle: (message: unknown, sender: Sender) => Promise<unknown>,
   ) => unknown;
   readonly onInstalled: (listener: () => void) => void;
-  // 열린 탭의 옛 스크립트에게 물러나라고 알린다(결정 0008).
-  readonly retireOldScripts: () => Promise<void>;
+  // 열린 탭의 옛 스크립트에게 물러나라고 알린다(결정 0008). 넣을 수 없는 탭이 아닌데 실패한 것을 돌려준다.
+  readonly retireOldScripts: () => Promise<readonly AppError[]>;
 }
 
 export function startBackground(deps: BackgroundDeps): void {
@@ -60,9 +60,17 @@ export function startBackground(deps: BackgroundDeps): void {
   );
   deps.listenRequests(router);
   deps.onInstalled(() => {
-    deps.retireOldScripts().catch(() => {
-      record({ featureId: null, kind: 'platform' });
-    });
+    deps
+      .retireOldScripts()
+      .then((errors) => {
+        // 탭이 많아도 문제 기록(최근 100개)을 채우지 않게 종류마다 한 번 남긴다(quality 067).
+        for (const kind of new Set(errors.map((error) => error.kind))) {
+          record({ featureId: null, kind });
+        }
+      })
+      .catch(() => {
+        record({ featureId: null, kind: 'platform' });
+      });
   });
   // 서비스 워커가 시작할 때 설정을 준비한다(처음 설치, 손상, 옛 형식). 실패 결과도 버리지 않고 기록한다(quality 067).
   // 읽는 쪽은 준비되지 않은 설정을 보면 storage.ensureReady로 다시 부탁한다(결정 0011).

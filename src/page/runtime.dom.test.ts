@@ -216,7 +216,10 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
     const runtime = setup([hostPart], true);
     runtime.apply(snapshot({ host: { enabled: true } }));
     const stale = staleElement();
-    retireInFrame(retireEventName, pageElementAttribute, claimAttribute, 'service-worker-token');
+    // 끝까지 돌면 참을 돌려준다. 새 판은 이 값으로 프레임마다 정리가 끝났는지 본다.
+    expect(
+      retireInFrame(retireEventName, pageElementAttribute, claimAttribute, 'service-worker-token'),
+    ).toBe(true);
     expect(stale.isConnected).toBe(false);
     expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
   });
