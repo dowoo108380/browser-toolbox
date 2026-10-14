@@ -437,6 +437,28 @@ describe('결정 0008 보조 방법: 물러남 이벤트 없이 연결만 끊긴
     expect(runtime.unsubscribed()).toBe(1);
   });
 
+  it('COM-7.2 한 기능이 시작하는 도중에 연결이 끊긴 것을 알아 물러나도, 같은 적용에서 그 뒤에 시작한 기능까지 모두 정리된다', () => {
+    let connected = true;
+    // 시작하면서 자기가 듣는 페이지 사건을 곧바로 일으키는 기능. 그 콜백 앞에서 실행 틀이 연결을 확인한다.
+    const early: PagePart = {
+      featureId: 'early',
+      start: (value, { scope }) => {
+        if (!isEnabled(value, 'early')) return;
+        scope.listen(document, 'test-early', () => undefined);
+        connected = false;
+        document.dispatchEvent(new Event('test-early'));
+      },
+    };
+    const late = countingPart('late');
+    const runtime = setup([early, late.part], true);
+    runtime.deps.isConnected = () => connected;
+    runtime.apply(snapshot({ early: { enabled: true }, late: { enabled: true } }));
+    expect(runtime.unsubscribed()).toBe(1);
+    expect(late.counts).toMatchObject({ started: 1, disposed: 1 });
+    ping();
+    expect(late.counts.pings).toBe(0);
+  });
+
   it('연결이 살아 있으면 보이기·이동·페이지 사건에도 물러나지 않는다', () => {
     const a = countingPart('a');
     const runtime = setup([a.part], true);

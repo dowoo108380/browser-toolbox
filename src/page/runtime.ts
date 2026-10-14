@@ -60,10 +60,24 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   // 시작하는 방법: 이 실행의 자원 범위를 받아 기능을 시작한다.
   type Start = (scope: Scope) => void;
 
+  // 사건은 하나씩 끝까지 처리한다(run-to-completion). 할 일을 하는 도중에 생긴 사건(시작 도중의 실패, 연결이 끊겨
+  // 물러남)은 줄에 두었다가 지금 사건의 할 일을 모두 마친 뒤 처리한다. 그러지 않으면 바로 처리한 사건 뒤에 남은
+  // 할 일이 그 사건이 만든 상태와 어긋난다(예: 모두 멈춘 뒤에 남은 'start'가 기능을 시작해 정리되지 않고 남음).
+  const queue: LifecycleEvent<Start>[] = [];
+  let dispatching = false;
   const dispatch = (event: LifecycleEvent<Start>) => {
-    const next = transition(lifecycle, event);
-    lifecycle = next.state;
-    for (const effect of next.effects) perform(effect);
+    queue.push(event);
+    if (dispatching) return;
+    dispatching = true;
+    try {
+      for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+        const result = transition(lifecycle, next);
+        lifecycle = result.state;
+        for (const effect of result.effects) perform(effect);
+      }
+    } finally {
+      dispatching = false;
+    }
   };
 
   // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
