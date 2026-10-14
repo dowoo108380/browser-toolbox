@@ -32,8 +32,8 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      // 핵심 로직(quality 015, 102): 설정 해석과 형식 이전, 기능의 core/.
-      include: ['src/storage/**/*.ts', 'src/features/*/core/**/*.ts'],
+      // 핵심 로직(quality 015, 102): 설정 해석과 형식 이전, 기능의 core/, 상태 기계(quality 062).
+      include: ['src/storage/**/*.ts', 'src/features/*/core/**/*.ts', 'src/page/lifecycle.ts'],
       exclude: ['**/*.test.ts', '**/index.ts'],
       thresholds: { lines: 90 },
     },

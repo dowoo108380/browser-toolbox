@@ -8,6 +8,7 @@
   "mutate": [
     "src/storage/**/*.ts",
     "src/features/*/core/**/*.ts",
+    "src/page/lifecycle.ts",
     "!src/**/*.test.ts",
     "!src/**/index.ts"
   ],

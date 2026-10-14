@@ -2,6 +2,12 @@ import { retireEventName } from '../contracts/index.ts';
 import { type Scope, claimOwnedHosts, createScope } from '../dom/index.ts';
 import type { AppError, ErrorKind, Result } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
+import {
+  type LifecycleEffect,
+  type LifecycleEvent,
+  initialLifecycle,
+  transition,
+} from './lifecycle.ts';
 import type { PageContext, PagePart } from './part.ts';
 
 // 콘텐츠 스크립트 실행 틀(아키텍처 2·3장). 설정을 구독해 기능을 시작하고 정리한다.
@@ -28,9 +34,10 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   let retired = false;
   let unsubscribe: () => void = () => undefined;
 
-  // 기능마다 마지막으로 적용한 설정(JSON)과 그때 만든 자원 범위. 실패해 멈춘 기능은 범위가 null이고,
-  // 그 기능의 설정이 바뀔 때까지 다시 시작하지 않는다(quality 010).
-  const running = new Map<string, { readonly key: string; readonly scope: Scope | null }>();
+  // 기능의 켜기·끄기 수명은 상태 기계(lifecycle.ts)가 정하고, 실행 틀은 그 할 일만 한다(quality 062).
+  // 상태 기계는 실행 번호만 알고, 그 실행의 자원 범위는 여기 둔다. 'start'가 만들고 'close'가 닫고 지운다.
+  let lifecycle = initialLifecycle;
+  const scopes = new Map<number, Scope>();
 
   const report = (featureId: string | null, kind: ErrorKind) => {
     void deps.report(featureId, kind).then((result) => {
@@ -50,46 +57,62 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     return false;
   };
 
-  // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
-  // 다른 기능과 실행 틀은 그대로 돈다.
-  const fail = (featureId: string, scope: Scope) => {
-    report(featureId, 'unexpected');
-    const entry = running.get(featureId);
-    if (entry?.scope === scope) running.set(featureId, { key: entry.key, scope: null });
-    scope.close();
+  // 시작하는 방법: 이 실행의 자원 범위를 받아 기능을 시작한다.
+  type Start = (scope: Scope) => void;
+
+  const dispatch = (event: LifecycleEvent<Start>) => {
+    const next = transition(lifecycle, event);
+    lifecycle = next.state;
+    for (const effect of next.effects) perform(effect);
   };
 
-  const stop = (featureId: string) => {
-    const scope = running.get(featureId)?.scope;
-    running.delete(featureId);
-    scope?.close();
+  // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
+  // 다른 기능과 실행 틀은 그대로 돈다.
+  const perform = (effect: LifecycleEffect<Start>) => {
+    switch (effect.type) {
+      case 'start': {
+        const fail = () => {
+          dispatch({ type: 'fail', featureId: effect.featureId, run: effect.run });
+        };
+        // 시작 도중 콜백이 실패해도 'close'가 이 범위를 찾을 수 있게 먼저 둔다.
+        const scope = createScope({ onError: fail, isLive: checkConnection });
+        scopes.set(effect.run, scope);
+        try {
+          effect.start(scope);
+        } catch {
+          // 시작 도중의 예외: 그때까지 범위에 맡긴 자원을 치우고 기록한다.
+          fail();
+        }
+        return;
+      }
+      case 'close': {
+        const scope = scopes.get(effect.run);
+        scopes.delete(effect.run);
+        scope?.close();
+        return;
+      }
+      case 'report':
+        report(effect.featureId, 'unexpected');
+        return;
+    }
   };
 
   const stopAll = () => {
-    for (const featureId of [...running.keys()]) stop(featureId);
+    dispatch({ type: 'stopAll' });
   };
 
-  // 바뀐 기능만 다시 적용한다(결정 0011 읽는 쪽 계약 5).
+  // 바뀐 기능만 다시 적용한다(결정 0011 읽는 쪽 계약 5). 기능마다 그 기능의 설정(JSON)이 key다.
   const apply = (snapshot: Snapshot) => {
-    for (const part of deps.parts) {
-      const key = JSON.stringify(snapshot.features.get(part.featureId) ?? null);
-      if (running.get(part.featureId)?.key === key) continue;
-      stop(part.featureId);
-      const scope: Scope = createScope({
-        onError: () => {
-          fail(part.featureId, scope);
+    dispatch({
+      type: 'apply',
+      desired: deps.parts.map((part) => ({
+        featureId: part.featureId,
+        key: JSON.stringify(snapshot.features.get(part.featureId) ?? null),
+        start: (scope: Scope) => {
+          part.start(snapshot, { ...deps.context, scope });
         },
-        isLive: checkConnection,
-      });
-      // 시작 도중 콜백이 실패해도 fail이 이 범위를 찾을 수 있게 먼저 둔다.
-      running.set(part.featureId, { key, scope });
-      try {
-        part.start(snapshot, { ...deps.context, scope });
-      } catch {
-        // 시작 도중의 예외: 그때까지 범위에 맡긴 자원을 치우고 기록한다.
-        fail(part.featureId, scope);
-      }
-    }
+      })),
+    });
   };
 
   // 웹 페이지도 이 이벤트를 보낼 수 있다. 연결이 실제로 끊겼을 때만 따른다(결정 0008).
