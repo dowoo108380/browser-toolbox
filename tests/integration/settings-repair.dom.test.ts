@@ -1,16 +1,13 @@
 import { h, render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startBackground } from '../../src/background/index.ts';
 import {
   repairNoticeDismiss,
-  responseSchema,
   settingsUpdate,
   storageEnsureReady,
 } from '../../src/contracts/index.ts';
 import { type FakeLocalStore, createFakeLocalStore } from '../../src/platform/fake.ts';
-import type { LocalStore, Requester, Sender } from '../../src/platform/index.ts';
-import { appError, err } from '../../src/shared/index.ts';
+import type { LocalStore, Requester } from '../../src/platform/index.ts';
 import {
   parseRepairNotice,
   repairNoticeKey,
@@ -20,6 +17,7 @@ import {
   watchRepairNotice,
 } from '../../src/storage/index.ts';
 import { PopupApp } from '../../src/ui/index.ts';
+import { startTestBackground } from '../support/background.ts';
 import { specs, stored } from '../support/settings.ts';
 
 // 설정 손상과 복구 알림(COM-3.4, 결정 0016)을 실제 모듈끼리 연결해 본다. 가짜는 Chrome 경계뿐이다:
@@ -45,40 +43,17 @@ function gate() {
   };
 }
 
-// 서비스 워커를 시작하고, 팝업이 쓰는 요청 함수를 돌려준다. holdTypes의 요청은 놓아줄 때까지 서비스 워커에 닿지 않는다.
+// 서비스 워커를 시작하고, 팝업이 쓰는 요청 함수를 돌려준다. holdRequests로 붙잡은 종류의 요청은 놓아줄 때까지
+// 서비스 워커에 닿지 않는다.
 function startServiceWorker(store: LocalStore) {
-  let handle: ((message: unknown, sender: Sender) => Promise<unknown>) | undefined;
-  const clock = { time: t };
-  startBackground({
-    features: specs,
-    format: settingsFormat,
-    store,
-    now: () => clock.time,
-    sleep: (ms) => {
-      clock.time += ms;
-      return Promise.resolve();
-    },
-    listenRequests: (listener) => {
-      handle = listener;
-    },
-    onInstalled: () => undefined,
-    retireOldScripts: () => Promise.resolve(),
-  });
   const held = new Set<string>();
   const requests = gate();
-  // chromeRequester처럼 메시지를 구조화 복제로 건네고, 응답을 그 요청의 정의로 검증한다.
-  const request: Requester = async (definition, payload) => {
-    const deliver = async (): Promise<unknown> => {
-      if (handle === undefined) throw new Error('서비스 워커가 요청을 듣지 않는다.');
-      const message = structuredClone({ type: definition.type, payload });
-      return structuredClone(await handle(message, { kind: 'extension' }));
-    };
-    const response = await (held.has(definition.type) ? requests.hold(deliver) : deliver());
-    const parsed = responseSchema(definition.value).safeParse(response);
-    return parsed.success
-      ? parsed.data
-      : err(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
-  };
+  const request = startTestBackground({
+    store,
+    features: specs,
+    startTime: t,
+    deliver: (type, send) => (held.has(type) ? requests.hold(send) : send()),
+  });
   return {
     request,
     holdRequests: (type: string) => held.add(type),
