@@ -1,4 +1,5 @@
 import type { BrowserContext, Frame } from '@playwright/test';
+import { problemReport } from '../../src/contracts/index.ts';
 import { retireTimeoutMs } from '../../src/platform/index.ts';
 import { connectBrowserCdp } from './support/browser-cdp.ts';
 import {
@@ -30,7 +31,7 @@ async function reloadExtension(profileDirectory: string, extensionId: string) {
   }
 }
 
-// 지금의 문제 기록(COM-5).
+// 지금 저장되어 있는 문제 기록(COM-5). 줄에 선 기록의 저장이 끝났는지는 보지 않으므로, 있을 기록을 기다릴 때만 쓴다.
 async function readProblems(context: BrowserContext, extensionId: string): Promise<unknown> {
   const page = await openPopup(context, extensionId);
   try {
@@ -43,17 +44,53 @@ async function readProblems(context: BrowserContext, extensionId: string): Promi
   }
 }
 
-// 정리가 알린 문제를 서비스 워커가 문제 기록에 다 쓰는 데 주는 여유.
-const recordMarginMs = 1000;
+// 문제 기록의 끝 표식. 시험만 쓰는 기능 id라 제품이 남기는 기록과 섞이지 않는다.
+const endMarker = { featureId: 'e2e-end-marker', kind: 'cancelled' } as const;
 
-// 다시 불러온 판의 서비스 워커가 정리를 마치고 남긴 문제 기록. 정리가 페이지에 닿은 것을 본 뒤 바로 부른다.
-// 정리가 끝났다는 신호는 없다(시험만을 위한 신호를 제품에 두지 않는다). 대신 설계가 보장하는 상한까지 기다린다:
-// 모든 탭의 기다림은 탭 목록을 얻은 직후 함께 시작하고(정리가 페이지에 닿은 것은 그 뒤다), 탭마다 retireTimeoutMs 안에
-// 끝나거나 timeout으로 알린다. 그 뒤에 온 결과는 버린다(결정 0008). 끝까지 돌지 못한 문서에 다시 넣은 뒤의 기록처럼
-// 늦게 남는 것도 이 안에 든다.
+const isEndMarker = (record: unknown) =>
+  typeof record === 'object' &&
+  record !== null &&
+  'featureId' in record &&
+  record.featureId === endMarker.featureId;
+
+// 이미 줄에 선 문제 기록이 모두 저장된 뒤의 기록(표식은 뺀다). 서비스 워커는 문제 기록을 한 줄에서 들어온 차례대로
+// 저장하고, problem.report에는 그 줄에서 저장을 마친 뒤 응답한다(결정 0006). 그래서 표식을 보내고 응답을 받은 뒤
+// 읽으면 그 전에 줄에 선 기록은 저장이 얼마나 걸렸든 모두 들어 있다. 시험만을 위한 신호를 제품에 두지 않고 이 동작을 쓴다.
+async function settledProblems(context: BrowserContext, extensionId: string): Promise<unknown[]> {
+  const page = await openPopup(context, extensionId);
+  try {
+    const { response, problems } = await page.evaluate(
+      async ({ type, payload }) => {
+        const answer: unknown = await chrome.runtime.sendMessage({ type, payload });
+        const items: Record<string, unknown> = await chrome.storage.local.get('problems');
+        return { response: answer, problems: items['problems'] ?? [] };
+      },
+      { type: problemReport.type, payload: endMarker },
+    );
+    expect(response).toEqual({ ok: true, value: null });
+    if (!Array.isArray(problems)) throw new Error('문제 기록이 배열이 아니다.');
+    const records: unknown[] = problems;
+    expect(records.filter(isEndMarker)).toHaveLength(1);
+    return records.filter((record) => !isEndMarker(record));
+  } finally {
+    await page.close();
+  }
+}
+
+// 서비스 워커의 타이머가 정한 때보다 늦게 도는 틈에 주는 여유(아래 problemsAfterRetire의 가정).
+const timerSlackMs = 1000;
+
+// 다시 불러온 판의 정리가 남긴 문제 기록. 정리가 페이지에 닿은 것을 본 뒤 바로 부른다. 보는 범위와 가정:
+// - 정리는 모든 탭의 기다림을 탭 목록을 얻은 직후 함께 시작하고(정리가 페이지에 닿은 것은 그 뒤), 탭마다
+//   retireTimeoutMs 안에 끝나거나 timeout으로 알리며 그 뒤의 결과는 버린다(결정 0008). 서비스 워커는 알린 문제를 그
+//   자리에서 문제 기록의 줄에 세운다. 그래서 retireTimeoutMs가 지나면 정리가 시킨 기록은 모두 줄에 서 있다. 다만
+//   서비스 워커의 타이머가 timerSlackMs보다 늦게 돌지 않는다고 본다(타이머가 도는 때에는 계약이 없다).
+// - 줄에 선 기록이 저장되는 때에도 계약이 없으므로 시간으로 기다리지 않고 settledProblems로 확인한다.
+// - 옛 콘텐츠 스크립트가 보내는 문제 알림(이슈 2의 시험)은 다시 불러온 뒤 disconnectSettleMs(0.5초)가 지나 보내므로
+//   이때까지 줄에 선다고 본다(그 메시지가 수 초씩 늦지 않는다고 본다).
 async function problemsAfterRetire(context: BrowserContext, extensionId: string) {
-  await new Promise((resolve) => setTimeout(resolve, retireTimeoutMs + recordMarginMs));
-  return readProblems(context, extensionId);
+  await new Promise((resolve) => setTimeout(resolve, retireTimeoutMs + timerSlackMs));
+  return settledProblems(context, extensionId);
 }
 
 // 문서에 물러남 이벤트가 닿은 횟수를 페이지 쪽에서 센다(결정 0008의 주된 방법).
@@ -286,8 +323,9 @@ test('COM-7 결정 0008 quality 068 주 스레드가 붙잡힌 탭은 다른 탭
     .toEqual([expect.objectContaining({ featureId: null, kind: 'timeout' })]);
   const seenAt = Date.now();
   expect(seenAt).toBeLessThan(await busy);
-  // 그 탭이 풀린 때(12초)는 정리의 상한(다시 불러온 뒤 retireTimeoutMs와 여유)이 지난 뒤다. 그 사이 더 남은 기록이 없다.
-  expect(await readProblems(context, extensionId)).toEqual([
+  // 그 탭이 풀린 때(12초)는 정리가 기록을 시킬 수 있는 때(다시 불러온 뒤 retireTimeoutMs와 여유)가 지난 뒤다.
+  // 줄에 선 기록이 모두 저장된 뒤에도 기록은 timeout 하나뿐이다.
+  expect(await settledProblems(context, extensionId)).toEqual([
     expect.objectContaining({ featureId: null, kind: 'timeout' }),
   ]);
 });

@@ -19,12 +19,23 @@ const after = <T>(ms: number, value: T) =>
     }, ms);
   });
 
+type MessageListener = (
+  message: unknown,
+  sender: unknown,
+  sendResponse: (response: unknown) => void,
+) => boolean;
+
+const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
+
 function fakeChrome(
   store: FakeLocalStore,
   tabs: readonly { readonly id: number }[],
   executeScript: (injection: Injection) => Promise<unknown>,
+  // 문제 기록(problems)을 저장하는 데 걸리는 시간. 저장의 끝에는 계약이 없다.
+  problemsSaveMs = 0,
 ) {
   let installed: (() => void) | undefined;
+  let onMessage: MessageListener | undefined;
   vi.stubGlobal('chrome', {
     storage: {
       local: {
@@ -32,12 +43,21 @@ function fakeChrome(
           const value = store.peek(key);
           return Promise.resolve(value === undefined ? {} : { [key]: value });
         },
-        set: (items: Readonly<Record<string, unknown>>) => store.set(items),
+        set: async (items: Readonly<Record<string, unknown>>) => {
+          if ('problems' in items && problemsSaveMs > 0) await after(problemsSaveMs, null);
+          await store.set(items);
+        },
       },
       onChanged: { addListener: () => undefined, removeListener: () => undefined },
     },
     runtime: {
-      onMessage: { addListener: () => undefined },
+      id: extensionId,
+      getURL: (path: string) => `chrome-extension://${extensionId}/${path}`,
+      onMessage: {
+        addListener: (listener: MessageListener) => {
+          onMessage = listener;
+        },
+      },
       onInstalled: {
         addListener: (listener: () => void) => {
           installed = listener;
@@ -52,6 +72,13 @@ function fakeChrome(
       if (installed === undefined) throw new Error('서비스 워커가 설치 이벤트를 듣지 않는다.');
       installed();
     },
+    // 콘텐츠 스크립트가 보낸 것처럼 서비스 워커에 요청을 보내고 응답을 돌려준다.
+    send: (message: unknown) =>
+      new Promise<unknown>((resolve) => {
+        if (onMessage === undefined) throw new Error('서비스 워커가 요청을 듣지 않는다.');
+        const sender = { id: extensionId, origin: 'http://a.test', tab: { id: 1 }, frameId: 0 };
+        onMessage(message, sender, resolve);
+      }),
   };
 }
 
@@ -123,5 +150,30 @@ describe('설치·갱신 때 옛 스크립트 정리의 기다림(결정 0008, a
     // 제한 시간이 지나도 더 남지 않는다(이 탭은 이미 끝났다).
     await vi.advanceTimersByTimeAsync(5000);
     expect(recordedKinds(store)).toEqual(['unexpected']);
+  });
+
+  it('quality 067 문제 기록의 저장이 늦어도, 정리가 기록을 시킨 뒤 보낸 문제 알림에 응답이 오면 그 기록은 저장되어 있다(확장 전체 시험이 기록을 읽는 방법)', async () => {
+    const store = createFakeLocalStore();
+    // 응답하지 않는 탭이라 5초에 timeout을 기록하게 시키고, 문제 기록은 저장마다 2초가 걸린다.
+    const chrome = fakeChrome(store, [{ id: 1 }], () => new Promise(() => undefined), 2000);
+    await import('../../src/entries/sw.ts');
+    await vi.advanceTimersByTimeAsync(10);
+    chrome.install();
+    // 확장 전체 시험이 예전에 기록을 읽던 때(정리의 제한 시간 5초와 여유 1초)에는 아직 저장되지 않았다.
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(recordedKinds(store)).toEqual([]);
+    // 끝 표식을 문제 알림으로 보낸다. 서비스 워커는 같은 줄에서 앞의 기록(7초에 저장)과 표식(9초에 저장)을 차례로
+    // 저장한 뒤 응답한다.
+    let answer: unknown;
+    void chrome
+      .send({ type: 'problem.report', payload: { featureId: 'marker', kind: 'cancelled' } })
+      .then((response) => {
+        answer = response;
+      });
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(answer).toEqual({ ok: true, value: null });
+    expect(recordedKinds(store)).toEqual(['timeout', 'cancelled']);
   });
 });
