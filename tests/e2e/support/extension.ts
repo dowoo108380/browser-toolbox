@@ -3,6 +3,7 @@ import {
   type BrowserContext,
   type Frame,
   type Page,
+  type Worker,
   test as base,
   chromium,
 } from '@playwright/test';
@@ -18,6 +19,31 @@ export const insecureFixtureOrigin = 'http://insecure.test:4173';
 
 export const distPath = path.resolve(import.meta.dirname, '..', '..', '..', 'dist');
 
+// 빌드한 확장을 올린 Chromium을 그 프로필로 띄운다. 닫은 뒤 같은 프로필로 다시 띄우면 브라우저를 다시 시작한 것이다.
+// browserDebugging이 참이면 브라우저 수준 CDP에 붙을 수 있게 띄운다(확장 다시 불러오기, R-04).
+export function launchWithExtension(
+  profileDirectory: string,
+  browserDebugging = false,
+): Promise<BrowserContext> {
+  return chromium.launchPersistentContext(profileDirectory, {
+    // 이 채널이어야 headless에서도 확장이 돈다(Playwright 문서).
+    channel: 'chromium',
+    args: [
+      `--disable-extensions-except=${distPath}`,
+      `--load-extension=${distPath}`,
+      `--host-resolver-rules=MAP ${new URL(insecureFixtureOrigin).hostname} 127.0.0.1`,
+      ...(browserDebugging
+        ? ['--remote-debugging-port=0', '--enable-unsafe-extension-debugging']
+        : []),
+    ],
+  });
+}
+
+// 확장의 서비스 워커. 아직 뜨지 않았으면 뜰 때까지 기다린다.
+export async function serviceWorkerOf(context: BrowserContext): Promise<Worker> {
+  return context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
+}
+
 export const test = base.extend<{
   // 참이면 브라우저 수준 CDP에 붙을 수 있게 띄운다(확장 다시 불러오기, R-04).
   browserDebugging: boolean;
@@ -31,24 +57,13 @@ export const test = base.extend<{
     await use(testInfo.outputPath('profile'));
   },
   context: async ({ browserDebugging, profileDirectory }, use) => {
-    const context = await chromium.launchPersistentContext(profileDirectory, {
-      // 이 채널이어야 headless에서도 확장이 돈다(Playwright 문서).
-      channel: 'chromium',
-      args: [
-        `--disable-extensions-except=${distPath}`,
-        `--load-extension=${distPath}`,
-        `--host-resolver-rules=MAP ${new URL(insecureFixtureOrigin).hostname} 127.0.0.1`,
-        ...(browserDebugging
-          ? ['--remote-debugging-port=0', '--enable-unsafe-extension-debugging']
-          : []),
-      ],
-    });
+    const context = await launchWithExtension(profileDirectory, browserDebugging);
     await use(context);
+    // 시험이 먼저 닫았어도 된다(다시 시작 시험). 닫힌 컨텍스트를 다시 닫으면 아무 일도 하지 않는다.
     await context.close();
   },
   extensionId: async ({ context }, use) => {
-    const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
-    await use(new URL(worker.url()).host);
+    await use(new URL((await serviceWorkerOf(context)).url()).host);
   },
 });
 
