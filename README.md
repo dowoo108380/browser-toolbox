@@ -69,11 +69,12 @@ src/
   features/    기능 하나 = 폴더 하나, features/list.ts가 기능 목록
   entries/     진입점(서비스 워커, 팝업, 콘텐츠 스크립트)
 scripts/       빌드, 등록 목록 생성, 패키징
-tests/         확장 전체 테스트(e2e), 실제 모듈끼리 연결한 시험(integration), 시험 페이지
+tests/         확장 전체 테스트(e2e), 실제 모듈끼리 연결한 시험(integration), 시험 페이지, 설정 표본(samples)
 ```
 
 - 위 목록에서 아래에 있는 층이 위에 있는 기반 층을 가져다 쓴다. 거꾸로는 쓰지 않는다. 예: `contracts` → `shared`, `storage` → `shared`·`contracts`·`platform`, `page`·`background`·`ui` → `storage`, `entries` → 모두. 위의 층을 모두 쓰는 것은 아니다(`dom`은 `shared`만 쓴다). 기능끼리는 서로 가져오지 않는다. 규칙은 `.dependency-cruiser.json`에 있고 `pnpm verify`가 검사한다.
 - 설정은 `chrome.storage.local`의 `settings` 키 하나에 둔다. 쓰는 곳은 서비스 워커 하나다. 사이트마다 정하는 설정(사이트 규칙, 사이트 예외)은 `sites[호스트][기능 id]`에 두고, 값의 모양은 그 기능이 정한다.
+- `tests/samples/settings/`에는 낸 판마다 그 판이 `settings`에 실제로 쓴 값을 하나씩 둔다(파일 이름은 그 판의 manifest 버전). 낸 판의 표본은 고치지 않는다. 모든 표본을 지금 판이 손상 없이, 저장된 항목과 필드를 하나도 잃지 않고 읽어야 한다(`tests/integration/settings-samples.test.ts`). 그래서 같은 형식 버전 안에서 기능 설정의 스키마에는 기본값 있는 필드를 더하거나 받는 범위를 넓히기만 한다. 필드를 빼거나 이름을 바꾸기, 받는 범위를 좁히기, 저장된 값을 다르게 읽기, 기능 id 바꾸기는 형식 버전을 올리고 이전 함수를 둔다.
 - 웹 페이지의 문맥에서 도는 코드(콘텐츠 스크립트, `chrome.scripting.executeScript`로 넣는 함수)는 보안 문맥에서만 있는 웹 API(예: `crypto.randomUUID`)를 쓰지 않는다. 일반 http 페이지에는 없다. 필요한 값은 서비스 워커가 만들어 넘긴다. 확장 전체 테스트의 시험 페이지는 보안 문맥인 `127.0.0.1`과 보안 문맥이 아닌 `insecure.test`(시험 브라우저가 루프백에 이음) 두 출처로 열 수 있고, 주소 앞에 `/loading/`을 붙이면 시험 서버가 응답을 끝내지 않아 로딩이 끝나지 않는 문서가 된다.
 - 실행 코드는 시험에서도 문자열로 쓰지 않는다. 페이지나 서비스 워커에서 돌릴 코드는 타입 검사를 받는 함수로 쓰고 Playwright의 `evaluate`에 함수로 넘긴다. 스크립트 요소 만들기와 평가 함수에 문자열 넘기기는 린터가 막는다.
 - `chrome.scripting.executeScript`는 기본으로 문서가 다 실릴 때까지 기다린다. 기다릴 이유가 없는 함수는 `injectImmediately`로 넣고, 모든 기다림에는 제한 시간을 둔다(`src/shared/timeout.ts`).
