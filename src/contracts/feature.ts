@@ -1,7 +1,9 @@
 import type * as z from 'zod/mini';
 
-// 팝업 범주. 요구사항 묶음과 같다(quality 017).
-type Category = 'media' | 'youtube' | 'subtitles' | 'tabs' | 'page' | 'chatgpt';
+// 팝업 범주. 요구사항 묶음과 같고, 팝업은 이 순서로 보인다(quality 017, 결정 0023). 설정 범주는 설정 페이지를 만들 때 더한다.
+export const categories = ['media', 'youtube', 'subtitles', 'tabs', 'page', 'chatgpt'] as const;
+
+export type Category = (typeof categories)[number];
 
 // 기능이 요청하는 Chrome 권한. 기능을 만들며 필요한 것을 더한다(결정 0009).
 type FeaturePermission = never;

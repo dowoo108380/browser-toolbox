@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { FeatureDefinition } from '../contracts/index.ts';
+import type { Category, FeatureDefinition } from '../contracts/index.ts';
 import type { AppError, Result } from '../shared/index.ts';
 import {
   type RepairNotice,
@@ -12,8 +12,12 @@ import {
   noRepair,
   settingsOf,
 } from '../storage/index.ts';
+import { visibleCategories } from './categories.ts';
+import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
+import { FeatureItem } from './feature-item.tsx';
+import { strings } from './strings.ts';
 
-// 팝업(COM-2). 05단계 뼈대에서는 기능마다 켜고 끄기만 있다. 범주와 검색은 06단계 COM-2에서 더한다.
+// 팝업(COM-2, 결정 0023). 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목을 보인다.
 
 interface PopupProps {
   readonly features: readonly FeatureDefinition[];
@@ -33,24 +37,6 @@ interface PopupProps {
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
 // 팝업이 열려 있는 동안 그보다 짧은 간격으로 깨워, 오래 열어 둔 뒤 누르자마자 닫혀도 요청이 닿게 한다(N-12, R-23).
 export const keepAwakeIntervalMs = 20_000;
-
-const strings = {
-  loading: '설정을 읽는 중이다.',
-  on: '켜짐',
-  off: '꺼짐',
-  repairLabel: '설정 복구 알림',
-  repairWhole: '저장된 설정을 읽을 수 없어 모든 설정을 기본값으로 바꿨다.',
-  repairFeatures: (names: string) =>
-    `다음 기능의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: ${names}.`,
-  // 사이트 이름 뒤 괄호의 기능만 바꿨다. 괄호가 없으면 그 사이트의 설정 전부다.
-  repairSites: (items: string) =>
-    `다음 사이트의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: ${items}.`,
-  siteItem: (host: string, featureName: string | null) =>
-    featureName === null ? host : `${host}(${featureName})`,
-  repairConfirm: '확인',
-  newer:
-    '더 새 버전의 확장이 저장한 설정이라 이 버전에서는 기능을 쓸 수 없다. 새 버전을 다시 설치한다.',
-};
 
 // 알림. 실패할 때마다 새 객체를 둔다. 같은 문구라도 다시 그려야 스위치가 저장된 값으로 돌아가기 때문이다.
 interface Notice {
@@ -77,6 +63,9 @@ export function PopupApp({
   const [seenRepair, setSeenRepair] = useState<RepairScope>(noRepair);
   // 사용자가 확인한 기록의 stamp. 서비스 워커가 비운 기록이 오기 전에도 감춘다.
   const [confirmedStamp, setConfirmedStamp] = useState<number | null>(null);
+  const shownCategories = visibleCategories(features);
+  // 고른 범주. 기능이 하나도 없으면 범주도 없다.
+  const [category, setCategory] = useState<Category | undefined>(shownCategories[0]);
 
   useEffect(
     () =>
@@ -156,30 +145,33 @@ export function PopupApp({
       {snapshot === null ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (
-        <ul class="features">
-          {features.map((feature) => {
-            const { enabled } = settingsOf(snapshot, feature);
-            return (
-              <li key={feature.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    data-feature={feature.id}
-                    checked={enabled}
-                    disabled={!awake}
-                    onChange={(event) => {
-                      void toggle(feature.id, event.currentTarget.checked);
-                    }}
-                  />
-                  <span class="name">{feature.name}</span>
-                  <span class="state">{enabled ? strings.on : strings.off}</span>
-                </label>
-                <p class="description">{feature.description}</p>
-              </li>
-            );
-          })}
-        </ul>
+        category !== undefined && (
+          <div class="layout">
+            <CategoryTabs categories={shownCategories} selected={category} onSelect={setCategory} />
+            <section
+              role="tabpanel"
+              id={categoryPanelId(category)}
+              aria-labelledby={categoryTabId(category)}
+              class="panel"
+            >
+              <ul class="features">
+                {features
+                  .filter((feature) => feature.category === category)
+                  .map((feature) => (
+                    <FeatureItem
+                      key={feature.id}
+                      feature={feature}
+                      enabled={settingsOf(snapshot, feature).enabled}
+                      disabled={!awake}
+                      onToggle={(enabled) => {
+                        void toggle(feature.id, enabled);
+                      }}
+                    />
+                  ))}
+              </ul>
+            </section>
+          </div>
+        )
       )}
       {snapshot !== null && notice !== null && <p role="status">{notice.message}</p>}
       {!isEmptyRepair(repair) && (

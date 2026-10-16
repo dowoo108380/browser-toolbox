@@ -6,29 +6,68 @@
 }
 
 body {
-  width: 320px;
+  width: 400px;
   margin: 0;
   padding: 12px;
 }
 
+/* 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목(결정 0023). */
+.layout {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.categories {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.categories [role='tab'] {
+  padding: 4px 10px;
+  border: 0;
+  border-inline-start: 3px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.categories [role='tab'][aria-selected='true'] {
+  border-inline-start-color: currentColor;
+  font-weight: 600;
+}
+
 .features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.features label {
+.feature .row {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.features .name {
+.feature label {
+  display: flex;
   flex: 1;
+  gap: 8px;
+  align-items: center;
+}
+
+.feature .name {
   font-weight: 600;
 }
 
-.features .description {
+.feature .description {
   margin: 2px 0 0 24px;
   opacity: 0.8;
 }

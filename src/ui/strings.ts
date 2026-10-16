@@ -1,0 +1,30 @@
+import type { Category } from '../contracts/index.ts';
+
+// 팝업의 문구(결정 0007). 기능의 이름과 설명은 기능 정의에 있다. 상태 문구는 모든 화면에서 같다(quality 018).
+
+export const strings = {
+  loading: '설정을 읽는 중이다.',
+  on: '켜짐',
+  off: '꺼짐',
+  categoriesLabel: '범주',
+  categories: {
+    media: '미디어',
+    youtube: 'YouTube',
+    subtitles: '자막',
+    tabs: '탭',
+    page: '페이지',
+    chatgpt: 'ChatGPT',
+  } satisfies Record<Category, string>,
+  repairLabel: '설정 복구 알림',
+  repairWhole: '저장된 설정을 읽을 수 없어 모든 설정을 기본값으로 바꿨다.',
+  repairFeatures: (names: string) =>
+    `다음 기능의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: ${names}.`,
+  // 사이트 이름 뒤 괄호의 기능만 바꿨다. 괄호가 없으면 그 사이트의 설정 전부다.
+  repairSites: (items: string) =>
+    `다음 사이트의 저장된 설정을 읽을 수 없어 기본값으로 바꿨다: ${items}.`,
+  siteItem: (host: string, featureName: string | null) =>
+    featureName === null ? host : `${host}(${featureName})`,
+  repairConfirm: '확인',
+  newer:
+    '더 새 버전의 확장이 저장한 설정이라 이 버전에서는 기능을 쓸 수 없다. 새 버전을 다시 설치한다.',
+};

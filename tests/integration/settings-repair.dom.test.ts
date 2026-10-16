@@ -96,8 +96,18 @@ async function openPopup(
       container,
     );
   });
-  const toggle = (featureId: string) =>
-    container.querySelector<HTMLInputElement>(`[data-feature="${featureId}"]`);
+  // 팝업은 고른 범주의 기능만 보인다(결정 0023). 그 기능의 스위치가 보일 때까지 범주를 차례로 고른다.
+  const toggle = (featureId: string) => {
+    const selector = `[data-feature="${featureId}"]`;
+    for (const tab of container.querySelectorAll<HTMLElement>('[role=tab]')) {
+      if (container.querySelector(selector) !== null) break;
+      // 콜백이 동기라 act가 돌아오기 전에 그리기를 마친다. 돌려주는 Promise는 기다릴 것이 없다.
+      void act(() => {
+        tab.click();
+      });
+    }
+    return container.querySelector<HTMLInputElement>(selector);
+  };
   return {
     repairText: () => container.querySelector('.repair')?.textContent ?? null,
     checked: (featureId: string) => toggle(featureId)?.checked,

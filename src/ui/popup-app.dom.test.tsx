@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as z from 'zod/mini';
-import { defineFeature } from '../contracts/index.ts';
+import { type Category, type FeatureDefinition, defineFeature } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type {
   RepairNotice,
@@ -38,12 +38,49 @@ const feature = defineFeature({
 const off: Snapshot = { features: new Map([['sample', { enabled: false }]]), sites: new Map() };
 const saveFailed = appError('platform', '설정을 저장하지 못했다. 저장된 설정은 바뀌지 않았다.');
 
+// 범주가 여럿인 기능 목록. YouTube 범주에는 기능이 없다.
+function toggleFeature(id: string, category: Category, name: string): FeatureDefinition {
+  return defineFeature({
+    id,
+    requirements: [],
+    name,
+    description: `${name} 설명`,
+    category,
+    kind: 'toggle',
+    content: null,
+    permissions: [],
+    settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  });
+}
+
+// 초점이 있는 요소에서 키를 누른다(keydown). 확장 화면의 키 처리는 모두 keydown에서 한다.
+async function press(key: string, modifiers: { readonly ctrlKey?: boolean } = {}) {
+  const target = document.activeElement ?? document.body;
+  await act(() => {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers }),
+    );
+  });
+}
+
+const manyCategories = [
+  toggleFeature('chat', 'chatgpt', '대화 기능'),
+  toggleFeature('speed', 'media', '배속 기능'),
+  toggleFeature('hide', 'page', '숨김 기능'),
+  toggleFeature('volume', 'media', '음량 기능'),
+];
+
 interface Options {
+  readonly features?: readonly FeatureDefinition[];
   readonly wake?: () => Promise<Result<unknown, AppError>>;
   readonly update?: () => Promise<Result<unknown, AppError>>;
 }
 
-async function show({ wake = () => Promise.resolve(ok(null)), update }: Options = {}) {
+async function show({
+  features = [feature],
+  wake = () => Promise.resolve(ok(null)),
+  update,
+}: Options = {}) {
   const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
   const wakes = vi.fn(wake);
   // 저장된 설정을 바로 준다. 저장이 성공해도 바뀜 알림은 시험이 직접 보낸다.
@@ -56,7 +93,7 @@ async function show({ wake = () => Promise.resolve(ok(null)), update }: Options 
   await act(() => {
     render(
       <PopupApp
-        features={[feature]}
+        features={features}
         subscribe={subscribe}
         watchRepairs={() => () => undefined}
         wake={wakes}
@@ -83,8 +120,90 @@ async function show({ wake = () => Promise.resolve(ok(null)), update }: Options 
     state: () => container.querySelector('.state')?.textContent,
     status: () => container.querySelector('[role=status]')?.textContent,
     apply: (snapshot: Snapshot) => act(() => handlers?.apply(snapshot)),
+    tab: (name: string) => {
+      const found = [...container.querySelectorAll<HTMLElement>('[role=tab]')].find(
+        (element) => element.textContent === name,
+      );
+      if (found === undefined) throw new Error(`범주 ${name}이 없다.`);
+      return found;
+    },
+    tabNames: () =>
+      [...container.querySelectorAll('[role=tab]')].map((element) => element.textContent),
+    selectedTab: () => container.querySelector('[role=tab][aria-selected=true]')?.textContent,
+    // 지금 보이는 패널의 기능 이름.
+    panelFeatures: () =>
+      [...container.querySelectorAll('[role=tabpanel] .name')].map(
+        (element) => element.textContent,
+      ),
   };
 }
+
+describe('COM-2 범주 목록(결정 0023)', () => {
+  it('기능이 있는 범주만 요구사항 묶음의 순서로 보이고, 처음에는 첫 범주의 기능을 보인다', async () => {
+    const popup = await show({ features: manyCategories });
+    expect(popup.tabNames()).toEqual(['미디어', '페이지', 'ChatGPT']);
+    expect(popup.selectedTab()).toBe('미디어');
+    expect(popup.panelFeatures()).toEqual(['배속 기능', '음량 기능']);
+    const panel = container.querySelector('[role=tabpanel]');
+    expect(panel?.getAttribute('aria-labelledby')).toBe(popup.tab('미디어').id);
+    expect(popup.tab('미디어').getAttribute('aria-controls')).toBe(panel?.id);
+  });
+
+  it('범주를 누르면 그 범주의 기능을 보인다', async () => {
+    const popup = await show({ features: manyCategories });
+    await act(() => {
+      popup.tab('페이지').click();
+    });
+    expect(popup.selectedTab()).toBe('페이지');
+    expect(popup.panelFeatures()).toEqual(['숨김 기능']);
+  });
+
+  it('COM-2.2 아래·위 방향키, Home, End가 다음·이전·처음·끝 범주로 초점을 옮기고 그 범주를 보인다', async () => {
+    const popup = await show({ features: manyCategories });
+    popup.tab('미디어').focus();
+    const steps: [key: string, category: string, features: string[]][] = [
+      ['ArrowDown', '페이지', ['숨김 기능']],
+      ['ArrowDown', 'ChatGPT', ['대화 기능']],
+      // 끝에서는 처음으로, 처음에서는 끝으로 간다.
+      ['ArrowDown', '미디어', ['배속 기능', '음량 기능']],
+      ['ArrowUp', 'ChatGPT', ['대화 기능']],
+      ['ArrowUp', '페이지', ['숨김 기능']],
+      ['Home', '미디어', ['배속 기능', '음량 기능']],
+      ['End', 'ChatGPT', ['대화 기능']],
+    ];
+    for (const [key, category, names] of steps) {
+      await press(key);
+      expect(document.activeElement, key).toBe(popup.tab(category));
+      expect(popup.selectedTab(), key).toBe(category);
+      expect(popup.panelFeatures(), key).toEqual(names);
+    }
+  });
+
+  it('범주 목록 안에서는 고른 범주만 Tab으로 들어간다(roving tabindex)', async () => {
+    const popup = await show({ features: manyCategories });
+    popup.tab('미디어').focus();
+    await press('ArrowDown');
+    expect(
+      [...container.querySelectorAll<HTMLElement>('[role=tab]')].map((tab) => tab.tabIndex),
+    ).toEqual([-1, 0, -1]);
+  });
+
+  it('조합 키와 함께 누른 방향키로는 범주를 옮기지 않는다', async () => {
+    const popup = await show({ features: manyCategories });
+    popup.tab('미디어').focus();
+    await press('ArrowDown', { ctrlKey: true });
+    expect(popup.selectedTab()).toBe('미디어');
+  });
+
+  it('스위치의 이름은 기능 이름이고, 설명을 그 스위치의 설명으로 잇는다', async () => {
+    const popup = await show();
+    const description = document.getElementById(
+      popup.toggle().getAttribute('aria-describedby') ?? '',
+    );
+    expect(description?.textContent).toBe('시험용');
+    expect(popup.toggle().labels?.[0]?.textContent).toBe('시험 기능');
+  });
+});
 
 describe('COM-3 기대 동작 3 저장에 실패하면 화면은 저장된 값을 보인다', () => {
   it('COM-3.3 같은 저장 실패가 두 번 이어져도 그때마다 스위치를 저장된 값으로 되돌린다', async () => {

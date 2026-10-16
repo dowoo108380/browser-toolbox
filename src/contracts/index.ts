@@ -1,4 +1,10 @@
-export { type FeatureDefinition, type ToggleSettings, defineFeature } from './feature.ts';
+export {
+  type Category,
+  type FeatureDefinition,
+  type ToggleSettings,
+  categories,
+  defineFeature,
+} from './feature.ts';
 export {
   type RequestDefinition,
   problemReport,
