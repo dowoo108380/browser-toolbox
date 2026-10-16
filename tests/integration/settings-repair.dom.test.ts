@@ -1,29 +1,18 @@
-import { h, render } from 'preact';
+import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  repairNoticeDismiss,
-  settingsUpdate,
-  storageEnsureReady,
-} from '../../src/contracts/index.ts';
+import { storageEnsureReady } from '../../src/contracts/index.ts';
 import { type FakeLocalStore, createFakeLocalStore } from '../../src/platform/fake.ts';
 import type { LocalStore, Requester } from '../../src/platform/index.ts';
-import {
-  parseRepairNotice,
-  repairNoticeKey,
-  settingsFormat,
-  settingsKey,
-  startSettingsReader,
-  watchRepairNotice,
-} from '../../src/storage/index.ts';
-import { PopupApp } from '../../src/ui/index.ts';
+import { parseRepairNotice, repairNoticeKey, settingsKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
+import { renderTestPopup, switchOf } from '../support/popup.ts';
 import { specs, stored } from '../support/settings.ts';
 
 // 설정 손상과 복구 알림(COM-3.4, 결정 0016)을 실제 모듈끼리 연결해 본다. 가짜는 Chrome 경계뿐이다:
 // 저장소(chrome.storage.local)와 메시지 통로(chrome.runtime.sendMessage). 서비스 워커(라우터, 설정 저장,
 // 복구 알림 기록)와 팝업(읽기 도우미, 복구 알림 읽기, 화면)은 실제 코드다. 응답과 읽기 결과는 시험이 붙잡아
-// 순서를 바꾼다. 이 폴더는 src 밖이라 tsconfig.json의 JSX 설정(Preact)이 걸리지 않으므로 JSX 대신 h()를 쓴다.
+// 순서를 바꾼다.
 
 const t = 1_790_000_000_000;
 
@@ -73,7 +62,7 @@ afterEach(() => {
   }
 });
 
-// 실제 진입점(src/entries/popup.tsx)과 같게 조립한 팝업. noticeStore로 복구 알림 읽기만 다른 저장소 창을 쓸 수 있다.
+// 실제 진입점과 같게 조립한 팝업. noticeStore로 복구 알림 읽기만 다른 저장소 창을 쓸 수 있다.
 async function openPopup(
   store: LocalStore,
   request: Requester,
@@ -82,32 +71,8 @@ async function openPopup(
   const container = document.createElement('div');
   document.body.append(container);
   containers.push(container);
-  await act(() => {
-    render(
-      h(PopupApp, {
-        features: specs,
-        subscribe: (handlers) =>
-          startSettingsReader({ store, request, format: settingsFormat, specs }, handlers),
-        watchRepairs: (handlers) => watchRepairNotice(noticeStore, handlers),
-        wake: () => request(storageEnsureReady, {}),
-        update: (featureId, patch) => request(settingsUpdate, { featureId, patch }),
-        dismissRepair: (stamp) => request(repairNoticeDismiss, { stamp }),
-      }),
-      container,
-    );
-  });
-  // 팝업은 고른 범주의 기능만 보인다(결정 0023). 그 기능의 스위치가 보일 때까지 범주를 차례로 고른다.
-  const toggle = (featureId: string) => {
-    const selector = `[data-feature="${featureId}"]`;
-    for (const tab of container.querySelectorAll<HTMLElement>('[role=tab]')) {
-      if (container.querySelector(selector) !== null) break;
-      // 콜백이 동기라 act가 돌아오기 전에 그리기를 마친다. 돌려주는 Promise는 기다릴 것이 없다.
-      void act(() => {
-        tab.click();
-      });
-    }
-    return container.querySelector<HTMLInputElement>(selector);
-  };
+  await renderTestPopup(container, { store, request, features: specs, noticeStore });
+  const toggle = (featureId: string) => switchOf(container, featureId);
   return {
     repairText: () => container.querySelector('.repair')?.textContent ?? null,
     checked: (featureId: string) => toggle(featureId)?.checked,
