@@ -161,10 +161,13 @@ export function createSettingsStore(deps: {
         const noticed = await noticeFirst(normalized.value.repairs);
         if (!noticed.ok) return noticed;
         const now = await timeAfter(loaded.value.readAt);
+        // 저장하는 항목은 저장된 항목 위에 검증을 거친 값을 덮은 것이다. 이 판이 아는 필드는 검증을 거친 값이 되고, 모르는
+        // 필드(같은 형식에서 더 새 판이 더한 것)는 저장된 값 그대로 남는다. 검증을 거친 값만 저장하면 스키마가 모르는 필드를
+        // 지워, 새 판으로 다시 올렸을 때 사용자 값을 잃는다. 요청에 든 모르는 필드는 스키마가 걸러 저장하지 않는다(결정 0022).
         const next: StoredSettings = {
           ...base,
           revision: nextRevision(base.revision, now),
-          features: { ...base.features, [featureId]: merged.data },
+          features: { ...base.features, [featureId]: { ...current, ...merged.data } },
         };
         const written = await write(next, { stored: loaded.value.raw, normalized: base });
         if (!written.ok) return written;

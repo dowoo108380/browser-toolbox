@@ -195,6 +195,16 @@ describe('설정 바꾸기', () => {
     expect(problems).toEqual([]);
   });
 
+  it('결정 0022 이 판이 모르는 필드(같은 형식의 더 새 판이 더한 것)는 그 기능을 바꿔도 그대로 남고, 요청에 든 모르는 필드는 저장하지 않는다', async () => {
+    const newer = { enabled: true, step: 0.5, label: 'a', savedFuturePreference: { mode: 2 } };
+    const { settings, store, problems, notices } = setup(stored(5, { sample: newer }));
+    const result = await settings.updateFeature('sample', { label: 'b', unknownInRequest: 1 });
+    expect(result).toEqual({ ok: true, value: { revision: t + 1 } });
+    expect(store.peek(settingsKey)).toEqual(stored(t + 1, { sample: { ...newer, label: 'b' } }));
+    expect(problems).toEqual([]);
+    expect(notices).toEqual([]);
+  });
+
   it('COM-3.3 저장이 실패하면 실패를 알리고 저장된 설정은 그대로다', async () => {
     const { settings, store } = setup(stored(5), { failWrites: true });
     const result = await settings.updateFeature('other', { enabled: true });
