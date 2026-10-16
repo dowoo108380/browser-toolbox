@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fixtureOther, fixtureTask } from '../extension/fixture-tasks.ts';
 import {
+  distPath,
   expect,
+  fixtureDistPath,
   fixtureOrigin,
   hostCount,
   indicatorTexts,
@@ -88,4 +93,17 @@ test('MED-3 팝업에서 켜면 최상위와 iframe의 영상에 실제 배속�
   await toggle.uncheck();
   await expect.poll(() => hostCount(page)).toBe(0);
   await expect.poll(() => hostCount(childFrame)).toBe(0);
+});
+
+test('결정 0025 배포 빌드(dist/)에는 시험 빌드의 시험 기능이 들어가지 않는다', () => {
+  // 비교 대상이 맞는지: 시험 빌드에는 들어 있다.
+  const fixtureWorker = readFileSync(path.join(fixtureDistPath, 'sw.js'), 'utf8');
+  expect(fixtureWorker.includes(fixtureTask.id)).toBe(true);
+  const found = ['sw.js', 'popup.js', 'content-common.js', 'manifest.json'].flatMap((file) => {
+    const text = readFileSync(path.join(distPath, file), 'utf8');
+    return [fixtureTask.id, fixtureOther.id]
+      .filter((id) => text.includes(id))
+      .map((id) => `${file}: ${id}`);
+  });
+  expect(found).toEqual([]);
 });
