@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { storageEnsureReady } from '../../src/contracts/index.ts';
 import { features } from '../../src/features/list.ts';
-import { createFakeLocalStore } from '../../src/platform/fake.ts';
+import { createFakeStore } from '../../src/platform/fake.ts';
 import {
   type Snapshot,
   type StoredSettings,
@@ -90,7 +90,7 @@ describe('COM-3.5 지금까지 낸 판의 설정 표본', () => {
     async ({ file, value }) => {
       const sample = currentSample(file, value);
       // 가짜 저장소는 받은 값을 복사해 둔다. 그래서 아래에서 value와 견주는 것은 서비스 워커가 남긴 값이다.
-      const store = createFakeLocalStore({ [settingsKey]: value });
+      const store = createFakeStore({ [settingsKey]: value });
       const request = startTestBackground({ store, features, startTime: 1_800_000_000_000 });
       const applied: Snapshot[] = [];
       const reported: unknown[] = [];

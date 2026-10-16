@@ -1,6 +1,6 @@
-import type { LocalStore } from '../../src/platform/index.ts';
+import type { KeyValueStore } from '../../src/platform/index.ts';
 
-// LocalStore(chrome.storage.local을 감싼 경계)의 계약(quality 047). 같은 사례를 가짜(src/platform/fake.ts)에는
+// KeyValueStore(chrome.storage.local을 감싼 경계)의 계약(quality 047). 같은 사례를 가짜(src/platform/fake.ts)에는
 // 단위 시험으로(src/platform/storage-contract.test.ts), 실제(chromeLocalStore)에는 확장의 서비스 워커 안에서
 // 돌린다(tests/e2e/storage-contract.spec.ts). 확장 안에서도 돌아야 하므로 Vitest를 쓰지 않고, 틀리면 던진다.
 // 바뀜 알림이 set의 완료보다 먼저 오는지 늦게 오는지는 계약이 아니다(Chrome 문서에 없음). 그래서 사례는
@@ -9,7 +9,7 @@ import type { LocalStore } from '../../src/platform/index.ts';
 export interface ContractCase {
   readonly name: string;
   // key는 이 사례만 쓰는 키 이름을 만든다. 실제 저장소는 사례끼리 함께 쓰므로 키로 나눈다.
-  readonly run: (store: LocalStore, key: (name: string) => string) => Promise<void>;
+  readonly run: (store: KeyValueStore, key: (name: string) => string) => Promise<void>;
 }
 
 // 키 순서까지 같은지 본다(JSON 문자열로 비교). undefined는 "undefined"로 적는다.
@@ -21,7 +21,7 @@ function same(actual: unknown, expected: unknown, what: string): void {
 }
 
 // 한 키의 바뀜 알림을 모은다. count개가 올 때까지 기다린다(실제 저장소는 알림을 나중에 보낸다).
-function record(store: LocalStore, key: string) {
+function record(store: KeyValueStore, key: string) {
   const values: unknown[] = [];
   let wake: () => void = () => undefined;
   const stop = store.onChanged(key, (value) => {
@@ -45,7 +45,7 @@ function record(store: LocalStore, key: string) {
   return { values, waitFor, stop };
 }
 
-export const localStoreContract: readonly ContractCase[] = [
+export const storeContract: readonly ContractCase[] = [
   {
     name: '없는 키를 읽으면 undefined다',
     run: async (store, key) => {

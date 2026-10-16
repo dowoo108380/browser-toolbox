@@ -1,5 +1,5 @@
 import * as z from 'zod/mini';
-import type { LocalStore } from '../platform/index.ts';
+import type { KeyValueStore } from '../platform/index.ts';
 import { type ErrorKind, createSerialQueue, errorKinds } from '../shared/index.ts';
 
 // 문제 기록(COM-5). 주소, 제목, 사이트 이름, 파일 이름은 넣지 않는다(quality 082).
@@ -24,7 +24,7 @@ export interface ProblemLog {
 }
 
 export function createProblemLog(deps: {
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly now: () => number;
 }): ProblemLog {
   const enqueue = createSerialQueue();

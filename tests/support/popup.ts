@@ -8,7 +8,7 @@ import {
   storageEnsureReady,
   tabStatus,
 } from '../../src/contracts/index.ts';
-import type { LocalStore, Requester } from '../../src/platform/index.ts';
+import type { KeyValueStore, Requester } from '../../src/platform/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
@@ -22,11 +22,11 @@ import { PopupApp } from '../../src/ui/index.ts';
 // 않으므로 JSX 대신 h()를 쓴다. 테스트에서만 가져온다.
 
 export interface TestPopupOptions {
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly request: Requester;
   readonly features: readonly FeatureDefinition[];
   // 복구 알림 읽기만 다른 저장소 창을 쓰게 할 수 있다. 없으면 store다.
-  readonly noticeStore?: Pick<LocalStore, 'get' | 'onChanged'>;
+  readonly noticeStore?: Pick<KeyValueStore, 'get' | 'onChanged'>;
 }
 
 export async function renderTestPopup(

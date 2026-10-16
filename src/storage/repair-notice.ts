@@ -1,5 +1,5 @@
 import * as z from 'zod/mini';
-import type { LocalStore } from '../platform/index.ts';
+import type { KeyValueStore } from '../platform/index.ts';
 import { type AppError, appError } from '../shared/index.ts';
 import type { SiteItem } from './items.ts';
 import { type Repair, nextRevision } from './write.ts';
@@ -107,7 +107,7 @@ export interface RepairNoticeHandlers {
 // 확장 화면이 복구 알림을 읽는다. 바뀜 알림을 먼저 듣고 읽는다. 읽기 결과와 바뀜 알림의 순서에 기대지 않고
 // stamp가 더 큰 기록만 받는다. 그만둔 뒤에는 알리지 않는다(COM-7).
 export function watchRepairNotice(
-  store: Pick<LocalStore, 'get' | 'onChanged'>,
+  store: Pick<KeyValueStore, 'get' | 'onChanged'>,
   handlers: RepairNoticeHandlers,
 ): () => void {
   let accepted = 0;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { settingsUpdate } from '../../src/contracts/index.ts';
 import { features } from '../../src/features/list.ts';
-import { createFakeLocalStore } from '../../src/platform/fake.ts';
+import { createFakeStore } from '../../src/platform/fake.ts';
 import { repairNoticeKey, settingsFormat, settingsKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
 
@@ -19,7 +19,7 @@ describe('결정 0022 옛 판이 더 새 판의 필드가 든 기능 설정을 �
     async (feature) => {
       // 더 새 판이 더한 필드(savedFuturePreference)와, 사용자가 그 판에서 켜 둔 기능.
       const newer = { ...feature.settings.defaults, enabled: true, savedFuturePreference: 2.5 };
-      const store = createFakeLocalStore({
+      const store = createFakeStore({
         [settingsKey]: {
           version: settingsFormat.version,
           revision: t - 1000,

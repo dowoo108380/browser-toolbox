@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type FakeLocalStore, createFakeLocalStore } from '../../src/platform/fake.ts';
+import { type FakeStore, createFakeStore } from '../../src/platform/fake.ts';
 import { popupStateKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
 import { renderTestPopup } from '../support/popup.ts';
@@ -20,7 +20,7 @@ afterEach(() => {
   }
 });
 
-async function openPopup(store: FakeLocalStore) {
+async function openPopup(store: FakeStore) {
   const request = startTestBackground({ store, features: specs, startTime: 1_790_000_000_000 });
   const container = document.createElement('div');
   document.body.append(container);
@@ -47,7 +47,7 @@ async function openPopup(store: FakeLocalStore) {
 
 describe('COM-2 기대 동작 5 마지막으로 연 범주', () => {
   it('팝업을 닫았다 다시 열면 마지막으로 고른 범주로 열린다', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     const first = await openPopup(store);
     expect(first.selected()).toBe('미디어');
     await first.choose('페이지');
@@ -62,7 +62,7 @@ describe('COM-2 기대 동작 5 마지막으로 연 범주', () => {
 
   it('남긴 값이 틀리거나 기능이 없는 범주면 첫 범주로 열고, 문제로 기록하지 않는다', async () => {
     for (const value of ['page', { category: 'youtube' }, { category: 'settings' }]) {
-      const store = createFakeLocalStore({ [popupStateKey]: value });
+      const store = createFakeStore({ [popupStateKey]: value });
       const popup = await openPopup(store);
       expect(popup.selected(), JSON.stringify(value)).toBe('미디어');
       expect(store.peek('problems'), JSON.stringify(value)).toBeUndefined();

@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { createFakeLocalStore } from '../platform/fake.ts';
+import { createFakeStore } from '../platform/fake.ts';
 import { popupStateKey, popupStateOf, readRememberedCategory } from './popup-state.ts';
 
 describe('결정 0023 팝업이 마지막으로 고른 범주 읽기', () => {
   it('남긴 범주를 읽는다', async () => {
-    const store = createFakeLocalStore({ [popupStateKey]: popupStateOf('page') });
+    const store = createFakeStore({ [popupStateKey]: popupStateOf('page') });
     expect(await readRememberedCategory(store)).toBe('page');
   });
 
   it('저장 키 이름은 popup이다(결정 0011의 표. 바꾸면 앞의 판이 남긴 값을 읽지 못한다)', async () => {
-    const store = createFakeLocalStore({ popup: { category: 'chatgpt' } });
+    const store = createFakeStore({ popup: { category: 'chatgpt' } });
     expect(await readRememberedCategory(store)).toBe('chatgpt');
   });
 
@@ -23,7 +23,7 @@ describe('결정 0023 팝업이 마지막으로 고른 범주 읽기', () => {
       { category: 'settings' },
       { category: 1 },
     ]) {
-      const store = createFakeLocalStore(value === undefined ? {} : { [popupStateKey]: value });
+      const store = createFakeStore(value === undefined ? {} : { [popupStateKey]: value });
       expect(await readRememberedCategory(store), JSON.stringify(value)).toBeNull();
     }
   });

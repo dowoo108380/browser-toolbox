@@ -1,6 +1,6 @@
 // chrome.storage.local을 감싼다. 저장소를 직접 읽고 쓰는 곳은 이 모듈과 그 가짜뿐이다(quality 059).
 
-export interface LocalStore {
+export interface KeyValueStore {
   // 키가 없으면 undefined.
   get(key: string): Promise<unknown>;
   set(items: Readonly<Record<string, unknown>>): Promise<void>;
@@ -8,7 +8,7 @@ export interface LocalStore {
   onChanged(key: string, listener: (newValue: unknown) => void): () => void;
 }
 
-export function chromeLocalStore(): LocalStore {
+export function chromeLocalStore(): KeyValueStore {
   return {
     async get(key) {
       const items = await chrome.storage.local.get(key);

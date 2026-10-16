@@ -7,7 +7,7 @@ import {
   storageEnsureReady,
   tabStatus,
 } from '../contracts/index.ts';
-import type { LocalStore, PageProbe, Sender } from '../platform/index.ts';
+import type { KeyValueStore, PageProbe, Sender } from '../platform/index.ts';
 import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
 import { createPopupState } from './popup-state.ts';
@@ -19,7 +19,7 @@ import { createSettingsStore } from './settings-store.ts';
 export interface BackgroundDeps {
   readonly features: readonly FeatureDefinition[];
   readonly format: SettingsFormat;
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   // 서비스 워커가 처음 실행될 때 바로 걸어야 하는 Chrome 이벤트를 건다.

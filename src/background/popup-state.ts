@@ -1,5 +1,5 @@
 import type { Category } from '../contracts/index.ts';
-import type { LocalStore } from '../platform/index.ts';
+import type { KeyValueStore } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import { popupStateKey, popupStateOf } from '../storage/index.ts';
 import type { Problem } from './problems.ts';
@@ -11,7 +11,7 @@ export interface PopupState {
 }
 
 export function createPopupState(deps: {
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly record: (problem: Problem) => void;
 }): PopupState {
   return {

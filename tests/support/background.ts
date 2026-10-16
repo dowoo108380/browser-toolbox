@@ -1,6 +1,6 @@
 import { startBackground } from '../../src/background/index.ts';
 import { type FeatureDefinition, responseSchema } from '../../src/contracts/index.ts';
-import type { LocalStore, PageProbe, Requester, Sender } from '../../src/platform/index.ts';
+import type { KeyValueStore, PageProbe, Requester, Sender } from '../../src/platform/index.ts';
 import { appError, err } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
 
@@ -9,7 +9,7 @@ import { settingsFormat } from '../../src/storage/index.ts';
 // 정리는 하지 않는다. 테스트에서만 가져온다.
 
 export interface TestBackgroundOptions {
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly features: readonly FeatureDefinition[];
   readonly startTime: number;
   // 요청이 서비스 워커에 닿는 때를 시험이 정한다(응답 순서를 바꾸는 시험). 없으면 바로 닿는다.

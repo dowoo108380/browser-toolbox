@@ -1,9 +1,9 @@
-import type { LocalStore } from './storage.ts';
+import type { KeyValueStore } from './storage.ts';
 
-// 테스트용 가짜. 진짜와 같은 계약을 지킨다(quality 047). 계약 사례는 tests/contract/local-store.ts에 있고,
+// 테스트용 가짜. 진짜와 같은 계약을 지킨다(quality 047). 계약 사례는 tests/contract/store.ts에 있고,
 // 같은 사례를 이 가짜(단위 시험)와 실제 chrome.storage.local(확장 안)에 돌린다. 테스트에서만 가져온다(결정 0004).
 
-export interface FakeLocalStore extends LocalStore {
+export interface FakeStore extends KeyValueStore {
   // 테스트가 저장소를 직접 들여다보거나 바꾼다.
   peek(key: string): unknown;
   // 저장소 밖에서 일어난 변경(다른 화면의 쓰기, 개발자 도구로 고친 값, 손상)을 흉내 낸다. undefined면 지운다.
@@ -30,9 +30,7 @@ function stored(value: unknown): unknown {
   return value;
 }
 
-export function createFakeLocalStore(
-  initial: Readonly<Record<string, unknown>> = {},
-): FakeLocalStore {
+export function createFakeStore(initial: Readonly<Record<string, unknown>> = {}): FakeStore {
   const items = new Map<string, unknown>(
     Object.entries(initial).map(([key, value]) => [key, stored(value)]),
   );

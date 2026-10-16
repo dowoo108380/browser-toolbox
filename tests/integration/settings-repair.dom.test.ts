@@ -2,8 +2,8 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { storageEnsureReady } from '../../src/contracts/index.ts';
-import { type FakeLocalStore, createFakeLocalStore } from '../../src/platform/fake.ts';
-import type { LocalStore, Requester } from '../../src/platform/index.ts';
+import { type FakeStore, createFakeStore } from '../../src/platform/fake.ts';
+import type { KeyValueStore, Requester } from '../../src/platform/index.ts';
 import { parseRepairNotice, repairNoticeKey, settingsKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
 import { renderTestPopup, switchOf } from '../support/popup.ts';
@@ -34,7 +34,7 @@ function gate() {
 
 // 서비스 워커를 시작하고, 팝업이 쓰는 요청 함수를 돌려준다. holdRequests로 붙잡은 종류의 요청은 놓아줄 때까지
 // 서비스 워커에 닿지 않는다.
-function startServiceWorker(store: LocalStore) {
+function startServiceWorker(store: KeyValueStore) {
   const held = new Set<string>();
   const requests = gate();
   const request = startTestBackground({
@@ -64,9 +64,9 @@ afterEach(() => {
 
 // 실제 진입점과 같게 조립한 팝업. noticeStore로 복구 알림 읽기만 다른 저장소 창을 쓸 수 있다.
 async function openPopup(
-  store: LocalStore,
+  store: KeyValueStore,
   request: Requester,
-  noticeStore: Pick<LocalStore, 'get' | 'onChanged'> = store,
+  noticeStore: Pick<KeyValueStore, 'get' | 'onChanged'> = store,
 ) {
   const container = document.createElement('div');
   document.body.append(container);
@@ -92,7 +92,7 @@ async function openPopup(
   };
 }
 
-function featureIds(store: FakeLocalStore): string[] {
+function featureIds(store: FakeStore): string[] {
   const value = store.peek(settingsKey);
   if (typeof value !== 'object' || value === null || !('features' in value)) return [];
   const { features } = value;
@@ -104,7 +104,7 @@ const countOf = (text: string | null, part: string) => (text ?? '').split(part).
 
 describe('COM-3.4 서비스 워커가 먼저 고쳐 쓴 뒤 팝업을 연다', () => {
   it('팝업은 고친 값만 읽어도 기본값으로 바꾼 기능 이름을 알리고, 확인하면 다시 열어도 없다', async () => {
-    const store = createFakeLocalStore({
+    const store = createFakeStore({
       [settingsKey]: stored(5, { sample: { enabled: 'no' }, other: { enabled: true } }),
     });
     const worker = startServiceWorker(store);
@@ -136,7 +136,7 @@ describe('COM-3.4 서비스 워커가 먼저 고쳐 쓴 뒤 팝업을 연다', (
   });
 
   it('결정 0017 손상된 사이트 항목은 그것만 지우고 사이트 이름으로 알린다. 모르는 기능의 사이트 항목과 다른 사이트는 그대로다', async () => {
-    const store = createFakeLocalStore({
+    const store = createFakeStore({
       [settingsKey]: stored(
         5,
         { other: { enabled: true } },
@@ -172,7 +172,7 @@ describe('COM-3.4 서비스 워커가 먼저 고쳐 쓴 뒤 팝업을 연다', (
   });
 
   it('설정 전체가 손상되었으면 모든 설정을 기본값으로 바꿨다고 알린다', async () => {
-    const store = createFakeLocalStore({ [settingsKey]: { version: 'x' } });
+    const store = createFakeStore({ [settingsKey]: { version: 'x' } });
     const worker = startServiceWorker(store);
     await vi.waitFor(() => {
       expect(store.peek(settingsKey)).toMatchObject({ version: 1, features: {} });
@@ -185,7 +185,7 @@ describe('COM-3.4 서비스 워커가 먼저 고쳐 쓴 뒤 팝업을 연다', (
   });
 
   it('알림을 읽은 결과가 새 손상이 더해진 기록보다 늦게 와도, 더 나중 기록을 보인다', async () => {
-    const store = createFakeLocalStore({
+    const store = createFakeStore({
       [settingsKey]: stored(5, { sample: { enabled: 'no' }, other: { enabled: true } }),
     });
     const worker = startServiceWorker(store);
@@ -214,7 +214,7 @@ describe('COM-3.4 서비스 워커가 먼저 고쳐 쓴 뒤 팝업을 연다', (
 
 describe('COM-3.4 팝업이 열린 채 손상이 생긴다', () => {
   async function openOnHealthySettings() {
-    const store = createFakeLocalStore({ [settingsKey]: stored(5, { other: { enabled: true } }) });
+    const store = createFakeStore({ [settingsKey]: stored(5, { other: { enabled: true } }) });
     const worker = startServiceWorker(store);
     const popup = await openPopup(store, worker.request);
     await popup.awake();

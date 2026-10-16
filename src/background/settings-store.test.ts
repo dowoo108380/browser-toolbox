@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod/mini';
 import { specs, stored } from '../../tests/support/settings.ts';
-import { createFakeLocalStore } from '../platform/fake.ts';
+import { createFakeStore } from '../platform/fake.ts';
 import { appError, err, ok } from '../shared/index.ts';
 import {
   type RepairScope,
@@ -50,7 +50,7 @@ function setup(
   initial?: unknown,
   { failWrites = false, failNotice = false, format = settingsFormat }: SetupOptions = {},
 ) {
-  const fake = createFakeLocalStore(initial === undefined ? {} : { [settingsKey]: initial });
+  const fake = createFakeStore(initial === undefined ? {} : { [settingsKey]: initial });
   const problems: Problem[] = [];
   const notices: RepairScope[] = [];
   // 복구 알림과 설정 쓰기가 일어난 순서.

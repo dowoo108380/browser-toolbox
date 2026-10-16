@@ -1,5 +1,5 @@
 import type { FeatureDefinition } from '../contracts/index.ts';
-import type { LocalStore } from '../platform/index.ts';
+import type { KeyValueStore } from '../platform/index.ts';
 import {
   type AppError,
   type Result,
@@ -37,7 +37,7 @@ export interface SettingsStore {
 }
 
 export function createSettingsStore(deps: {
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   readonly format: SettingsFormat;

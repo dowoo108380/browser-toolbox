@@ -1,5 +1,5 @@
 import { storageEnsureReady } from '../contracts/index.ts';
-import type { LocalStore, Requester } from '../platform/index.ts';
+import type { KeyValueStore, Requester } from '../platform/index.ts';
 import { type AppError, appError } from '../shared/index.ts';
 import { type SettingsFormat, settingsKey } from './format.ts';
 import type { FeatureSettingsSpec } from './items.ts';
@@ -10,7 +10,7 @@ import type { RepairScope } from './repair-notice.ts';
 
 export interface SettingsReaderDeps {
   // 읽기와 바뀜 듣기만 받는다. 설정을 쓰는 곳은 서비스 워커 하나다(결정 0005).
-  readonly store: Pick<LocalStore, 'get' | 'onChanged'>;
+  readonly store: Pick<KeyValueStore, 'get' | 'onChanged'>;
   readonly request: Requester;
   readonly format: SettingsFormat;
   readonly specs: readonly FeatureSettingsSpec[];

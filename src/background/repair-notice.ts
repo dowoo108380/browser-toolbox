@@ -1,4 +1,4 @@
-import type { LocalStore } from '../platform/index.ts';
+import type { KeyValueStore } from '../platform/index.ts';
 import {
   type AppError,
   type Result,
@@ -26,7 +26,7 @@ export interface RepairNoticeLog {
 }
 
 export function createRepairNoticeLog(deps: {
-  readonly store: LocalStore;
+  readonly store: KeyValueStore;
   readonly now: () => number;
 }): RepairNoticeLog {
   const enqueue = createSerialQueue();

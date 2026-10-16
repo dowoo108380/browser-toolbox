@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type FakeLocalStore, createFakeLocalStore } from '../../src/platform/fake.ts';
+import { type FakeStore, createFakeStore } from '../../src/platform/fake.ts';
 import { settingsKey } from '../../src/storage/index.ts';
 
 // 설치·갱신 때 열린 탭의 옛 스크립트 정리(결정 0008)를 서비스 워커 쪽 실제 모듈끼리 연결해 본다. 진입점
@@ -28,7 +28,7 @@ type MessageListener = (
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
 
 function fakeChrome(
-  store: FakeLocalStore,
+  store: FakeStore,
   tabs: readonly { readonly id: number }[],
   executeScript: (injection: Injection) => Promise<unknown>,
   // 문제 기록(problems)을 저장하는 데 걸리는 시간. 저장의 끝에는 계약이 없다.
@@ -83,7 +83,7 @@ function fakeChrome(
 }
 
 // 문제 기록에 남은 종류들.
-function recordedKinds(store: FakeLocalStore): unknown[] {
+function recordedKinds(store: FakeStore): unknown[] {
   const records = store.peek('problems');
   if (!Array.isArray(records)) return [];
   const list: unknown[] = records;
@@ -105,7 +105,7 @@ afterEach(() => {
 
 describe('설치·갱신 때 옛 스크립트 정리의 기다림(결정 0008, architecture 7장 "제한 시간")', () => {
   it('quality 067 quality 068 한 탭이 응답하지 않아도 다른 탭의 실패는 바로 기록하고, 응답하지 않는 탭은 5초가 지나면 timeout으로 기록한다', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     const { install } = fakeChrome(store, [{ id: 1 }, { id: 2 }], (injection) =>
       injection.target.tabId === 1
         ? // 응답하지 않는 탭(예: 로딩이 끝나지 않거나 주 스레드가 붙잡힌 페이지).
@@ -129,7 +129,7 @@ describe('설치·갱신 때 옛 스크립트 정리의 기다림(결정 0008, a
   });
 
   it('quality 067 1.5초보다 늦게 끝난 탭의 실패도 제한 시간 안이면 기록한다(끝까지 돌지 못한 문서에 다시 넣은 뒤)', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     // 처음 넣기는 2초 뒤에 iframe이 끝까지 돌지 못했다고 답하고, 그 문서에 다시 넣으면 0.2초 뒤에 또 그렇게 답한다.
     const { install } = fakeChrome(store, [{ id: 1 }], (injection) =>
       injection.target.documentIds === undefined
@@ -153,7 +153,7 @@ describe('설치·갱신 때 옛 스크립트 정리의 기다림(결정 0008, a
   });
 
   it('quality 067 문제 기록의 저장이 늦어도, 정리가 기록을 시킨 뒤 보낸 문제 알림에 응답이 오면 그 기록은 저장되어 있다(확장 전체 시험이 기록을 읽는 방법)', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     // 응답하지 않는 탭이라 5초에 timeout을 기록하게 시키고, 문제 기록은 저장마다 2초가 걸린다.
     const chrome = fakeChrome(store, [{ id: 1 }], () => new Promise(() => undefined), 2000);
     await import('../../src/entries/sw.ts');

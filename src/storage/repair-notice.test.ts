@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFakeLocalStore } from '../platform/fake.ts';
+import { createFakeStore } from '../platform/fake.ts';
 import type { AppError } from '../shared/index.ts';
 import {
   type RepairNotice,
@@ -178,7 +178,7 @@ describe('확장 화면이 읽는 기록', () => {
   const second: RepairNotice = { stamp: t + 1, ...scope(['sample']), whole: true };
 
   it('열 때 남아 있는 기록을 읽고, 바뀌면 새 기록을 받는다', async () => {
-    const store = createFakeLocalStore({ [repairNoticeKey]: first });
+    const store = createFakeStore({ [repairNoticeKey]: first });
     const watcher = watch(store);
     await settle();
     store.replace(repairNoticeKey, second);
@@ -186,7 +186,7 @@ describe('확장 화면이 읽는 기록', () => {
   });
 
   it('읽기 결과가 바뀜 알림보다 늦게 와도 옛 기록으로 돌아가지 않는다', async () => {
-    const store = createFakeLocalStore({ [repairNoticeKey]: first });
+    const store = createFakeStore({ [repairNoticeKey]: first });
     let release: () => void = () => undefined;
     // 읽기 결과는 시험이 놓아줄 때 온다. 그 결과는 읽기를 시작한 때의 기록이다.
     const watcher = watch({
@@ -209,7 +209,7 @@ describe('확장 화면이 읽는 기록', () => {
   });
 
   it('같은 기록을 두 번 받아도 한 번만 알리고, 형식이 틀린 기록은 넘긴다', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     const watcher = watch(store);
     await settle();
     store.replace(repairNoticeKey, first);
@@ -219,7 +219,7 @@ describe('확장 화면이 읽는 기록', () => {
   });
 
   it('읽지 못하면 알리고, 그만둔 뒤에는 읽기 실패도 바뀜도 알리지 않는다', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     const failing = watch({ ...store, get: () => Promise.reject(new Error('읽기 실패')) });
     await settle();
     expect(failing.problems.map((problem) => problem.kind)).toEqual(['platform']);
@@ -243,7 +243,7 @@ describe('확장 화면이 읽는 기록', () => {
   });
 
   it('그만두면 듣기를 그만두고, 그 직후에 이미 보낸 바뀜 알림이 와도 알리지 않는다', async () => {
-    const store = createFakeLocalStore();
+    const store = createFakeStore();
     let listening = 0;
     // 듣기를 그만두기 전에 보낸 알림이 그만둔 뒤에 닿는 경우: 듣기를 그만둬도 알림이 계속 오게 흉내 낸다.
     const watcher = watch({

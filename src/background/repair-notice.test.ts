@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFakeLocalStore } from '../platform/fake.ts';
+import { createFakeStore } from '../platform/fake.ts';
 import { repairNoticeKey } from '../storage/index.ts';
 import { createRepairNoticeLog } from './repair-notice.ts';
 
@@ -8,7 +8,7 @@ import { createRepairNoticeLog } from './repair-notice.ts';
 const t = 1_790_000_000_000;
 
 function setup(initial?: unknown) {
-  const store = createFakeLocalStore(initial === undefined ? {} : { [repairNoticeKey]: initial });
+  const store = createFakeStore(initial === undefined ? {} : { [repairNoticeKey]: initial });
   const clock = { time: t };
   const log = createRepairNoticeLog({ store, now: () => clock.time });
   return { store, clock, log };
@@ -90,7 +90,7 @@ describe('설정 복구 알림 기록', () => {
   });
 
   it('저장소에 쓰지 못하면 실패를 돌려준다', async () => {
-    const fake = createFakeLocalStore();
+    const fake = createFakeStore();
     const log = createRepairNoticeLog({
       store: { ...fake, set: () => Promise.reject(new Error('quota')) },
       now: () => t,
