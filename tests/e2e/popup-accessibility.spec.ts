@@ -1,5 +1,6 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
+import { type Release, fixtureOther, fixtureTask, releaseKey } from '../extension/fixture-tasks.ts';
 import { expect, fixtureOrigin, openPopupOn, serviceWorkerOf, test } from './support/extension.ts';
 
 // quality 023·024: 확장 화면의 조작 요소에 역할·이름·상태가 있고, 자동 접근성 검사(axe)에서 WCAG 2.2 AA 위반이 없다
@@ -62,4 +63,42 @@ test('quality 023 024 팝업은 범주·기능 항목·쓸 수 없는 이유·�
   const ready = await openPopupOn(context, extensionId, fixture);
   await expect(ready.getByRole('switch', { name: '미디어 배속' })).toBeEnabled();
   await expectNoViolations(ready, '쓸 수 있는 탭');
+});
+
+test.describe('실행 기능(시험 빌드, 결정 0025)', () => {
+  test.use({ extensionBuild: 'fixture' });
+
+  test('quality 023 024 COM-10 팝업은 실행 단추, 진행 중인 작업과 막힌 단추의 이유, 끝난 결과·실패를 보일 때 접근성 위반이 없다', async ({
+    context,
+    extensionId,
+  }) => {
+    const worker = await serviceWorkerOf(context);
+    const page = await context.newPage();
+    await page.goto(`${fixtureOrigin}/blank.html`);
+    const release = (featureId: string, outcome: Release['outcome'], serial: number) =>
+      worker.evaluate(
+        async ({ key, value }) => {
+          await chrome.storage.session.set({ [key]: value });
+        },
+        { key: releaseKey, value: { featureId, outcome, serial } },
+      );
+    const popup = await openPopupOn(context, extensionId, page);
+    await popup.getByRole('tab', { name: '탭' }).click();
+    const run = popup.getByRole('button', { name: fixtureTask.name, exact: true });
+    await expect(run).not.toHaveAttribute('aria-disabled', 'true');
+    await expectNoViolations(popup, '실행 단추');
+
+    await run.click();
+    await expect(popup.getByText('쓸 수 없음: 이 탭에서 시험 작업 진행 중')).toHaveCount(2);
+    await expectNoViolations(popup, '진행 중, 막힌 단추의 이유');
+
+    await release(fixtureTask.id, 'succeed', 1);
+    await expect(popup.locator('.task')).toHaveText(/끝났다/);
+    await expectNoViolations(popup, '끝난 결과');
+
+    await popup.getByRole('button', { name: fixtureOther.name, exact: true }).click();
+    await release(fixtureOther.id, 'fail', 2);
+    await expect(popup.locator('.task')).toHaveText(/실패했다/);
+    await expectNoViolations(popup, '실패한 결과');
+  });
 });

@@ -120,6 +120,7 @@ export default defineConfig(
   {
     ignores: [
       'dist/',
+      'dist-fixture/',
       'coverage/',
       'reports/',
       'test-results/',

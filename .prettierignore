@@ -1,5 +1,6 @@
 # 만들어지는 것과 잠금 파일은 서식 검사에서 뺀다.
 dist/
+dist-fixture/
 coverage/
 reports/
 test-results/

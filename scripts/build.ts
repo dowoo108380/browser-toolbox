@@ -1,16 +1,38 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { type BuildOptions, build } from 'esbuild';
-import { features } from '../src/features/list.ts';
+import { type BuildOptions, type Plugin, build } from 'esbuild';
+import { features as productFeatures } from '../src/features/list.ts';
 import { pageScriptBudgetBytes } from './budgets.ts';
 import { createManifest, minimumChromeVersion } from './manifest.ts';
 import { syncGenerated } from './registry.ts';
 
 // dist/에 압축 해제된 확장을 만든다(결정 0002, 아키텍처 10장).
+// --fixture이면 시험 빌드를 dist-fixture/에 만든다(결정 0025): 진입점이 가져오는 기능 목록과 서비스 워커의 등록 목록만
+// tests/extension/의 것(제품의 목록에 시험 기능을 덧붙인 것)으로 바꾸고 나머지는 제품과 같다. 배포물은 늘 dist/다.
 
 const root = process.cwd();
-const outdir = path.join(root, 'dist');
+const fixture = process.argv.includes('--fixture');
+const outdir = path.join(root, fixture ? 'dist-fixture' : 'dist');
 const watch = process.argv.includes('--watch');
+// 제품 빌드는 시험 코드를 읽지 않는다.
+const features = fixture
+  ? (await import('../tests/extension/features.ts')).features
+  : productFeatures;
+
+// 진입점(src/entries/)이 가져오는 두 목록을 시험 빌드의 것으로 바꾼다. 시험 빌드의 목록이 제품의 목록을 가져올 때는
+// 바꾸지 않는다(가져오는 곳이 진입점이 아니다).
+const fixtureLists: Plugin = {
+  name: 'fixture-lists',
+  setup(builder) {
+    const entries = path.join(root, 'src', 'entries');
+    const replace = (target: string) => (args: { importer: string }) =>
+      path.dirname(args.importer) === entries
+        ? { path: path.join(root, 'tests', 'extension', target) }
+        : undefined;
+    builder.onResolve({ filter: /\/features\/list\.ts$/ }, replace('features.ts'));
+    builder.onResolve({ filter: /\/generated\/sw\.ts$/ }, replace('task-parts.ts'));
+  },
+};
 
 interface PackageJson {
   readonly version: string;
@@ -23,7 +45,7 @@ function readPackageJson(): PackageJson {
   return parsed as PackageJson;
 }
 
-const stale = await syncGenerated(features, root, false);
+const stale = await syncGenerated(productFeatures, root, false);
 if (stale.length > 0) {
   throw new Error(
     `등록 목록이 기능 목록과 맞지 않는다(${stale.join(', ')}). pnpm generate를 실행한다.`,
@@ -44,6 +66,7 @@ const common: BuildOptions = {
   // 타사 라이선스는 THIRD_PARTY_NOTICES.txt에 모은다.
   legalComments: 'none',
   logLevel: 'warning',
+  plugins: fixture ? [fixtureLists] : [],
 };
 
 const builds: BuildOptions[] = [

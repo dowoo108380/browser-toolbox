@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "verify": "pnpm check && pnpm build && pnpm test:e2e && pnpm package",
+    "verify": "pnpm check && pnpm build && pnpm build:fixture && pnpm test:e2e && pnpm package",
     "check": "pnpm generate --check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm structure && pnpm unused && pnpm test",
     "generate": "node scripts/generate.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
@@ -17,6 +17,7 @@
     "unused": "knip",
     "test": "PLAYWRIGHT_BROWSERS_PATH=0 vitest run --coverage",
     "build": "node scripts/build.ts",
+    "build:fixture": "node scripts/build.ts --fixture",
     "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test --project e2e",
     "package": "node scripts/package.ts",
     "measure": "pnpm build && pnpm package && PLAYWRIGHT_BROWSERS_PATH=0 playwright test --project measure --workers 1",

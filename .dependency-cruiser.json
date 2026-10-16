@@ -172,7 +172,9 @@
   ],
   "options": {
     "doNotFollow": { "path": "node_modules" },
-    "exclude": { "path": "^(dist|coverage|test-results|playwright-report|artifacts)/" },
+    "exclude": {
+      "path": "^(dist|dist-fixture|coverage|test-results|playwright-report|artifacts)/"
+    },
     "tsConfig": { "fileName": "tsconfig.node.json" },
     "tsPreCompilationDeps": true,
     "enhancedResolveOptions": { "extensions": [".ts", ".tsx", ".js"] }

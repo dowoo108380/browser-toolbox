@@ -8,6 +8,7 @@ docs/
 # 설치한 것과 만들어지는 것
 node_modules/
 dist/
+dist-fixture/
 coverage/
 reports/
 test-results/
