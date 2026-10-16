@@ -2,12 +2,18 @@ import { h, render } from 'preact';
 import { act } from 'preact/test-utils';
 import {
   type FeatureDefinition,
+  popupRemember,
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
 } from '../../src/contracts/index.ts';
 import type { LocalStore, Requester } from '../../src/platform/index.ts';
-import { settingsFormat, startSettingsReader, watchRepairNotice } from '../../src/storage/index.ts';
+import {
+  readRememberedCategory,
+  settingsFormat,
+  startSettingsReader,
+  watchRepairNotice,
+} from '../../src/storage/index.ts';
 import { PopupApp } from '../../src/ui/index.ts';
 
 // 실제 모듈끼리 연결한 시험(tests/integration)이 팝업을 실제 진입점(src/entries/popup.tsx)과 같게 조립해 그린다.
@@ -39,6 +45,8 @@ export async function renderTestPopup(
         wake: () => request(storageEnsureReady, {}),
         update: (featureId, patch) => request(settingsUpdate, { featureId, patch }),
         dismissRepair: (stamp) => request(repairNoticeDismiss, { stamp }),
+        rememberedCategory: () => readRememberedCategory(store),
+        rememberCategory: (category) => request(popupRemember, { category }),
       }),
       container,
     );

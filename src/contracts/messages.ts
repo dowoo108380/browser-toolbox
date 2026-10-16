@@ -1,5 +1,6 @@
 import * as z from 'zod/mini';
 import { errorKinds } from '../shared/index.ts';
+import { categories } from './feature.ts';
 
 // 구성 요소 사이의 요청은 여기서 한 번만 정의한다(결정 0006). 타입은 스키마에서 끌어낸다.
 export interface RequestDefinition<Type extends string, Payload, Value> {
@@ -65,9 +66,18 @@ export const problemReport = defineRequest({
   senders: 'any',
 });
 
+// 사용자가 팝업에서 범주를 골랐다. 서비스 워커가 남겨 두고, 다음에 팝업을 열 때 그 범주로 연다(COM-2 기대 동작 5, 결정 0023).
+export const popupRemember = defineRequest({
+  type: 'popup.remember',
+  payload: z.object({ category: z.enum(categories) }),
+  value: z.null(),
+  senders: 'extension',
+});
+
 export const requests = [
   settingsUpdate,
   storageEnsureReady,
   repairNoticeDismiss,
   problemReport,
+  popupRemember,
 ] as const;

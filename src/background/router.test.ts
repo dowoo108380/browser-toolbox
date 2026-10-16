@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  popupRemember,
   problemReport,
   repairNoticeDismiss,
   settingsUpdate,
@@ -23,6 +24,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(storageEnsureReady, () => Promise.resolve(ok(null))),
       route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
       route(problemReport, () => Promise.resolve(ok(null))),
+      route(popupRemember, () => Promise.resolve(ok(null))),
     ],
     (error) => unexpected.push(error),
   );
@@ -46,6 +48,21 @@ describe('요청 검증(결정 0006)', () => {
       if (!result.ok) expect(result.error.kind).toBe('permission');
     }
     expect(await router(dismiss, extension)).toEqual(ok(null));
+  });
+
+  it('결정 0023 팝업의 범주는 확장 화면만 남길 수 있고, 모르는 범주는 받지 않는다', async () => {
+    const { router } = setup();
+    const remember = { type: 'popup.remember', payload: { category: 'page' } };
+    expect(await router(remember, extension)).toEqual(ok(null));
+    const fromContent = await router(remember, content);
+    expect(fromContent.ok).toBe(false);
+    if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+    const unknown = await router(
+      { type: 'popup.remember', payload: { category: 'settings' } },
+      extension,
+    );
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) expect(unknown.error.kind).toBe('invalid-input');
   });
 
   it('콘텐츠 스크립트도 준비 요청과 문제 기록은 보낼 수 있다', async () => {
@@ -96,6 +113,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         ),
         route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
         route(problemReport, () => Promise.resolve(ok(null))),
+        route(popupRemember, () => Promise.resolve(ok(null))),
       ],
       (error) => unexpected.push(error),
     );

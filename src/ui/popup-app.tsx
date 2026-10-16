@@ -32,6 +32,10 @@ interface PopupProps {
   ) => Promise<Result<unknown, AppError>>;
   // 사용자가 본 복구 알림(stamp)을 확인했다고 서비스 워커에 알린다.
   readonly dismissRepair: (stamp: number) => Promise<Result<unknown, AppError>>;
+  // 지난번에 고른 범주. 없거나 읽지 못하면 null이다(결정 0023).
+  readonly rememberedCategory: () => Promise<Category | null>;
+  // 고른 범주를 서비스 워커에 남긴다.
+  readonly rememberCategory: (category: Category) => Promise<Result<unknown, AppError>>;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -50,6 +54,8 @@ export function PopupApp({
   wake,
   update,
   dismissRepair,
+  rememberedCategory,
+  rememberCategory,
 }: PopupProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -64,8 +70,30 @@ export function PopupApp({
   // 사용자가 확인한 기록의 stamp. 서비스 워커가 비운 기록이 오기 전에도 감춘다.
   const [confirmedStamp, setConfirmedStamp] = useState<number | null>(null);
   const shownCategories = visibleCategories(features);
-  // 고른 범주. 기능이 하나도 없으면 범주도 없다.
-  const [category, setCategory] = useState<Category | undefined>(shownCategories[0]);
+  // 고른 범주. 기능이 하나도 없으면 범주도 없다. 지난번 범주를 읽기 전에는 범주를 그리지 않는다. 첫 범주를 잠깐
+  // 보였다가 바꾸지 않기 위해서다.
+  const [category, setCategory] = useState<Category | undefined>(undefined);
+  const [categoryRead, setCategoryRead] = useState(false);
+
+  // 지난번에 고른 범주로 연다. 그 범주가 보이지 않거나(기능이 없음) 남긴 것이 없으면 첫 범주다(COM-2 기대 동작 5).
+  useEffect(() => {
+    let open = true;
+    void rememberedCategory().then((remembered) => {
+      if (!open) return;
+      const shown = visibleCategories(features);
+      setCategory(remembered !== null && shown.includes(remembered) ? remembered : shown[0]);
+      setCategoryRead(true);
+    });
+    return () => {
+      open = false;
+    };
+  }, [rememberedCategory, features]);
+
+  const selectCategory = (next: Category) => {
+    setCategory(next);
+    // 남기지 못해도 알리지 않는다. 편의 값이고, 서비스 워커가 기록한다(결정 0023).
+    void rememberCategory(next);
+  };
 
   useEffect(
     () =>
@@ -142,12 +170,16 @@ export function PopupApp({
 
   return (
     <main>
-      {snapshot === null ? (
+      {snapshot === null || !categoryRead ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (
         category !== undefined && (
           <div class="layout">
-            <CategoryTabs categories={shownCategories} selected={category} onSelect={setCategory} />
+            <CategoryTabs
+              categories={shownCategories}
+              selected={category}
+              onSelect={selectCategory}
+            />
             <section
               role="tabpanel"
               id={categoryPanelId(category)}
@@ -173,7 +205,9 @@ export function PopupApp({
           </div>
         )
       )}
-      {snapshot !== null && notice !== null && <p role="status">{notice.message}</p>}
+      {snapshot !== null && categoryRead && notice !== null && (
+        <p role="status">{notice.message}</p>
+      )}
       {!isEmptyRepair(repair) && (
         <section class="repair" aria-label={strings.repairLabel} aria-live="polite">
           {repair.whole && <p>{strings.repairWhole}</p>}

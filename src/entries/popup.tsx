@@ -1,8 +1,18 @@
 import { render } from 'preact';
-import { repairNoticeDismiss, settingsUpdate, storageEnsureReady } from '../contracts/index.ts';
+import {
+  popupRemember,
+  repairNoticeDismiss,
+  settingsUpdate,
+  storageEnsureReady,
+} from '../contracts/index.ts';
 import { features } from '../features/list.ts';
 import { chromeLocalStore, chromeRequester } from '../platform/index.ts';
-import { settingsFormat, startSettingsReader, watchRepairNotice } from '../storage/index.ts';
+import {
+  readRememberedCategory,
+  settingsFormat,
+  startSettingsReader,
+  watchRepairNotice,
+} from '../storage/index.ts';
 import { PopupApp } from '../ui/index.ts';
 
 const request = chromeRequester();
@@ -22,6 +32,8 @@ render(
     wake={() => request(storageEnsureReady, {})}
     update={(featureId, patch) => request(settingsUpdate, { featureId, patch })}
     dismissRepair={(stamp) => request(repairNoticeDismiss, { stamp })}
+    rememberedCategory={() => readRememberedCategory(store)}
+    rememberCategory={(category) => request(popupRemember, { category })}
   />,
   root,
 );

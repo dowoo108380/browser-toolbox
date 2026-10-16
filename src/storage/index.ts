@@ -8,6 +8,7 @@ export {
 export { type Snapshot, settingsOf } from './reader.ts';
 export { type Repair, checkFinal, checkSize, nextRevision, normalize } from './write.ts';
 export { type SettingsReaderHandlers, startSettingsReader } from './subscribe.ts';
+export { popupStateKey, popupStateOf, readRememberedCategory } from './popup-state.ts';
 export {
   type RepairNotice,
   type RepairNoticeHandlers,

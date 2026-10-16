@@ -1,5 +1,6 @@
 import {
   type FeatureDefinition,
+  popupRemember,
   problemReport,
   repairNoticeDismiss,
   settingsUpdate,
@@ -8,6 +9,7 @@ import {
 import type { LocalStore, Sender } from '../platform/index.ts';
 import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
+import { createPopupState } from './popup-state.ts';
 import { createProblemLog } from './problems.ts';
 import { createRepairNoticeLog } from './repair-notice.ts';
 import { createRouter, route } from './router.ts';
@@ -45,6 +47,7 @@ export function startBackground(deps: BackgroundDeps): void {
     record,
     noticeRepair: repairNotice.add,
   });
+  const popupState = createPopupState({ store: deps.store, record });
   const router = createRouter(
     [
       route(settingsUpdate, (payload) => settings.updateFeature(payload.featureId, payload.patch)),
@@ -54,6 +57,7 @@ export function startBackground(deps: BackgroundDeps): void {
         await problems.record(payload);
         return ok(null);
       }),
+      route(popupRemember, (payload) => popupState.remember(payload.category)),
     ],
     () => {
       record({ featureId: null, kind: 'unexpected' });

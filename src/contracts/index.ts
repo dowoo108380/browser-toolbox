@@ -7,6 +7,7 @@ export {
 } from './feature.ts';
 export {
   type RequestDefinition,
+  popupRemember,
   problemReport,
   repairNoticeDismiss,
   requests,

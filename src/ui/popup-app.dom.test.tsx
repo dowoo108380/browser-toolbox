@@ -70,19 +70,31 @@ const manyCategories = [
   toggleFeature('volume', 'media', '음량 기능'),
 ];
 
+// 그린 뒤 바로 풀리는 Promise(지난번 범주 읽기 등)의 결과까지 그린다.
+const settle = () =>
+  act(async () => {
+    await Promise.resolve();
+  });
+
 interface Options {
   readonly features?: readonly FeatureDefinition[];
   readonly wake?: () => Promise<Result<unknown, AppError>>;
   readonly update?: () => Promise<Result<unknown, AppError>>;
+  // 지난번 범주를 읽는 함수. 없으면 남긴 범주가 없다.
+  readonly readRemembered?: () => Promise<Category | null>;
+  readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
 }
 
 async function show({
   features = [feature],
   wake = () => Promise.resolve(ok(null)),
   update,
+  readRemembered = () => Promise.resolve(null),
+  remember = () => Promise.resolve(ok(null)),
 }: Options = {}) {
   const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
   const wakes = vi.fn(wake);
+  const remembers = vi.fn(remember);
   // 저장된 설정을 바로 준다. 저장이 성공해도 바뀜 알림은 시험이 직접 보낸다.
   let handlers: SettingsReaderHandlers | undefined;
   const subscribe = (next: SettingsReaderHandlers) => {
@@ -99,10 +111,13 @@ async function show({
         wake={wakes}
         update={updates}
         dismissRepair={() => Promise.resolve(ok(null))}
+        rememberedCategory={readRemembered}
+        rememberCategory={remembers}
       />,
       container,
     );
   });
+  await settle();
   const toggle = () => {
     const element = container.querySelector<HTMLInputElement>('[role=switch]');
     if (element === null) throw new Error('스위치가 없다.');
@@ -117,6 +132,7 @@ async function show({
       }),
     updates,
     wakes,
+    remembers,
     state: () => container.querySelector('.state')?.textContent,
     status: () => container.querySelector('[role=status]')?.textContent,
     apply: (snapshot: Snapshot) => act(() => handlers?.apply(snapshot)),
@@ -193,6 +209,62 @@ describe('COM-2 범주 목록(결정 0023)', () => {
     popup.tab('미디어').focus();
     await press('ArrowDown', { ctrlKey: true });
     expect(popup.selectedTab()).toBe('미디어');
+  });
+
+  it('COM-2 기대 동작 5 지난번에 고른 범주로 연다', async () => {
+    const popup = await show({
+      features: manyCategories,
+      readRemembered: () => Promise.resolve('page'),
+    });
+    expect(popup.selectedTab()).toBe('페이지');
+    expect(popup.panelFeatures()).toEqual(['숨김 기능']);
+  });
+
+  it('지난번 범주에 기능이 없으면(보이지 않는 범주) 첫 범주로 연다', async () => {
+    const popup = await show({
+      features: manyCategories,
+      readRemembered: () => Promise.resolve('youtube'),
+    });
+    expect(popup.selectedTab()).toBe('미디어');
+  });
+
+  it('지난번 범주를 읽기 전에는 범주를 그리지 않는다(첫 범주를 잠깐 보였다가 바꾸지 않는다)', async () => {
+    let answer: (category: Category | null) => void = () => undefined;
+    const popup = await show({
+      features: manyCategories,
+      readRemembered: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    expect(container.querySelector('[role=tablist]')).toBeNull();
+    answer('chatgpt');
+    await settle();
+    expect(popup.selectedTab()).toBe('ChatGPT');
+  });
+
+  it('범주를 고를 때마다(누르기, 방향키) 그 범주를 남긴다. 연 것만으로는 남기지 않는다', async () => {
+    const popup = await show({ features: manyCategories });
+    expect(popup.remembers).not.toHaveBeenCalled();
+    await act(() => {
+      popup.tab('페이지').click();
+    });
+    popup.tab('페이지').focus();
+    await press('ArrowDown');
+    expect(popup.remembers.mock.calls).toEqual([['page'], ['chatgpt']]);
+  });
+
+  it('범주를 남기지 못해도 알리지 않는다(편의 값이고 서비스 워커가 기록한다)', async () => {
+    const popup = await show({
+      features: manyCategories,
+      remember: () => Promise.resolve(err(appError('platform', '남기지 못했다.'))),
+    });
+    await act(async () => {
+      popup.tab('페이지').click();
+      await Promise.resolve();
+    });
+    expect(popup.selectedTab()).toBe('페이지');
+    expect(popup.status()).toBeUndefined();
   });
 
   it('스위치의 이름은 기능 이름이고, 설명을 그 스위치의 설명으로 잇는다', async () => {
@@ -311,10 +383,13 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           wake={() => Promise.resolve(ok(null))}
           update={() => Promise.resolve(ok(null))}
           dismissRepair={dismissals}
+          rememberedCategory={() => Promise.resolve(null)}
+          rememberCategory={() => Promise.resolve(ok(null))}
         />,
         container,
       );
     });
+    await settle();
     return {
       dismissals,
       repairText: () => container.querySelector('.repair')?.textContent ?? null,
