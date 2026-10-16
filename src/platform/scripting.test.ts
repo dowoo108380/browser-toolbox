@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppError } from '../shared/index.ts';
-import { retireInAllFrames, retireTimeoutMs } from './scripting.ts';
+import {
+  hasPageRuntime,
+  probePageRuntime,
+  retireInAllFrames,
+  retireTimeoutMs,
+} from './scripting.ts';
 
 // 새 판이 열린 탭의 모든 프레임에 정리 함수를 넣는 일(결정 0008)의 Chrome 경계. 진짜 chrome 대신 시험이 만든 객체를 전역에 둔다.
 // 오류 문구와 결과의 모양은 Chromium 156에서 실제로 받은 것이다(결정 0008 고친 기록 2026-10-14, 실험).
@@ -226,5 +231,61 @@ describe('열린 탭의 옛 스크립트 정리의 기다림(아키텍처 7장 "
     await vi.advanceTimersByTimeAsync(retireTimeoutMs + 200);
     expect(retire.reported).toEqual(['timeout']);
     expect(executeScript).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('결정 0023 지금 탭의 탐침', () => {
+  // 탐침이 넣는 인자와, 그 결과를 정하는 가짜 executeScript.
+  function fakeProbe(answer: () => Promise<readonly FrameResult[]>) {
+    const executeScript = vi.fn(() => answer());
+    vi.stubGlobal('chrome', { scripting: { executeScript } });
+    return executeScript;
+  }
+
+  it('최상위 문서에만 바로 넣고, 실행 틀이 있는지 돌려준다', async () => {
+    const executeScript = fakeProbe(() => Promise.resolve([{ documentId: 'a', result: true }]));
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', runtime: true });
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 7, frameIds: [0] },
+        args: ['key'],
+        injectImmediately: true,
+      }),
+    );
+    fakeProbe(() => Promise.resolve([{ documentId: 'a', result: false }]));
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', runtime: false });
+  });
+
+  it('Chrome이 넣을 수 없는 페이지라고 거절하면 unavailable이다(Chromium 156에서 받은 문구)', async () => {
+    const messages = [
+      'Cannot access a chrome:// URL',
+      'Cannot access contents of the page. Extension manifest must request permission to access the respective host.',
+      'The extensions gallery cannot be scripted.',
+      'Frame with ID 0 is showing error page',
+      'No tab with id: 7.',
+    ];
+    for (const message of messages) {
+      fakeProbe(() => Promise.reject(new Error(message)));
+      expect(await probePageRuntime(7, 'key'), message).toEqual({ status: 'unavailable' });
+    }
+  });
+
+  it('그 밖의 거절과 결과가 없는 응답은 failed다(숨기지 않고 부르는 쪽이 기록한다)', async () => {
+    fakeProbe(() => Promise.reject(new Error('Something new')));
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'failed' });
+    fakeProbe(() => Promise.resolve([]));
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'failed' });
+  });
+
+  it('탐침 함수는 그 이름의 표식이 참일 때만 참이다', () => {
+    const key = 'browser-toolbox.test-runtime';
+    expect(hasPageRuntime(key)).toBe(false);
+    Reflect.set(globalThis, Symbol.for(key), true);
+    try {
+      expect(hasPageRuntime(key)).toBe(true);
+      expect(hasPageRuntime()).toBe(false);
+    } finally {
+      Reflect.deleteProperty(globalThis, Symbol.for(key));
+    }
   });
 });

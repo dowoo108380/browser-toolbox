@@ -10,6 +10,8 @@ import {
   indicatorTexts,
   insecureFixtureOrigin,
   openPopup,
+  openPopupOn,
+  tabStatusOf,
   test,
 } from './support/extension.ts';
 
@@ -168,6 +170,12 @@ for (const { label, origin, secure } of origins) {
     // 정리 함수가 모든 프레임에서 끝까지 돌았으면 새 판은 문제를 기록하지 않는다. 함수가 페이지에서 예외를 내면
     // 여기에 unexpected가 남는다(quality 067, 2026-10-14 전에는 흔적 없이 지나갔다).
     expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+
+    // 그 탭에서 팝업을 열면 새로 고쳐야 쓸 수 있다고 안내하고(COM-7 기대 동작 2, 결정 0023), 새로 고치면 쓸 수 있다.
+    const reopened = await openPopupOn(context, extensionId, page);
+    await expect(reopened.getByText('쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음')).toBeVisible();
+    await page.reload();
+    expect(await tabStatusOf(reopened, page)).toEqual({ ok: true, value: { page: 'ready' } });
   });
 }
 

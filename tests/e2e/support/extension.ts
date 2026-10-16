@@ -7,6 +7,7 @@ import {
   test as base,
   chromium,
 } from '@playwright/test';
+import { tabStatus } from '../../../src/contracts/index.ts';
 
 // 빌드한 확장을 올린 Chromium(R-01). 테스트마다 새 프로필에서 시작한다(quality 104).
 
@@ -73,6 +74,42 @@ export async function openPopup(context: BrowserContext, extensionId: string): P
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   return popup;
+}
+
+// 팝업 문서를 page가 있는 창의 뒤쪽 탭으로 연다. 그래서 실제 팝업처럼 그 문서가 보는 "그 창의 지금 탭"이 page다
+// (결정 0023). page를 앞으로 가져온 뒤, 잠시 연 다른 팝업 문서가 그 창에 뒤쪽 탭을 만든다. Playwright가 연 페이지는
+// 모두 한 창에 있다(2026-10-16 실험).
+export async function openPopupOn(
+  context: BrowserContext,
+  extensionId: string,
+  page: Page,
+): Promise<Page> {
+  const url = `chrome-extension://${extensionId}/popup.html`;
+  const helper = await context.newPage();
+  await helper.goto(url);
+  await page.bringToFront();
+  const opened = context.waitForEvent('page');
+  await helper.evaluate(async (popupUrl) => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab === undefined) throw new Error('지금 탭이 없다.');
+    await chrome.tabs.create({ url: popupUrl, active: false, windowId: tab.windowId });
+  }, url);
+  const popup = await opened;
+  await helper.close();
+  await popup.waitForLoadState();
+  return popup;
+}
+
+// page의 탭 상태를 확장 화면(extensionPage)에서 묻는다. 팝업이 열 때 보내는 것과 같은 요청(tab.status)이다.
+// 확장은 Chrome 내부 페이지의 주소를 볼 수 없으므로 page를 앞으로 가져와 그 창의 지금 탭으로 찾는다.
+export async function tabStatusOf(extensionPage: Page, page: Page): Promise<unknown> {
+  await page.bringToFront();
+  return extensionPage.evaluate(async (type) => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id === undefined) throw new Error('지금 탭이 없다.');
+    const answer: unknown = await chrome.runtime.sendMessage({ type, payload: { tabId: tab.id } });
+    return answer;
+  }, tabStatus.type);
 }
 
 interface ShadowNode {

@@ -2,7 +2,12 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as z from 'zod/mini';
-import { type Category, type FeatureDefinition, defineFeature } from '../contracts/index.ts';
+import {
+  type Category,
+  type FeatureDefinition,
+  type PageAccess,
+  defineFeature,
+} from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type {
   RepairNotice,
@@ -90,6 +95,8 @@ interface Options {
   // 지난번 범주를 읽는 함수. 없으면 남긴 범주가 없다.
   readonly readRemembered?: () => Promise<Category | null>;
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
+  readonly currentTab?: () => Promise<number | null>;
+  readonly tabStatus?: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
 }
 
 async function show({
@@ -98,10 +105,13 @@ async function show({
   update,
   readRemembered = () => Promise.resolve(null),
   remember = () => Promise.resolve(ok(null)),
+  currentTab = () => Promise.resolve(7),
+  tabStatus = () => Promise.resolve(ok({ page: 'ready' as const })),
 }: Options = {}) {
   const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
   const wakes = vi.fn(wake);
   const remembers = vi.fn(remember);
+  const statuses = vi.fn(tabStatus);
   // 저장된 설정을 바로 준다. 저장이 성공해도 바뀜 알림은 시험이 직접 보낸다.
   let handlers: SettingsReaderHandlers | undefined;
   const subscribe = (next: SettingsReaderHandlers) => {
@@ -120,6 +130,8 @@ async function show({
         dismissRepair={() => Promise.resolve(ok(null))}
         rememberedCategory={readRemembered}
         rememberCategory={remembers}
+        currentTab={currentTab}
+        tabStatus={statuses}
       />,
       container,
     );
@@ -140,6 +152,7 @@ async function show({
     updates,
     wakes,
     remembers,
+    statuses,
     state: () => container.querySelector('.state')?.textContent,
     status: () => container.querySelector('[role=status]')?.textContent,
     apply: (snapshot: Snapshot) => act(() => handlers?.apply(snapshot)),
@@ -381,6 +394,67 @@ describe('COM-2 기능 검색(결정 0023)', () => {
   });
 });
 
+describe('COM-2 기대 동작 4 지금 탭에서 쓸 수 없는 기능의 이유(결정 0023)', () => {
+  // 페이지에 작용하는 기능과 그렇지 않은 기능(시험 기능)이 같은 범주에 있다.
+  const onPages = defineFeature({
+    ...feature,
+    id: 'on-pages',
+    name: '페이지 기능',
+    content: { sites: 'all', frames: 'all' },
+  });
+  const both = [onPages, feature];
+
+  const reasonOf = (featureId: string) =>
+    container
+      .querySelector(`[data-feature="${featureId}"]`)
+      ?.closest('li')
+      ?.querySelector('.reason')?.textContent ?? null;
+
+  it('COM-2.3 지금 탭에 확장이 접근할 수 없으면 페이지에 작용하는 기능에만 이유를 보이고 스위치의 설명으로 잇는다. 스위치는 막지 않는다', async () => {
+    const popup = await show({
+      features: both,
+      tabStatus: () => Promise.resolve(ok({ page: 'denied' as const })),
+    });
+    await popup.awake();
+    expect(popup.statuses).toHaveBeenCalledWith(7);
+    expect(reasonOf('on-pages')).toBe('쓸 수 없음: 확장이 이 페이지에 접근할 수 없음');
+    expect(reasonOf('sample')).toBeNull();
+    const toggle = container.querySelector<HTMLInputElement>('[data-feature="on-pages"]');
+    const described = (toggle?.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent);
+    expect(described).toEqual(['시험용', '쓸 수 없음: 확장이 이 페이지에 접근할 수 없음']);
+    expect(toggle?.disabled).toBe(false);
+  });
+
+  it('COM-7 기대 동작 2 실행 틀이 없는 탭이면 새로 고쳐야 쓸 수 있다고 보인다', async () => {
+    await show({
+      features: both,
+      tabStatus: () => Promise.resolve(ok({ page: 'reload' as const })),
+    });
+    expect(reasonOf('on-pages')).toBe('쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음');
+  });
+
+  it('쓸 수 있는 탭이면 이유가 없다', async () => {
+    const popup = await show({ features: both });
+    expect(popup.statuses).toHaveBeenCalledTimes(1);
+    expect(reasonOf('on-pages')).toBeNull();
+  });
+
+  it('상태를 얻지 못하면 이유 없이 그 까닭을 알린다', async () => {
+    const timeout = appError('timeout', '확장의 응답이 없다. 잠시 뒤 다시 한다.');
+    const popup = await show({ features: both, tabStatus: () => Promise.resolve(err(timeout)) });
+    expect(popup.status()).toBe(timeout.message);
+    expect(reasonOf('on-pages')).toBeNull();
+  });
+
+  it('지금 탭을 알 수 없으면 묻지 않고 그렇다고 알린다', async () => {
+    const popup = await show({ features: both, currentTab: () => Promise.resolve(null) });
+    expect(popup.statuses).not.toHaveBeenCalled();
+    expect(popup.status()).toBe('지금 탭을 알 수 없어 기능을 쓸 수 있는지 확인하지 못했다.');
+  });
+});
+
 describe('COM-3 기대 동작 3 저장에 실패하면 화면은 저장된 값을 보인다', () => {
   it('COM-3.3 같은 저장 실패가 두 번 이어져도 그때마다 스위치를 저장된 값으로 되돌린다', async () => {
     const popup = await show({ update: () => Promise.resolve(err(saveFailed)) });
@@ -489,6 +563,8 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           dismissRepair={dismissals}
           rememberedCategory={() => Promise.resolve(null)}
           rememberCategory={() => Promise.resolve(ok(null))}
+          currentTab={() => Promise.resolve(1)}
+          tabStatus={() => Promise.resolve(ok({ page: 'ready' as const }))}
         />,
         container,
       );

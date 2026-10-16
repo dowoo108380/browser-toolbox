@@ -6,5 +6,12 @@ export {
   isExtensionConnected,
   listenRequests,
 } from './messaging.ts';
-export { retireInAllFrames, retireInFrame, retireTimeoutMs } from './scripting.ts';
+export {
+  type PageProbe,
+  probePageRuntime,
+  retireInAllFrames,
+  retireInFrame,
+  retireTimeoutMs,
+} from './scripting.ts';
+export { currentTabId } from './tabs.ts';
 export { listenInstalled } from './runtime.ts';

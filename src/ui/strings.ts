@@ -11,6 +11,11 @@ export const strings = {
   searchPlaceholder: '기능 검색(Ctrl+K)',
   searchResultsLabel: '검색 결과',
   noResults: '맞는 기능이 없다.',
+  // 지금 탭에서 쓸 수 없는 기능의 이유(quality 018, 026). '쓸 수 없음'은 모든 화면에서 같은 상태 문구다.
+  unavailable: (reason: string) => `쓸 수 없음: ${reason}`,
+  pageDenied: '확장이 이 페이지에 접근할 수 없음',
+  pageReload: '이 탭을 새로 고쳐야 쓸 수 있음',
+  noCurrentTab: '지금 탭을 알 수 없어 기능을 쓸 수 있는지 확인하지 못했다.',
   categories: {
     media: '미디어',
     youtube: 'YouTube',

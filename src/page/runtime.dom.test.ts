@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { retireEventName } from '../contracts/index.ts';
+import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
 import {
   claimAttribute,
   createIsolatedHost,
@@ -19,7 +19,7 @@ afterEach(() => {
   for (const deps of started.splice(0)) deps.isConnected = () => false;
   document.dispatchEvent(new Event(retireEventName));
   for (const element of document.querySelectorAll(`[${pageElementAttribute}]`)) element.remove();
-  Reflect.deleteProperty(globalThis, Symbol.for('browser-toolbox.page-runtime'));
+  Reflect.deleteProperty(globalThis, Symbol.for(pageRuntimeKey));
 });
 
 function snapshot(features: Record<string, unknown>): Snapshot {

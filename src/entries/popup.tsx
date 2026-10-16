@@ -4,9 +4,10 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabStatus,
 } from '../contracts/index.ts';
 import { features } from '../features/list.ts';
-import { chromeLocalStore, chromeRequester } from '../platform/index.ts';
+import { chromeLocalStore, chromeRequester, currentTabId } from '../platform/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
@@ -34,6 +35,8 @@ render(
     dismissRepair={(stamp) => request(repairNoticeDismiss, { stamp })}
     rememberedCategory={() => readRememberedCategory(store)}
     rememberCategory={(category) => request(popupRemember, { category })}
+    currentTab={currentTabId}
+    tabStatus={(tabId) => request(tabStatus, { tabId })}
   />,
   root,
 );

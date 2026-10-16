@@ -74,10 +74,26 @@ export const popupRemember = defineRequest({
   senders: 'extension',
 });
 
+// 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지(결정 0023). ready: 이 확장의 실행 틀이 그 탭의 최상위 문서에서
+// 돈다. reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시 불러오기 전에 연 페이지, 새로 고치면 쓸 수 있다).
+// denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
+const pageAccesses = ['ready', 'reload', 'denied'] as const;
+
+export type PageAccess = (typeof pageAccesses)[number];
+
+// 팝업이 자기 창의 지금 탭의 상태를 묻는다(COM-2 기대 동작 4, COM-7 기대 동작 2, 결정 0023).
+export const tabStatus = defineRequest({
+  type: 'tab.status',
+  payload: z.object({ tabId: z.int() }),
+  value: z.object({ page: z.enum(pageAccesses) }),
+  senders: 'extension',
+});
+
 export const requests = [
   settingsUpdate,
   storageEnsureReady,
   repairNoticeDismiss,
   problemReport,
   popupRemember,
+  tabStatus,
 ] as const;

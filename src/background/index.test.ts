@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { startTestBackground } from '../../tests/support/background.ts';
 import { specs, stored } from '../../tests/support/settings.ts';
+import { tabStatus } from '../contracts/index.ts';
 import { createFakeLocalStore } from '../platform/fake.ts';
-import type { LocalStore } from '../platform/index.ts';
+import type { LocalStore, PageProbe } from '../platform/index.ts';
 import { type AppError, appError } from '../shared/index.ts';
 import { settingsFormat, settingsKey } from '../storage/index.ts';
 import { startBackground } from './index.ts';
@@ -29,6 +31,7 @@ function start(
       installed = listener;
     },
     retireOldScripts: retire,
+    probePage: () => Promise.resolve({ status: 'ran', runtime: true }),
   });
   return () => {
     installed();
@@ -128,5 +131,45 @@ describe('설치·갱신 때 옛 스크립트 정리(결정 0008)', () => {
     await vi.waitFor(() => {
       expect(recordedKinds(failing)).toEqual(['platform']);
     });
+  });
+});
+
+describe('결정 0023 지금 탭의 상태(tab.status)', () => {
+  async function statusWith(probe: PageProbe) {
+    const store = createFakeLocalStore();
+    const probed: number[] = [];
+    const request = startTestBackground({
+      store,
+      features: specs,
+      startTime: 1_790_000_000_000,
+      probePage: (tabId) => {
+        probed.push(tabId);
+        return Promise.resolve(probe);
+      },
+    });
+    const result = await request(tabStatus, { tabId: 7 });
+    await settle();
+    return { result, probed, recorded: recordedKinds(store) };
+  }
+
+  it('그 탭의 최상위 문서에 실행 틀이 있으면 ready, 넣을 수는 있는데 없으면 reload다', async () => {
+    const ready = await statusWith({ status: 'ran', runtime: true });
+    expect(ready.result).toEqual({ ok: true, value: { page: 'ready' } });
+    expect(ready.probed).toEqual([7]);
+    const reload = await statusWith({ status: 'ran', runtime: false });
+    expect(reload.result).toEqual({ ok: true, value: { page: 'reload' } });
+    expect(reload.recorded).toEqual([]);
+  });
+
+  it('Chrome이 알려진 문구로 거절하면 denied이고 기록하지 않는다', async () => {
+    const denied = await statusWith({ status: 'unavailable' });
+    expect(denied.result).toEqual({ ok: true, value: { page: 'denied' } });
+    expect(denied.recorded).toEqual([]);
+  });
+
+  it('quality 067 알려지지 않은 거절도 denied로 답하되 platform으로 기록한다', async () => {
+    const failed = await statusWith({ status: 'failed' });
+    expect(failed.result).toEqual({ ok: true, value: { page: 'denied' } });
+    expect(failed.recorded).toEqual(['platform']);
   });
 });

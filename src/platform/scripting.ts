@@ -127,6 +127,44 @@ async function retireInTab(
   return null;
 }
 
+// 탭의 최상위 문서에서 이 확장의 실행 틀이 도는지(결정 0023). 이 확장의 격리된 세계에서 돌므로 실행 틀이 그 세계의
+// 전역에 둔 표식이 보인다. 확장을 다시 불러온 뒤의 옛 탭은 새 세계라 표식이 없다(2026-10-16 실험). Chrome이 함수
+// 본문만 옮겨 실행하므로 바깥의 이름을 쓰지 않고 표식 이름을 args로 받는다.
+export function hasPageRuntime(key?: string): boolean {
+  return key !== undefined && Reflect.get(globalThis, Symbol.for(key)) === true;
+}
+
+// 탐침 결과. ran: 넣었고 실행 틀이 있는지(runtime), unavailable: Chrome이 그 페이지에 넣기를 거절함(확장이 접근할 수
+// 없는 페이지), failed: 그 밖의 거절.
+export type PageProbe =
+  | { readonly status: 'ran'; readonly runtime: boolean }
+  | { readonly status: 'unavailable' }
+  | { readonly status: 'failed' };
+
+// 넣을 수 없는 페이지의 거절 문구. 정리의 것(cannotInject)에 더해, 팝업은 http·https가 아닌 탭에서도 열리므로 Chrome
+// 내부 페이지의 문구를 더한다. 빈 탭, file:, data:, 이 확장의 페이지는 "Cannot access contents of the page"다
+// (2026-10-16 실험, Chromium 156).
+const cannotProbe = [...cannotInject, /Cannot access a chrome:\/\/ URL/];
+
+export async function probePageRuntime(tabId: number, runtimeKey: string): Promise<PageProbe> {
+  try {
+    const [frame] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: hasPageRuntime,
+      args: [runtimeKey],
+      // 문서가 다 실리기를 기다릴 이유가 없다(정리와 같은 까닭).
+      injectImmediately: true,
+    });
+    if (frame === undefined) return { status: 'failed' };
+    return { status: 'ran', runtime: frame.result === true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return cannotProbe.some((known) => known.test(message))
+      ? { status: 'unavailable' }
+      : { status: 'failed' };
+  }
+}
+
 // 한 탭을 정리하는 기다림의 제한 시간(아키텍처 7장 "비동기, 제한 시간, 취소"). 바로 넣으므로 보통 곧 끝난다. 그 탭의
 // 페이지가 주 스레드를 붙잡고 있으면 Chrome은 풀릴 때까지 함수를 돌리지 못하고 기다린다(2026-10-14 확장 전체 시험).
 // 메시지의 기본 제한 시간과 같게 둔다.

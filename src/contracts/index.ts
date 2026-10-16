@@ -6,6 +6,7 @@ export {
   defineFeature,
 } from './feature.ts';
 export {
+  type PageAccess,
   type RequestDefinition,
   popupRemember,
   problemReport,
@@ -14,5 +15,6 @@ export {
   responseSchema,
   settingsUpdate,
   storageEnsureReady,
+  tabStatus,
 } from './messages.ts';
-export { retireEventName } from './events.ts';
+export { pageRuntimeKey, retireEventName } from './events.ts';

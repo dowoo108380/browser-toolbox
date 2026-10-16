@@ -5,6 +5,7 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabStatus,
 } from '../contracts/index.ts';
 import type { Sender } from '../platform/index.ts';
 import { appError, err, ok } from '../shared/index.ts';
@@ -25,6 +26,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
       route(problemReport, () => Promise.resolve(ok(null))),
       route(popupRemember, () => Promise.resolve(ok(null))),
+      route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
     ],
     (error) => unexpected.push(error),
   );
@@ -63,6 +65,15 @@ describe('요청 검증(결정 0006)', () => {
     );
     expect(unknown.ok).toBe(false);
     if (!unknown.ok) expect(unknown.error.kind).toBe('invalid-input');
+  });
+
+  it('결정 0023 지금 탭의 상태는 확장 화면만 물을 수 있다', async () => {
+    const { router } = setup();
+    const status = { type: 'tab.status', payload: { tabId: 3 } };
+    expect(await router(status, extension)).toEqual(ok({ page: 'ready' }));
+    const fromContent = await router(status, content);
+    expect(fromContent.ok).toBe(false);
+    if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
   });
 
   it('콘텐츠 스크립트도 준비 요청과 문제 기록은 보낼 수 있다', async () => {
@@ -114,6 +125,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
         route(problemReport, () => Promise.resolve(ok(null))),
         route(popupRemember, () => Promise.resolve(ok(null))),
+        route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
       ],
       (error) => unexpected.push(error),
     );

@@ -6,6 +6,7 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabStatus,
 } from '../../src/contracts/index.ts';
 import type { LocalStore, Requester } from '../../src/platform/index.ts';
 import {
@@ -47,6 +48,9 @@ export async function renderTestPopup(
         dismissRepair: (stamp) => request(repairNoticeDismiss, { stamp }),
         rememberedCategory: () => readRememberedCategory(store),
         rememberCategory: (category) => request(popupRemember, { category }),
+        // 지금 탭은 시험이 정하지 않는다. 탐침 결과는 서비스 워커의 probePage가 정한다.
+        currentTab: () => Promise.resolve(1),
+        tabStatus: (tabId) => request(tabStatus, { tabId }),
       }),
       container,
     );

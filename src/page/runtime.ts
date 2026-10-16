@@ -1,4 +1,4 @@
-import { retireEventName } from '../contracts/index.ts';
+import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
 import { type Scope, claimOwnedHosts, createScope } from '../dom/index.ts';
 import type { AppError, ErrorKind, Result } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
@@ -22,7 +22,7 @@ interface PageRuntimeDeps {
 
 // 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4).
 // 격리된 쪽의 전역은 같은 확장의 콘텐츠 스크립트끼리만 함께 본다.
-const runtimeMarker = Symbol.for('browser-toolbox.page-runtime');
+const runtimeMarker = Symbol.for(pageRuntimeKey);
 
 // 물러남 이벤트를 받았는데 아직 연결되어 있을 때 다시 확인하는 때(ms). 끝없이 확인하지 않는다(quality 069).
 const retireRecheckDelaysMs = [200, 1000, 5000];

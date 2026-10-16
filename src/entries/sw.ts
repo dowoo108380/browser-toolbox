@@ -1,11 +1,12 @@
 import { startBackground } from '../background/index.ts';
-import { retireEventName } from '../contracts/index.ts';
+import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
 import { claimAttribute, pageElementAttribute } from '../dom/index.ts';
 import { features } from '../features/list.ts';
 import {
   chromeLocalStore,
   listenInstalled,
   listenRequests,
+  probePageRuntime,
   retireInAllFrames,
 } from '../platform/index.ts';
 import { settingsFormat } from '../storage/index.ts';
@@ -27,4 +28,5 @@ startBackground({
       { eventName: retireEventName, elementAttribute: pageElementAttribute, claimAttribute },
       report,
     ),
+  probePage: (tabId) => probePageRuntime(tabId, pageRuntimeKey),
 });

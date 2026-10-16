@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { Category, FeatureDefinition } from '../contracts/index.ts';
-import type { AppError, Result } from '../shared/index.ts';
+import type { Category, FeatureDefinition, PageAccess } from '../contracts/index.ts';
+import { type AppError, type Result, appError, err } from '../shared/index.ts';
 import {
   type RepairNotice,
   type RepairNoticeHandlers,
@@ -12,6 +12,7 @@ import {
   noRepair,
   settingsOf,
 } from '../storage/index.ts';
+import { unavailableReason } from './availability.ts';
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
 import { FeatureItem } from './feature-item.tsx';
@@ -39,6 +40,10 @@ interface PopupProps {
   readonly rememberedCategory: () => Promise<Category | null>;
   // 고른 범주를 서비스 워커에 남긴다.
   readonly rememberCategory: (category: Category) => Promise<Result<unknown, AppError>>;
+  // 팝업이 붙은 창의 지금 탭. 없으면 null이다.
+  readonly currentTab: () => Promise<number | null>;
+  // 그 탭에서 페이지에 작용하는 기능을 쓸 수 있는지 서비스 워커에 묻는다(결정 0023).
+  readonly tabStatus: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -59,6 +64,8 @@ export function PopupApp({
   dismissRepair,
   rememberedCategory,
   rememberCategory,
+  currentTab,
+  tabStatus,
 }: PopupProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -91,6 +98,26 @@ export function PopupApp({
       open = false;
     };
   }, [rememberedCategory, features]);
+
+  // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지. 받기 전이나 받지 못했으면 null이라 이유를 보이지 않는다.
+  // 받지 못한 까닭은 알림으로 보인다. 팝업이 열린 동안 탭이 바뀌어도 다시 묻지 않는다(결정 0023).
+  const [page, setPage] = useState<PageAccess | null>(null);
+  useEffect(() => {
+    let open = true;
+    const ask = async () => {
+      const tabId = await currentTab();
+      if (tabId === null) return err(appError('unavailable', strings.noCurrentTab));
+      return tabStatus(tabId);
+    };
+    void ask().then((result) => {
+      if (!open) return;
+      if (result.ok) setPage(result.value.page);
+      else setNotice({ message: result.error.message });
+    });
+    return () => {
+      open = false;
+    };
+  }, [currentTab, tabStatus]);
 
   const selectCategory = (next: Category) => {
     setCategory(next);
@@ -259,6 +286,7 @@ export function PopupApp({
                           onToggle={(enabled) => {
                             void toggle(feature.id, enabled);
                           }}
+                          unavailable={unavailableReason(feature, page)}
                         />
                       ))}
                   </ul>

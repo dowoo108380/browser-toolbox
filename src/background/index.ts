@@ -5,8 +5,9 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabStatus,
 } from '../contracts/index.ts';
-import type { LocalStore, Sender } from '../platform/index.ts';
+import type { LocalStore, PageProbe, Sender } from '../platform/index.ts';
 import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
 import { createPopupState } from './popup-state.ts';
@@ -29,6 +30,8 @@ export interface BackgroundDeps {
   // 열린 탭의 옛 스크립트에게 물러나라고 알린다(결정 0008). 넣을 수 없는 탭이 아닌데 실패한 것을 탭마다 끝나는 대로
   // report로 알리고, 모든 탭이 끝나거나 제한 시간을 넘기면 끝난다.
   readonly retireOldScripts: (report: (problem: AppError) => void) => Promise<void>;
+  // 그 탭의 최상위 문서에 탐침을 넣어 이 확장의 실행 틀이 도는지 본다(결정 0023).
+  readonly probePage: (tabId: number) => Promise<PageProbe>;
 }
 
 export function startBackground(deps: BackgroundDeps): void {
@@ -58,6 +61,19 @@ export function startBackground(deps: BackgroundDeps): void {
         return ok(null);
       }),
       route(popupRemember, (payload) => popupState.remember(payload.category)),
+      route(tabStatus, async (payload) => {
+        const probe = await deps.probePage(payload.tabId);
+        switch (probe.status) {
+          case 'ran':
+            return ok({ page: probe.runtime ? 'ready' : 'reload' });
+          case 'unavailable':
+            return ok({ page: 'denied' });
+          case 'failed':
+            // 알려지지 않은 거절도 그 페이지에는 넣을 수 없는 것이다. 쓸 수 없다고 답하되 숨기지 않고 기록한다(quality 067).
+            record({ featureId: null, kind: 'platform' });
+            return ok({ page: 'denied' });
+        }
+      }),
     ],
     () => {
       record({ featureId: null, kind: 'unexpected' });

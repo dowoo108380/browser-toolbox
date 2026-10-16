@@ -1,6 +1,6 @@
 import { startBackground } from '../../src/background/index.ts';
 import { type FeatureDefinition, responseSchema } from '../../src/contracts/index.ts';
-import type { LocalStore, Requester, Sender } from '../../src/platform/index.ts';
+import type { LocalStore, PageProbe, Requester, Sender } from '../../src/platform/index.ts';
 import { appError, err } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
 
@@ -14,6 +14,8 @@ export interface TestBackgroundOptions {
   readonly startTime: number;
   // 요청이 서비스 워커에 닿는 때를 시험이 정한다(응답 순서를 바꾸는 시험). 없으면 바로 닿는다.
   readonly deliver?: (type: string, send: () => Promise<unknown>) => Promise<unknown>;
+  // 탭의 탐침 결과(결정 0023). 없으면 모든 탭에서 실행 틀이 돈다.
+  readonly probePage?: (tabId: number) => Promise<PageProbe>;
 }
 
 // 확장 화면과 콘텐츠 스크립트가 쓰는 요청 함수를 돌려준다. chromeRequester처럼 메시지를 구조화 복제로 건네고,
@@ -35,6 +37,7 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
     },
     onInstalled: () => undefined,
     retireOldScripts: () => Promise.resolve(),
+    probePage: options.probePage ?? (() => Promise.resolve({ status: 'ran', runtime: true })),
   });
   const deliver = options.deliver ?? ((_type, send) => send());
   return async (definition, payload) => {
