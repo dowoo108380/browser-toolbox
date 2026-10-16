@@ -140,7 +140,7 @@ export interface TaskWatchHandlers {
 
 // 확장 화면이 그 탭의 작업 기록을 읽는다. 바뀜 알림을 먼저 듣고 읽는다. 알림이 읽기 결과보다 먼저 오면 읽기 결과(더 옛
 // 값일 수 있다)는 버린다. 모양이 틀린 기록은 작업이 없는 것으로 보인다(쓰는 서비스 워커가 기록한다). 그만둔 뒤에는
-// 알리지 않는다(COM-7).
+// 알리지 않는다(COM-7): 바뀜 듣기를 그만두고, 그 뒤에 끝난 읽기는 버린다.
 export function watchTask(
   store: Pick<KeyValueStore, 'get' | 'onChanged'>,
   tabId: number,
@@ -153,7 +153,6 @@ export function watchTask(
     handlers.task(records === null ? null : taskOf(records, tabId));
   };
   const unsubscribe = store.onChanged(tasksKey, (raw) => {
-    if (stopped) return;
     changed = true;
     receive(raw);
   });

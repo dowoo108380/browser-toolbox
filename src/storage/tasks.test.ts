@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeStore } from '../platform/fake.ts';
-import { appError, err, ok } from '../shared/index.ts';
+import { type AppError, appError, err, ok } from '../shared/index.ts';
 import {
   type TaskRecord,
   type TaskRecords,
@@ -174,10 +174,10 @@ describe('확장 화면이 그 탭의 작업을 읽음', () => {
 
   it('읽지 못하면 그 까닭을 알리고, 그만둔 뒤에는 알리지 않는다', async () => {
     const failing = { ...createFakeStore(), get: () => Promise.reject(new Error('x')) };
-    const problems: string[] = [];
-    watchTask(failing, 1, { task: () => undefined, problem: (error) => problems.push(error.kind) });
+    const problems: AppError[] = [];
+    watchTask(failing, 1, { task: () => undefined, problem: (error) => problems.push(error) });
     await vi.waitFor(() => {
-      expect(problems).toEqual(['platform']);
+      expect(problems).toEqual([appError('platform', '작업 기록을 읽지 못했다.')]);
     });
     const later: string[] = [];
     const stop = watchTask(failing, 1, {
