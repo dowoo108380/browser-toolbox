@@ -1,12 +1,12 @@
 import * as z from 'zod/mini';
-import { type FeatureDefinition, defineFeature } from '../../src/contracts/index.ts';
+import { type ToggleFeature, defineFeature } from '../../src/contracts/index.ts';
 import { type SettingsFormat, currentStructure } from '../../src/storage/index.ts';
 
 // storage와 background 테스트가 함께 쓰는 설정 시험 자료. 테스트에서만 가져온다.
 
 // 시험 기능은 사이트마다 따로 정하는 설정(사이트 규칙처럼 문자열 목록)도 있다. 사이트 설정은 아직 기능 정의(FeatureDefinition)에
 // 없어 저장 모듈이 받는 모양(FeatureSettingsSpec)으로 더한다. 사이트 설정이 있는 기능을 처음 만들 때 정의에 더한다(결정 0017).
-const sampleFeature: FeatureDefinition<{
+const sampleFeature: ToggleFeature<{
   readonly enabled: boolean;
   readonly step: number;
   readonly label: string;
@@ -28,7 +28,7 @@ const sampleFeature: FeatureDefinition<{
   siteSettings: { schema: z.object({ rules: z.array(z.string()) }) },
 };
 
-const otherFeature: FeatureDefinition = defineFeature({
+const otherFeature: ToggleFeature = defineFeature({
   id: 'other',
   requirements: [],
   name: '다른 기능',

@@ -38,6 +38,28 @@ export function contentCommonSource(features: readonly FeatureDefinition[], root
   return lines.join('\n');
 }
 
+// 서비스 워커가 실행 기능의 작업에 쓸 일(결정 0024). 실행 기능의 background.ts가 내놓는 task다.
+// 실행 기능마다 일이 꼭 하나 있는지는 서비스 워커가 시작할 때 본다(src/background/tasks.ts).
+export function swSource(features: readonly FeatureDefinition[], root: string): string {
+  const parts = features.filter(
+    (feature) =>
+      feature.kind === 'action' &&
+      existsSync(path.join(root, 'src', 'features', feature.id, 'background.ts')),
+  );
+  const lines = [
+    ...header,
+    "import type { TaskPart } from '../../background/index.ts';",
+    ...parts.map(
+      (feature) =>
+        `import { task as ${camelCase(feature.id)} } from '../../features/${feature.id}/background.ts';`,
+    ),
+    '',
+    `export const taskParts: readonly TaskPart[] = [${parts.map((feature) => camelCase(feature.id)).join(', ')}];`,
+    '',
+  ];
+  return lines.join('\n');
+}
+
 // 등록 목록을 기능 목록에 맞춘다. write가 거짓이면 쓰지 않고 맞지 않는 파일만 돌려준다.
 // 서식 검사와 어긋나지 않도록 Prettier로 정리한 결과를 쓴다.
 export async function syncGenerated(
@@ -47,6 +69,7 @@ export async function syncGenerated(
 ): Promise<string[]> {
   const files = new Map([
     [path.join(generatedDirectory, 'content-common.ts'), contentCommonSource(features, root)],
+    [path.join(generatedDirectory, 'sw.ts'), swSource(features, root)],
   ]);
   const stale: string[] = [];
   for (const [file, source] of files) {

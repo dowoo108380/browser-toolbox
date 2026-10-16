@@ -1,4 +1,4 @@
-import { problemReport } from '../contracts/index.ts';
+import { featuresWithSettings, problemReport } from '../contracts/index.ts';
 import { features } from '../features/list.ts';
 import { startPageRuntime } from '../page/index.ts';
 import { chromeLocalStore, chromeRequester, isExtensionConnected } from '../platform/index.ts';
@@ -14,7 +14,12 @@ startPageRuntime({
   context: { window, document },
   subscribe: (handlers) =>
     startSettingsReader(
-      { store: chromeLocalStore(), request, format: settingsFormat, specs: features },
+      {
+        store: chromeLocalStore(),
+        request,
+        format: settingsFormat,
+        specs: featuresWithSettings(features),
+      },
       handlers,
     ),
   report: (featureId, kind) => request(problemReport, { featureId, kind }),

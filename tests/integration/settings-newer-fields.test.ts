@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { settingsUpdate } from '../../src/contracts/index.ts';
+import { featuresWithSettings, settingsUpdate } from '../../src/contracts/index.ts';
 import { features } from '../../src/features/list.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import { repairNoticeKey, settingsFormat, settingsKey } from '../../src/storage/index.ts';
@@ -14,7 +14,7 @@ import { startTestBackground } from '../support/background.ts';
 const t = 1_800_000_000_000;
 
 describe('결정 0022 옛 판이 더 새 판의 필드가 든 기능 설정을 바꿈', () => {
-  it.each(features)(
+  it.each(featuresWithSettings(features))(
     '$id: 바꾼 필드만 바뀌고 더 새 판이 더한 필드는 저장된 값 그대로 남는다',
     async (feature) => {
       // 더 새 판이 더한 필드(savedFuturePreference)와, 사용자가 그 판에서 켜 둔 기능.

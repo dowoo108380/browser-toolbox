@@ -2,11 +2,13 @@ import { h, render } from 'preact';
 import { act } from 'preact/test-utils';
 import {
   type FeatureDefinition,
+  featuresWithSettings,
   popupRemember,
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskStart,
 } from '../../src/contracts/index.ts';
 import type { KeyValueStore, Requester } from '../../src/platform/index.ts';
 import {
@@ -39,7 +41,7 @@ export async function renderTestPopup(
         features,
         subscribe: (handlers) =>
           startSettingsReader(
-            { store, request, format: settingsFormat, specs: features },
+            { store, request, format: settingsFormat, specs: featuresWithSettings(features) },
             handlers,
           ),
         watchRepairs: (handlers) => watchRepairNotice(noticeStore, handlers),
@@ -51,6 +53,7 @@ export async function renderTestPopup(
         // 지금 탭은 시험이 정하지 않는다. 탐침 결과는 서비스 워커의 probePage가 정한다.
         currentTab: () => Promise.resolve(1),
         tabStatus: (tabId) => request(tabStatus, { tabId }),
+        startTask: (featureId, tabId) => request(taskStart, { featureId, tabId }),
       }),
       container,
     );

@@ -1,10 +1,12 @@
 import { render } from 'preact';
 import {
+  featuresWithSettings,
   popupRemember,
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskStart,
 } from '../contracts/index.ts';
 import { features } from '../features/list.ts';
 import { chromeLocalStore, chromeRequester, currentTabId } from '../platform/index.ts';
@@ -26,7 +28,10 @@ render(
   <PopupApp
     features={features}
     subscribe={(handlers) =>
-      startSettingsReader({ store, request, format: settingsFormat, specs: features }, handlers)
+      startSettingsReader(
+        { store, request, format: settingsFormat, specs: featuresWithSettings(features) },
+        handlers,
+      )
     }
     watchRepairs={(handlers) => watchRepairNotice(store, handlers)}
     // 서비스 워커를 깨우는 데 storage.ensureReady를 쓴다. 설정이 준비되었으면 바로 응답한다(아키텍처 4장).
@@ -37,6 +42,7 @@ render(
     rememberCategory={(category) => request(popupRemember, { category })}
     currentTab={currentTabId}
     tabStatus={(tabId) => request(tabStatus, { tabId })}
+    startTask={(featureId, tabId) => request(taskStart, { featureId, tabId })}
   />,
   root,
 );

@@ -1,4 +1,4 @@
-import type { FeatureDefinition, ToggleSettings } from '../contracts/index.ts';
+import type { ToggleFeature, ToggleSettings } from '../contracts/index.ts';
 import type { Scope } from '../dom/index.ts';
 import { type Snapshot, settingsOf } from '../storage/index.ts';
 
@@ -23,7 +23,7 @@ export interface PagePart {
 }
 
 export function definePagePart<S extends ToggleSettings>(
-  definition: FeatureDefinition<S>,
+  definition: ToggleFeature<S>,
   start: (settings: S, context: PageStart) => void,
 ): PagePart {
   return {

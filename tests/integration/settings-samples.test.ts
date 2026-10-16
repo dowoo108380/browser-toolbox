@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { storageEnsureReady } from '../../src/contracts/index.ts';
+import { featuresWithSettings, storageEnsureReady } from '../../src/contracts/index.ts';
 import { features } from '../../src/features/list.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import {
@@ -95,7 +95,7 @@ describe('COM-3.5 지금까지 낸 판의 설정 표본', () => {
       const applied: Snapshot[] = [];
       const reported: unknown[] = [];
       const stop = startSettingsReader(
-        { store, request, format: settingsFormat, specs: features },
+        { store, request, format: settingsFormat, specs: featuresWithSettings(features) },
         {
           apply: (snapshot) => applied.push(snapshot),
           corrupt: (scope) => reported.push({ corrupt: scope }),

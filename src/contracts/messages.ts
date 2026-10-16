@@ -89,6 +89,15 @@ export const tabStatus = defineRequest({
   senders: 'extension',
 });
 
+// 팝업이 자기 창의 지금 탭에서 실행 기능의 작업을 시작한다(COM-10, 결정 0024). 서비스 워커는 그 탭에 진행 중인 작업이
+// 없을 때만 시작하고 작업 id로 답한다. 일은 응답과 따로 끝까지 하고, 진행과 결과는 작업 기록(storage.session)에 남긴다.
+export const taskStart = defineRequest({
+  type: 'task.start',
+  payload: z.object({ featureId: z.string(), tabId: z.int() }),
+  value: z.object({ taskId: z.string() }),
+  senders: 'extension',
+});
+
 export const requests = [
   settingsUpdate,
   storageEnsureReady,
@@ -96,4 +105,5 @@ export const requests = [
   problemReport,
   popupRemember,
   tabStatus,
+  taskStart,
 ] as const;

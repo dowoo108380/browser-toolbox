@@ -1,11 +1,13 @@
 import {
   type FeatureDefinition,
+  featuresWithSettings,
   popupRemember,
   problemReport,
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskStart,
 } from '../contracts/index.ts';
 import type { KeyValueStore, PageProbe, Sender } from '../platform/index.ts';
 import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
@@ -15,11 +17,21 @@ import { createProblemLog } from './problems.ts';
 import { createRepairNoticeLog } from './repair-notice.ts';
 import { createRouter, route } from './router.ts';
 import { createSettingsStore } from './settings-store.ts';
+import type { TaskPart } from './task-part.ts';
+import { createTaskRunner } from './tasks.ts';
+
+export { type TaskPart, defineTaskPart } from './task-part.ts';
 
 export interface BackgroundDeps {
   readonly features: readonly FeatureDefinition[];
   readonly format: SettingsFormat;
   readonly store: KeyValueStore;
+  // 탭마다의 작업 기록을 두는 저장소(chrome.storage.session, 결정 0024).
+  readonly session: KeyValueStore;
+  // 실행 기능의 서비스 워커 쪽 일. 빌드가 기능 목록에서 만든 등록 목록이다(src/entries/generated/sw.ts).
+  readonly taskParts: readonly TaskPart[];
+  readonly randomId: () => string;
+  readonly tabExists: (tabId: number) => Promise<boolean>;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   // 서비스 워커가 처음 실행될 때 바로 걸어야 하는 Chrome 이벤트를 건다.
@@ -46,9 +58,17 @@ export function startBackground(deps: BackgroundDeps): void {
     now: deps.now,
     sleep: deps.sleep,
     format: deps.format,
-    features: deps.features,
+    features: featuresWithSettings(deps.features),
     record,
     noticeRepair: repairNotice.add,
+  });
+  const tasks = createTaskRunner({
+    session: deps.session,
+    features: deps.features,
+    parts: deps.taskParts,
+    randomId: deps.randomId,
+    tabExists: deps.tabExists,
+    record,
   });
   const popupState = createPopupState({ store: deps.store, record });
   const router = createRouter(
@@ -74,6 +94,7 @@ export function startBackground(deps: BackgroundDeps): void {
             return ok({ page: 'denied' });
         }
       }),
+      route(taskStart, (payload) => tasks.start(payload.featureId, payload.tabId)),
     ],
     () => {
       record({ featureId: null, kind: 'unexpected' });

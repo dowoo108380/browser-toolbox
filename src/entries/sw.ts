@@ -4,18 +4,25 @@ import { claimAttribute, pageElementAttribute } from '../dom/index.ts';
 import { features } from '../features/list.ts';
 import {
   chromeLocalStore,
+  chromeSessionStore,
   listenInstalled,
   listenRequests,
   probePageRuntime,
   retireInAllFrames,
+  tabExists,
 } from '../platform/index.ts';
 import { settingsFormat } from '../storage/index.ts';
+import { taskParts } from './generated/sw.ts';
 
 // 서비스 워커. Chrome 이벤트는 처음 실행될 때 바로 걸어야 하므로 여기서 곧바로 시작한다.
 startBackground({
   features,
   format: settingsFormat,
   store: chromeLocalStore(),
+  session: chromeSessionStore(),
+  taskParts,
+  randomId: () => crypto.randomUUID(),
+  tabExists,
   now: () => Date.now(),
   sleep: (ms) =>
     new Promise((resolve) => {

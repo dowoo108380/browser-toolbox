@@ -6,6 +6,7 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskStart,
 } from '../contracts/index.ts';
 import type { Sender } from '../platform/index.ts';
 import { appError, err, ok } from '../shared/index.ts';
@@ -27,6 +28,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(problemReport, () => Promise.resolve(ok(null))),
       route(popupRemember, () => Promise.resolve(ok(null))),
       route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
+      route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
     ],
     (error) => unexpected.push(error),
   );
@@ -72,6 +74,15 @@ describe('요청 검증(결정 0006)', () => {
     const status = { type: 'tab.status', payload: { tabId: 3 } };
     expect(await router(status, extension)).toEqual(ok({ page: 'ready' }));
     const fromContent = await router(status, content);
+    expect(fromContent.ok).toBe(false);
+    if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+  });
+
+  it('결정 0024 작업은 확장 화면만 시작할 수 있다', async () => {
+    const { router } = setup();
+    const start = { type: 'task.start', payload: { featureId: 'save', tabId: 3 } };
+    expect(await router(start, extension)).toEqual(ok({ taskId: 't' }));
+    const fromContent = await router(start, content);
     expect(fromContent.ok).toBe(false);
     if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
   });
@@ -126,6 +137,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(problemReport, () => Promise.resolve(ok(null))),
         route(popupRemember, () => Promise.resolve(ok(null))),
         route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
+        route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
       ],
       (error) => unexpected.push(error),
     );

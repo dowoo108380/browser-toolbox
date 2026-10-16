@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { Category, FeatureDefinition, PageAccess } from '../contracts/index.ts';
+import type { ActionFeature, Category, FeatureDefinition, PageAccess } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err } from '../shared/index.ts';
 import {
   type RepairNotice,
@@ -12,6 +12,7 @@ import {
   noRepair,
   settingsOf,
 } from '../storage/index.ts';
+import { ActionItem } from './action-item.tsx';
 import { unavailableReason } from './availability.ts';
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
@@ -44,6 +45,8 @@ interface PopupProps {
   readonly currentTab: () => Promise<number | null>;
   // 그 탭에서 페이지에 작용하는 기능을 쓸 수 있는지 서비스 워커에 묻는다(결정 0023).
   readonly tabStatus: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
+  // 그 탭에서 실행 기능의 작업을 시작한다(결정 0024). 진행과 결과는 작업 기록으로 받는다.
+  readonly startTask: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -66,6 +69,7 @@ export function PopupApp({
   rememberCategory,
   currentTab,
   tabStatus,
+  startTask,
 }: PopupProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -102,12 +106,15 @@ export function PopupApp({
   // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지. 받기 전이나 받지 못했으면 null이라 이유를 보이지 않는다.
   // 받지 못한 까닭은 알림으로 보인다. 팝업이 열린 동안 탭이 바뀌어도 다시 묻지 않는다(결정 0023).
   const [page, setPage] = useState<PageAccess | null>(null);
+  // 지금 탭. 알기 전이거나 없으면 null이다. 실행 기능은 이 탭에서 작업을 시작한다.
+  const [tabId, setTabId] = useState<number | null>(null);
   useEffect(() => {
     let open = true;
     const ask = async () => {
-      const tabId = await currentTab();
-      if (tabId === null) return err(appError('unavailable', strings.noCurrentTab));
-      return tabStatus(tabId);
+      const tab = await currentTab();
+      if (tab === null) return err(appError('unavailable', strings.noCurrentTab));
+      if (open) setTabId(tab);
+      return tabStatus(tab);
     };
     void ask().then((result) => {
       if (!open) return;
@@ -224,6 +231,44 @@ export function PopupApp({
     setNotice(result.ok ? null : { message: result.error.message });
   };
 
+  // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
+  const run = async (feature: ActionFeature) => {
+    if (tabId === null) return;
+    const result = await startTask(feature.id, tabId);
+    setNotice(result.ok ? null : { message: result.error.message });
+  };
+
+  // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치, 실행은 단추다.
+  const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
+    switch (feature.kind) {
+      case 'toggle':
+        return (
+          <FeatureItem
+            key={feature.id}
+            feature={feature}
+            enabled={settingsOf(settings, feature).enabled}
+            disabled={!awake}
+            onToggle={(enabled) => {
+              void toggle(feature.id, enabled);
+            }}
+            unavailable={unavailableReason(feature, page)}
+          />
+        );
+      case 'action':
+        return (
+          <ActionItem
+            key={feature.id}
+            feature={feature}
+            waiting={!awake || tabId === null}
+            onRun={() => {
+              void run(feature);
+            }}
+            unavailable={unavailableReason(feature, page)}
+          />
+        );
+    }
+  };
+
   const loggedRepair =
     repairLog === null || repairLog.stamp === confirmedStamp ? noRepair : repairLog;
   const repair = mergeRepairs(loggedRepair, seenRepair);
@@ -277,18 +322,7 @@ export function PopupApp({
                   <ul class="features">
                     {features
                       .filter((feature) => feature.category === category)
-                      .map((feature) => (
-                        <FeatureItem
-                          key={feature.id}
-                          feature={feature}
-                          enabled={settingsOf(snapshot, feature).enabled}
-                          disabled={!awake}
-                          onToggle={(enabled) => {
-                            void toggle(feature.id, enabled);
-                          }}
-                          unavailable={unavailableReason(feature, page)}
-                        />
-                      ))}
+                      .map((feature) => itemOf(feature, snapshot))}
                   </ul>
                 </section>
               </div>

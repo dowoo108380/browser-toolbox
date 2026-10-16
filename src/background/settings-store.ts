@@ -1,4 +1,4 @@
-import type { FeatureDefinition } from '../contracts/index.ts';
+import type { ToggleFeature } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
 import {
   type AppError,
@@ -41,7 +41,8 @@ export function createSettingsStore(deps: {
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   readonly format: SettingsFormat;
-  readonly features: readonly FeatureDefinition[];
+  // 설정을 저장하는 기능만 받는다(featuresWithSettings).
+  readonly features: readonly ToggleFeature[];
   readonly record: (problem: Problem) => void;
   // 손상을 기본값으로 고쳐 쓰기 전에 사용자에게 보일 복구 알림을 남긴다(결정 0016).
   readonly noticeRepair: (scope: RepairScope) => Promise<Result<null, AppError>>;

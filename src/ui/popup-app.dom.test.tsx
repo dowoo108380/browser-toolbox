@@ -97,6 +97,7 @@ interface Options {
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
   readonly currentTab?: () => Promise<number | null>;
   readonly tabStatus?: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
+  readonly startTask?: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
 }
 
 async function show({
@@ -107,8 +108,10 @@ async function show({
   remember = () => Promise.resolve(ok(null)),
   currentTab = () => Promise.resolve(7),
   tabStatus = () => Promise.resolve(ok({ page: 'ready' as const })),
+  startTask = () => Promise.resolve(ok(null)),
 }: Options = {}) {
   const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
+  const starts = vi.fn(startTask);
   const wakes = vi.fn(wake);
   const remembers = vi.fn(remember);
   const statuses = vi.fn(tabStatus);
@@ -132,6 +135,7 @@ async function show({
         rememberCategory={remembers}
         currentTab={currentTab}
         tabStatus={statuses}
+        startTask={starts}
       />,
       container,
     );
@@ -153,6 +157,7 @@ async function show({
     wakes,
     remembers,
     statuses,
+    starts,
     state: () => container.querySelector('.state')?.textContent,
     status: () => container.querySelector('[role=status]')?.textContent,
     apply: (snapshot: Snapshot) => act(() => handlers?.apply(snapshot)),
@@ -455,6 +460,120 @@ describe('COM-2 기대 동작 4 지금 탭에서 쓸 수 없는 기능의 이유
   });
 });
 
+describe('COM-10 실행 기능의 단추(결정 0024)', () => {
+  const saveTask = defineFeature({
+    id: 'save',
+    requirements: [],
+    name: '자막 저장',
+    description: '자막을 글로 저장한다.',
+    category: 'media',
+    kind: 'action',
+    content: null,
+    permissions: [],
+    task: { timeoutMs: 10_000 },
+  });
+  const onPage = defineFeature({
+    ...saveTask,
+    id: 'capture',
+    name: '캡처',
+    content: { sites: 'all', frames: 'top' },
+  });
+  // 깨어났는지 스위치로 보므로 켜고 끄기 기능도 둔다.
+  const withToggle = [feature, saveTask, onPage];
+
+  const button = (featureId: string) => {
+    const found = container.querySelector<HTMLButtonElement>(`button[data-feature="${featureId}"]`);
+    if (found === null) throw new Error(`${featureId}의 단추가 없다.`);
+    return found;
+  };
+  const click = (element: HTMLElement) =>
+    act(async () => {
+      element.click();
+      await Promise.resolve();
+    });
+
+  it('실행 기능은 기능 이름이 적힌 단추이고 설명을 잇는다. 누르면 지금 탭에서 작업을 시작한다', async () => {
+    const popup = await show({ features: withToggle });
+    await popup.awake();
+    expect(button('save').textContent).toBe('자막 저장');
+    expect(
+      document.getElementById(button('save').getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toBe('자막을 글로 저장한다.');
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+    await click(button('save'));
+    expect(popup.starts).toHaveBeenCalledWith('save', 7);
+  });
+
+  it('N-12 서비스 워커가 깨어나기 전에는 막혀 있고 눌러도 시작하지 않는다', async () => {
+    let wake: (result: Result<unknown, AppError>) => void = () => undefined;
+    const popup = await show({
+      features: withToggle,
+      wake: () =>
+        new Promise((resolve) => {
+          wake = resolve;
+        }),
+    });
+    expect(button('save').getAttribute('aria-disabled')).toBe('true');
+    await click(button('save'));
+    expect(popup.starts).not.toHaveBeenCalled();
+    await act(() => {
+      wake(ok(null));
+    });
+    await popup.awake();
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('지금 탭에서 쓸 수 없으면 이유를 단추의 설명으로 잇고, 막혀 있어 눌러도 시작하지 않는다', async () => {
+    const popup = await show({
+      features: withToggle,
+      tabStatus: () => Promise.resolve(ok({ page: 'denied' as const })),
+    });
+    await popup.awake();
+    const described = (button('capture').getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent);
+    expect(described).toEqual([
+      '자막을 글로 저장한다.',
+      '쓸 수 없음: 확장이 이 페이지에 접근할 수 없음',
+    ]);
+    expect(button('capture').getAttribute('aria-disabled')).toBe('true');
+    await click(button('capture'));
+    expect(popup.starts).not.toHaveBeenCalled();
+    // 페이지에 작용하지 않는 실행 기능은 그대로 쓴다.
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('지금 탭을 알 수 없으면 막혀 있다', async () => {
+    const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(null) });
+    await popup.awake();
+    expect(button('save').getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('작업을 시작하지 못하면 그 이유를 알린다', async () => {
+    const running = appError('unavailable', '이 탭에서 캡처 진행 중이다. 끝난 뒤 다시 한다.');
+    const popup = await show({
+      features: withToggle,
+      startTask: () => Promise.resolve(err(running)),
+    });
+    await popup.awake();
+    await click(button('save'));
+    expect(popup.status()).toBe(running.message);
+  });
+
+  it('검색에서 간 실행 기능은 그 단추에 초점이 간다', async () => {
+    await show({ features: withToggle });
+    const search = container.querySelector<HTMLInputElement>('[role=combobox]');
+    if (search === null) throw new Error('검색 칸이 없다.');
+    search.focus();
+    await act(() => {
+      search.value = '자막';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await press('Enter');
+    expect(document.activeElement).toBe(button('save'));
+  });
+});
+
 describe('COM-3 기대 동작 3 저장에 실패하면 화면은 저장된 값을 보인다', () => {
   it('COM-3.3 같은 저장 실패가 두 번 이어져도 그때마다 스위치를 저장된 값으로 되돌린다', async () => {
     const popup = await show({ update: () => Promise.resolve(err(saveFailed)) });
@@ -565,6 +684,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           rememberCategory={() => Promise.resolve(ok(null))}
           currentTab={() => Promise.resolve(1)}
           tabStatus={() => Promise.resolve(ok({ page: 'ready' as const }))}
+          startTask={() => Promise.resolve(ok(null))}
         />,
         container,
       );

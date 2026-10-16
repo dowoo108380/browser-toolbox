@@ -13,5 +13,5 @@ export {
   retireInFrame,
   retireTimeoutMs,
 } from './scripting.ts';
-export { currentTabId } from './tabs.ts';
+export { currentTabId, tabExists } from './tabs.ts';
 export { listenInstalled } from './runtime.ts';

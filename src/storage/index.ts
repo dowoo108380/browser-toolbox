@@ -23,3 +23,11 @@ export {
   repairScopeOf,
   watchRepairNotice,
 } from './repair-notice.ts';
+export {
+  type TaskOutcome,
+  type TaskRecords,
+  finishTask,
+  parseTasks,
+  startTask,
+  tasksKey,
+} from './tasks.ts';

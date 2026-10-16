@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startTestBackground } from '../../tests/support/background.ts';
 import { specs, stored } from '../../tests/support/settings.ts';
-import { tabStatus } from '../contracts/index.ts';
+import { defineFeature, tabStatus, taskStart } from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
 import type { KeyValueStore, PageProbe } from '../platform/index.ts';
-import { type AppError, appError } from '../shared/index.ts';
-import { settingsFormat, settingsKey } from '../storage/index.ts';
-import { startBackground } from './index.ts';
+import { type AppError, appError, ok } from '../shared/index.ts';
+import { settingsFormat, settingsKey, tasksKey } from '../storage/index.ts';
+import { defineTaskPart, startBackground } from './index.ts';
 
 // 서비스 워커가 시작할 때 하는 일(결정 0011 "형식 이전과 고쳐 쓰기", quality 067).
 
@@ -21,6 +21,10 @@ function start(
     features: specs,
     format: settingsFormat,
     store,
+    session: createFakeStore(),
+    taskParts: [],
+    randomId: () => 'task',
+    tabExists: () => Promise.resolve(true),
     now: () => clock.time,
     sleep: (ms) => {
       clock.time += ms;
@@ -171,5 +175,54 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
     const failed = await statusWith({ status: 'failed' });
     expect(failed.result).toEqual({ ok: true, value: { page: 'denied' } });
     expect(failed.recorded).toEqual(['platform']);
+  });
+});
+
+describe('결정 0024 실행 기능의 작업(task.start)', () => {
+  const action = defineFeature({
+    id: 'save',
+    requirements: [],
+    name: '저장',
+    description: '시험용',
+    category: 'tabs',
+    kind: 'action',
+    content: null,
+    permissions: [],
+    task: { timeoutMs: 1000 },
+  });
+
+  it('요청을 그 기능의 일로 보내 작업 id로 답하고, 끝을 세션 저장소의 작업 기록에 남긴다', async () => {
+    const session = createFakeStore();
+    const tabs: number[] = [];
+    const part = defineTaskPart(action, ({ tabId }) => {
+      tabs.push(tabId);
+      return Promise.resolve(ok({ summary: '끝' }));
+    });
+    const request = startTestBackground({
+      store: createFakeStore(),
+      features: [...specs, action],
+      startTime: 1_790_000_000_000,
+      session,
+      taskParts: [part],
+    });
+    expect(await request(taskStart, { featureId: 'save', tabId: 3 })).toEqual(
+      ok({ taskId: 'task-1' }),
+    );
+    await vi.waitFor(() => {
+      expect(session.peek(tasksKey)).toEqual({
+        '3': { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '끝' },
+      });
+    });
+    expect(tabs).toEqual([3]);
+  });
+
+  it('quality 066 실행 기능의 일이 등록 목록에 없으면 서비스 워커가 시작하지 않고 던진다', () => {
+    expect(() =>
+      startTestBackground({
+        store: createFakeStore(),
+        features: [...specs, action],
+        startTime: 1_790_000_000_000,
+      }),
+    ).toThrow('실행 기능 save의 일이 0개다.');
   });
 });
