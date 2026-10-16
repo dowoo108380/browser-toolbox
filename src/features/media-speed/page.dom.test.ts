@@ -83,7 +83,11 @@ function start(snapshot: Snapshot) {
     isLive: () => true,
   });
   stops.push(scope.close);
-  page.start(snapshot, { window, document, scope });
+  // 배속 표시창은 외부 화면 요소에 기대지 않는다.
+  const find = () => {
+    throw new Error('배속 표시창은 외부 화면 요소를 찾지 않는다.');
+  };
+  page.start(snapshot, { window, document, scope, find });
   return { close: scope.close, errors };
 }
 
@@ -541,8 +545,8 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
         handlers = next;
         return () => undefined;
       },
-      report: (featureId, kind) => {
-        reports.push({ featureId, kind });
+      report: (problem) => {
+        reports.push(problem);
         return Promise.resolve(ok(null));
       },
       isConnected: () => connected.value,

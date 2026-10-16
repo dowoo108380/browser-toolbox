@@ -28,7 +28,7 @@ startPageRuntime({
       },
       handlers,
     ),
-  report: (featureId, kind) => request(problemReport, { featureId, kind }),
+  report: (problem) => request(problemReport, problem),
   isConnected: isExtensionConnected,
   listenNotices: (show) =>
     listenExtensionRequest(taskNotice, ({ text }) => {

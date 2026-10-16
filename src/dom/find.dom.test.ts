@@ -58,13 +58,18 @@ function search(element: NamedElement = target, limitMs: number | null = element
     scope,
     window,
     element,
-    limitMs,
     onFound: (element) => {
       found.push(element);
     },
-    onTimeout: () => {
-      timeouts += 1;
-    },
+    limit:
+      limitMs === null
+        ? null
+        : {
+            ms: limitMs,
+            onTimeout: () => {
+              timeouts += 1;
+            },
+          },
   });
   return { scope, stop, errors, found, timeouts: () => timeouts };
 }
@@ -219,11 +224,10 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
       scope,
       window,
       element: target,
-      limitMs: elementTimeoutMs,
       onFound: () => {
         throw new Error('기능의 실패');
       },
-      onTimeout: () => undefined,
+      limit: { ms: elementTimeoutMs, onTimeout: () => undefined },
     });
     expect(errors).toHaveLength(1);
   });

@@ -20,28 +20,19 @@ interface Search {
   readonly scope: Scope;
   readonly window: Window;
   readonly element: NamedElement;
-  // 보인 시간의 한도(ms). null이면 한도 없이 나타날 때까지 지켜본다(찾지 못한 뒤 실행 틀이 지켜볼 때).
-  readonly limitMs: number | null;
   readonly onFound: (found: Element) => void | Promise<void>;
-  // 보인 시간이 한도에 이르렀다.
-  readonly onTimeout: () => void;
+  // 보인 시간의 한도(ms)와 그에 이르렀을 때 부를 함수. null이면 한도 없이 나타날 때까지 지켜본다(찾지 못한 뒤 실행
+  // 틀이 지켜볼 때).
+  readonly limit: { readonly ms: number; readonly onTimeout: () => void } | null;
 }
 
 // 곧바로 한 번 찾고, 없으면 탭이 보이는 동안만 문서의 바뀜마다 다시 찾는다. 숨겨지면 관찰과 세기를 멈추고, 다시 보이면 한 번
 // 찾고 이어 센다(quality 003). 찾거나 한도에 이르면 끝난다. 돌려준 함수는 이 찾기만 그만둔다. 범위가 닫혀도 그만둔다.
 // 찾는 함수의 예외는 처음 한 번이면 부른 쪽에, 그 뒤면 범위에 간다. onFound와 onTimeout은 범위가 감싼다.
-export function awaitElement({
-  scope,
-  window,
-  element,
-  limitMs,
-  onFound,
-  onTimeout,
-}: Search): () => void {
+export function awaitElement({ scope, window, element, onFound, limit }: Search): () => void {
   const { document } = window;
   // 알림은 바깥 범위로 감싼다. 이 찾기의 자원을 닫은 뒤에도 부른다.
   const found = scope.guard(onFound);
-  const timedOut = scope.guard(onTimeout);
   const initial = element.find(document);
   if (initial !== null) {
     found(initial);
@@ -53,7 +44,8 @@ export function awaitElement({
     search.close();
   };
   // 남은 보인 시간. null이면 한도가 없다.
-  let remaining = limitMs;
+  let remaining = limit === null ? null : limit.ms;
+  const timedOut = limit === null ? () => undefined : scope.guard(limit.onTimeout);
   // 보이는 동안의 관찰과 타이머, 그리고 그때부터 센 시각. 숨겨지면 닫는다.
   let watching: { readonly scope: Scope; readonly since: number } | null = null;
 

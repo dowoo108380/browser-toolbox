@@ -1,23 +1,38 @@
-import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
-import { type Scope, claimOwnedHosts, createScope } from '../dom/index.ts';
+import { type ElementRef, pageRuntimeKey, retireEventName } from '../contracts/index.ts';
+import {
+  type NamedElement,
+  type Scope,
+  awaitElement,
+  claimOwnedHosts,
+  createScope,
+  elementTimeoutMs,
+} from '../dom/index.ts';
 import type { AppError, ErrorKind, Result } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import {
+  type Lifecycle,
   type LifecycleEffect,
   type LifecycleEvent,
   initialLifecycle,
   transition,
 } from './lifecycle.ts';
 import { createNoticeBoard } from './notice.ts';
-import type { PageContext, PagePart } from './part.ts';
+import type { PageContext, PagePart, PageStart } from './part.ts';
 
 // 콘텐츠 스크립트 실행 틀(아키텍처 2·3장). 설정을 구독해 기능을 시작하고 정리한다.
+
+// 서비스 워커에 기록을 부탁하는 문제(problem.report). 찾지 못함은 그 요소를 싣는다(결정 0026).
+export interface PageProblem {
+  readonly featureId: string | null;
+  readonly kind: ErrorKind;
+  readonly element?: ElementRef;
+}
 
 interface PageRuntimeDeps {
   readonly parts: readonly PagePart[];
   readonly context: PageContext;
   readonly subscribe: (handlers: SettingsReaderHandlers) => () => void;
-  readonly report: (featureId: string | null, kind: ErrorKind) => Promise<Result<null, AppError>>;
+  readonly report: (problem: PageProblem) => Promise<Result<null, AppError>>;
   readonly isConnected: () => boolean;
   // 서비스 워커가 보낸 작업 결과 알림의 글을 받는다(결정 0024). 돌려준 함수로 듣기를 그만둔다.
   readonly listenNotices: (show: (text: string) => void) => () => void;
@@ -37,13 +52,16 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   let retired = false;
   let unsubscribe: () => void = () => undefined;
 
+  // 시작하는 방법: 이 실행의 자원 범위와 외부 화면 요소 찾기를 받아 기능을 시작한다.
+  type Start = (run: Pick<PageStart, 'scope' | 'find'>) => void;
+
   // 기능의 켜기·끄기 수명은 상태 기계(lifecycle.ts)가 정하고, 실행 틀은 그 할 일만 한다(quality 062).
-  // 상태 기계는 실행 번호만 알고, 그 실행의 자원 범위는 여기 둔다. 'start'가 만들고 'close'가 닫고 지운다.
-  let lifecycle = initialLifecycle;
+  // 상태 기계는 실행 번호만 알고, 그 실행의 자원 범위는 여기 둔다. 'start'와 'watch'가 만들고 'close'가 닫고 지운다.
+  let lifecycle: Lifecycle<Start, NamedElement> = initialLifecycle;
   const scopes = new Map<number, Scope>();
 
-  const report = (featureId: string | null, kind: ErrorKind) => {
-    void deps.report(featureId, kind).then((result) => {
+  const report = (problem: PageProblem) => {
+    void deps.report(problem).then((result) => {
       // 확장 API가 끊겼다고 하면 옛 스크립트다. 물러난다(결정 0008의 셋째 방법).
       if (!result.ok && result.error.kind === 'disconnected') retire();
     });
@@ -60,15 +78,12 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     return false;
   };
 
-  // 시작하는 방법: 이 실행의 자원 범위를 받아 기능을 시작한다.
-  type Start = (scope: Scope) => void;
-
   // 사건은 하나씩 끝까지 처리한다(run-to-completion). 할 일을 하는 도중에 생긴 사건(시작 도중의 실패, 연결이 끊겨
   // 물러남)은 줄에 두었다가 지금 사건의 할 일을 모두 마친 뒤 처리한다. 그러지 않으면 바로 처리한 사건 뒤에 남은
   // 할 일이 그 사건이 만든 상태와 어긋난다(예: 모두 멈춘 뒤에 남은 'start'가 기능을 시작해 정리되지 않고 남음).
-  const queue: LifecycleEvent<Start>[] = [];
+  const queue: LifecycleEvent<Start, NamedElement>[] = [];
   let dispatching = false;
-  const dispatch = (event: LifecycleEvent<Start>) => {
+  const dispatch = (event: LifecycleEvent<Start, NamedElement>) => {
     queue.push(event);
     if (dispatching) return;
     dispatching = true;
@@ -83,26 +98,66 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     }
   };
 
+  // 실행 run의 자원 범위를 만든다. 범위가 알린 실패는 그 실행의 실패다. 시작 도중 콜백이 실패해도 'close'가 이 범위를
+  // 찾을 수 있게 먼저 맵에 둔다.
+  const openScope = (featureId: string, run: number): Scope => {
+    const scope = createScope({
+      window: deps.context.window,
+      onError: () => {
+        dispatch({ type: 'fail', featureId, run });
+      },
+      isLive: checkConnection,
+    });
+    scopes.set(run, scope);
+    return scope;
+  };
+
   // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
+  // 기대는 외부 화면 요소를 찾지 못한 기능도 그 기능만 멈추고 되돌린 뒤, 그 요소가 나타나면 다시 시작한다(결정 0026).
   // 다른 기능과 실행 틀은 그대로 돈다.
-  const perform = (effect: LifecycleEffect<Start>) => {
+  const perform = (effect: LifecycleEffect<Start, NamedElement>) => {
     switch (effect.type) {
       case 'start': {
-        const fail = () => {
-          dispatch({ type: 'fail', featureId: effect.featureId, run: effect.run });
-        };
-        // 시작 도중 콜백이 실패해도 'close'가 이 범위를 찾을 수 있게 먼저 둔다.
-        const scope = createScope({
-          window: deps.context.window,
-          onError: fail,
-          isLive: checkConnection,
-        });
-        scopes.set(effect.run, scope);
+        const { featureId, run } = effect;
+        const scope = openScope(featureId, run);
+        const find: PageStart['find'] = (element, onFound) =>
+          awaitElement({
+            scope,
+            window: deps.context.window,
+            element,
+            onFound,
+            limit: {
+              ms: elementTimeoutMs,
+              onTimeout: () => {
+                dispatch({ type: 'notFound', featureId, run, element });
+              },
+            },
+          });
         try {
-          effect.start(scope);
+          effect.start({ scope, find });
         } catch {
           // 시작 도중의 예외: 그때까지 범위에 맡긴 자원을 치우고 기록한다.
-          fail();
+          dispatch({ type: 'fail', featureId, run });
+        }
+        return;
+      }
+      case 'watch': {
+        // 찾지 못한 요소가 나타나는지 한도 없이 지켜본다. 숨겨진 동안은 쉰다.
+        const { featureId, run } = effect;
+        const scope = openScope(featureId, run);
+        try {
+          awaitElement({
+            scope,
+            window: deps.context.window,
+            element: effect.element,
+            onFound: () => {
+              dispatch({ type: 'found', featureId, run });
+            },
+            limit: null,
+          });
+        } catch {
+          // 찾는 함수의 예외는 그 기능의 실패다.
+          dispatch({ type: 'fail', featureId, run });
         }
         return;
       }
@@ -112,9 +167,16 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
         scope?.close();
         return;
       }
-      case 'report':
-        report(effect.featureId, 'unexpected');
+      case 'report': {
+        const { featureId, problem } = effect;
+        if (problem.kind === 'unexpected') {
+          report({ featureId, kind: 'unexpected' });
+          return;
+        }
+        const { id, name } = problem.element;
+        report({ featureId, kind: 'not-found', element: { id, name } });
         return;
+      }
     }
   };
 
@@ -129,8 +191,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       desired: deps.parts.map((part) => ({
         featureId: part.featureId,
         key: JSON.stringify(snapshot.features.get(part.featureId) ?? null),
-        start: (scope: Scope) => {
-          part.start(snapshot, { ...deps.context, scope });
+        start: ({ scope, find }: Pick<PageStart, 'scope' | 'find'>) => {
+          part.start(snapshot, { ...deps.context, scope, find });
         },
       })),
     });
@@ -186,7 +248,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     problem: (error) => {
       if (!checkConnection()) return;
       if (error.kind === 'disconnected') retire();
-      else report(null, error.kind);
+      else report({ featureId: null, kind: error.kind });
     },
   });
 

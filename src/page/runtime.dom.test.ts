@@ -1,16 +1,18 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
 import {
+  type NamedElement,
   claimAttribute,
   createIsolatedHost,
+  elementTimeoutMs,
   hostTagName,
   pageElementAttribute,
 } from '../dom/index.ts';
 import { retireInFrame } from '../platform/index.ts';
-import { type AppError, type ErrorKind, type Result, appError, err, ok } from '../shared/index.ts';
+import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import type { PagePart } from './part.ts';
-import { startPageRuntime } from './runtime.ts';
+import { type PageProblem, startPageRuntime } from './runtime.ts';
 
 // 테스트가 만든 실행 틀. 테스트가 끝나면 모두 물러나게 해 다음 테스트에 남지 않게 한다(quality 104).
 const started: { isConnected: () => boolean }[] = [];
@@ -30,7 +32,7 @@ function setup(parts: readonly PagePart[], connected = true) {
   let handlers: SettingsReaderHandlers | undefined;
   let subscriptions = 0;
   let unsubscribed = 0;
-  const reports: { featureId: string | null; kind: ErrorKind }[] = [];
+  const reports: PageProblem[] = [];
   // 서비스 워커가 보낸 작업 결과 알림(결정 0024). 시험이 notice로 보낸다.
   let showNotice: ((text: string) => void) | undefined;
   let noticeListeners = 0;
@@ -44,8 +46,8 @@ function setup(parts: readonly PagePart[], connected = true) {
         unsubscribed += 1;
       };
     },
-    report: (featureId: string | null, kind: ErrorKind): Promise<Result<null, AppError>> => {
-      reports.push({ featureId, kind });
+    report: (problem: PageProblem): Promise<Result<null, AppError>> => {
+      reports.push(problem);
       return Promise.resolve(ok(null));
     },
     isConnected: () => connected,
@@ -512,5 +514,274 @@ describe('결정 0008 보조 방법: 물러남 이벤트 없이 연결만 끊긴
     ping();
     expect(a.counts).toMatchObject({ disposed: 0, pings: 1 });
     expect(runtime.unsubscribed()).toBe(0);
+  });
+});
+
+describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', () => {
+  // 시계는 가짜이고, 문서가 보이는지는 시험이 정한다(headless Chromium의 문서는 늘 visible이다).
+  let visibility: DocumentVisibilityState = 'visible';
+  const added: Element[] = [];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(document, 'visibilityState');
+    visibility = 'visible';
+    for (const element of added.splice(0)) element.remove();
+  });
+
+  const setVisibility = (next: DocumentVisibilityState) => {
+    visibility = next;
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+
+  // 외부 사이트의 요소를 본뜬 시험 요소. 찾는 단서는 aria-label이다.
+  const labelled = (id: string, name: string): NamedElement => ({
+    id,
+    name,
+    find: (root) => root.querySelector(`[aria-label="${name}"]`),
+  });
+  const region = labelled('test.region', '시험 영역');
+  const editArea = labelled('test.edit-area', '시험 수정 영역');
+
+  const add = (label: string, tag = 'section'): Element => {
+    const element = document.createElement(tag);
+    element.setAttribute('aria-label', label);
+    document.body.append(element);
+    added.push(element);
+    return element;
+  };
+
+  // 관찰 알림(마이크로태스크)까지 처리한다.
+  const settle = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  // 늘 있는 요소에 기대는 기능. 켜지면 먼저 문서 루트에 표시를 달고(반쯤 적용한 변경), 시험 영역을 찾으면 그 영역에도
+  // 표시를 단다. 모두 범위에 맡긴다.
+  function regionPart() {
+    const counts = { started: 0, applied: 0 };
+    const part: PagePart = {
+      featureId: 'region',
+      start: (value, { scope, find }) => {
+        if (!isEnabled(value, 'region')) return;
+        counts.started += 1;
+        const root = document.documentElement;
+        root.setAttribute('data-test-region', 'waiting');
+        scope.defer(() => {
+          root.removeAttribute('data-test-region');
+        });
+        find(region, (element) => {
+          counts.applied += 1;
+          element.setAttribute('data-test-applied', '');
+          scope.defer(() => {
+            element.removeAttribute('data-test-applied');
+          });
+        });
+      },
+    };
+    return { part, counts };
+  }
+
+  // 조작해야 생기는 요소에 기대는 기능. "시험 수정" 단추를 누르면 그때부터 수정 영역을 찾는다.
+  function editPart() {
+    const counts = { started: 0, applied: 0 };
+    const part: PagePart = {
+      featureId: 'edit',
+      start: (value, { scope, find }) => {
+        if (!isEnabled(value, 'edit')) return;
+        counts.started += 1;
+        scope.listen(document, 'click', (event) => {
+          if (!(event.target instanceof Element)) return;
+          if (event.target.getAttribute('aria-label') !== '시험 수정') return;
+          find(editArea, () => {
+            counts.applied += 1;
+          });
+        });
+      },
+    };
+    return { part, counts };
+  }
+
+  const notFoundReport = (featureId: string, element: NamedElement): PageProblem => ({
+    featureId,
+    kind: 'not-found',
+    element: { id: element.id, name: element.name },
+  });
+
+  it('COM-6.1 요소가 없으면 켠 때부터 15초 뒤 그 기능만 멈추고 반쯤 적용한 변경을 되돌리며, 찾지 못한 요소와 함께 기록한다', () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    const before = document.documentElement.getAttributeNames();
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    expect(document.documentElement.getAttribute('data-test-region')).toBe('waiting');
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(runtime.reports).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(document.documentElement.getAttributeNames()).toEqual(before);
+    expect(runtime.reports).toEqual([notFoundReport('region', region)]);
+  });
+
+  it('COM-6.2 찾지 못한 기능이 멈춰도 같은 페이지의 다른 기능은 그대로 돈다', () => {
+    const feature = regionPart();
+    const other = countingPart('other');
+    const runtime = setup([feature.part, other.part]);
+    runtime.apply(snapshot({ region: { enabled: true }, other: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    ping();
+    expect(other.counts).toEqual({ started: 1, disposed: 0, pings: 1 });
+  });
+
+  it('COM-6.3 찾지 못한 뒤 요소가 나타나면 그 기능을 다시 시작해 작용하고 더 기록하지 않는다', async () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    // 한참 뒤에 나타나도 지켜본다(한도가 없다).
+    vi.advanceTimersByTime(10 * 60_000);
+    const element = add('시험 영역');
+    await settle();
+    expect(feature.counts).toEqual({ started: 2, applied: 1 });
+    expect(element.hasAttribute('data-test-applied')).toBe(true);
+    expect(runtime.reports).toHaveLength(1);
+  });
+
+  it('COM-6.5 페이지를 연 지 15초가 지난 뒤 켜면 요소가 있을 때는 바로 작용하고, 없을 때는 켠 때부터 15초 뒤에 찾지 못함이 된다', () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ region: { enabled: false } }));
+    vi.advanceTimersByTime(20_000);
+    const element = add('시험 영역');
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    expect(element.hasAttribute('data-test-applied')).toBe(true);
+
+    runtime.apply(snapshot({ region: { enabled: false } }));
+    element.remove();
+    vi.advanceTimersByTime(20_000);
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(runtime.reports).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(runtime.reports).toEqual([notFoundReport('region', region)]);
+  });
+
+  it('COM-6.6 조작해야 생기는 요소는 조작하지 않으면 5분이 지나도 찾지 못함이 되지 않고, 조작한 뒤 15초 안에 생기지 않으면 찾지 못함이 된다', () => {
+    const feature = editPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ edit: { enabled: true } }));
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(runtime.reports).toEqual([]);
+    const button = add('시험 수정', 'button');
+    if (!(button instanceof HTMLElement)) throw new Error('단추가 아니다.');
+    button.click();
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(runtime.reports).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(runtime.reports).toEqual([notFoundReport('edit', editArea)]);
+  });
+
+  it('COM-6.6 조작한 뒤 요소가 생기면 작용한다', async () => {
+    const feature = editPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ edit: { enabled: true } }));
+    const button = add('시험 수정', 'button');
+    if (!(button instanceof HTMLElement)) throw new Error('단추가 아니다.');
+    button.click();
+    vi.advanceTimersByTime(3000);
+    add('시험 수정 영역');
+    await settle();
+    expect(feature.counts).toEqual({ started: 1, applied: 1 });
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toEqual([]);
+  });
+
+  it('COM-6.7 요소가 탭이 보일 때에야 생기는 페이지를 숨겨진 탭으로 열어 1분 뒤에 보이게 하면 찾지 못함이 되지 않는다', async () => {
+    visibility = 'hidden';
+    // 보일 때 요소를 만드는 페이지.
+    const showRegion = () => {
+      if (document.visibilityState === 'visible') add('시험 영역');
+    };
+    document.addEventListener('visibilitychange', showRegion);
+    try {
+      const feature = regionPart();
+      const runtime = setup([feature.part]);
+      runtime.apply(snapshot({ region: { enabled: true } }));
+      vi.advanceTimersByTime(60_000);
+      setVisibility('visible');
+      await settle();
+      vi.advanceTimersByTime(elementTimeoutMs);
+      expect(runtime.reports).toEqual([]);
+      expect(feature.counts.applied).toBe(1);
+    } finally {
+      document.removeEventListener('visibilitychange', showRegion);
+    }
+  });
+
+  it('quality 083 찾지 못한 기능을 끄면 지켜보기도 그친다', async () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
+    runtime.apply(snapshot({ region: { enabled: false } }));
+    expect(disconnect).toHaveBeenCalled();
+    disconnect.mockRestore();
+    add('시험 영역');
+    await settle();
+    expect(feature.counts).toEqual({ started: 1, applied: 0 });
+  });
+
+  it('결정 0008 물러나면 지켜보기도 그친다', async () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    runtime.deps.isConnected = () => false;
+    document.dispatchEvent(new Event(retireEventName));
+    add('시험 영역');
+    await settle();
+    expect(feature.counts).toEqual({ started: 1, applied: 0 });
+  });
+
+  it('quality 010 지켜보는 동안 찾는 함수가 던지면 그 기능의 실패로 기록하고, 설정이 바뀔 때까지 다시 찾지 않는다', async () => {
+    let broken = false;
+    const fragile: NamedElement = {
+      ...region,
+      find: (root) => {
+        if (broken) throw new Error('사이트 모듈의 결함');
+        return region.find(root);
+      },
+    };
+    const counts = { started: 0 };
+    const part: PagePart = {
+      featureId: 'fragile',
+      start: (value, { find }) => {
+        if (!isEnabled(value, 'fragile')) return;
+        counts.started += 1;
+        find(fragile, () => undefined);
+      },
+    };
+    const runtime = setup([part]);
+    runtime.apply(snapshot({ fragile: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    broken = true;
+    add('다른 영역');
+    await settle();
+    expect(runtime.reports).toEqual([
+      notFoundReport('fragile', region),
+      { featureId: 'fragile', kind: 'unexpected' },
+    ]);
+    broken = false;
+    add('시험 영역');
+    await settle();
+    expect(counts.started).toBe(1);
   });
 });
