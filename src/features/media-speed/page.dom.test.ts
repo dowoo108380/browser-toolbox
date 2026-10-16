@@ -78,6 +78,7 @@ async function frames() {
 function start(snapshot: Snapshot) {
   const errors: unknown[] = [];
   const scope = createScope({
+    window,
     onError: (error) => errors.push(error),
     isLive: () => true,
   });

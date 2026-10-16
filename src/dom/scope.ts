@@ -28,13 +28,17 @@ export interface Scope {
   readonly mutationObserver: (
     callback: (records: MutationRecord[]) => void | Promise<void>,
   ) => ScopedMutationObserver;
+  // 정한 시간(ms) 뒤에 콜백을 한 번 부른다. 돌려준 함수는 부르기 전이면 취소한다.
+  readonly timeout: (delayMs: number, callback: () => void | Promise<void>) => () => void;
 }
 
 interface ScopedMutationObserver {
   readonly observe: (target: Node, options?: MutationObserverInit) => void;
 }
 
-interface ScopeHooks {
+interface ScopeOptions {
+  // 타이머를 거는 창(그 프레임의 window).
+  readonly window: Window;
   // 콜백의 예외와 정리 함수의 예외를 받는다. 받은 쪽(실행 틀)이 기능을 멈추고 기록한다.
   readonly onError: (error: unknown) => void;
   // 감싼 콜백을 부르기 전에 묻는다. 거짓이면 부르지 않는다. 실행 틀은 이때 확장과의 연결을 확인하고,
@@ -42,11 +46,12 @@ interface ScopeHooks {
   readonly isLive: () => boolean;
 }
 
-export function createScope(hooks: ScopeHooks): Scope {
-  return makeScope(hooks, null);
+export function createScope(options: ScopeOptions): Scope {
+  return makeScope(options, null);
 }
 
-function makeScope({ onError, isLive }: ScopeHooks, detachFromParent: (() => void) | null): Scope {
+function makeScope(context: ScopeOptions, detachFromParent: (() => void) | null): Scope {
+  const { window, onError, isLive } = context;
   let closed = false;
   // Set은 넣은 순서를 지킨다. 닫을 때 거꾸로 돈다.
   const cleanups = new Set<() => void>();
@@ -97,7 +102,7 @@ function makeScope({ onError, isLive }: ScopeHooks, detachFromParent: (() => voi
 
   const child = (): Scope => {
     let detach = (): void => undefined;
-    const inner = makeScope({ onError, isLive }, () => {
+    const inner = makeScope(context, () => {
       detach();
     });
     detach = defer(inner.close);
@@ -129,6 +134,18 @@ function makeScope({ onError, isLive }: ScopeHooks, detachFromParent: (() => voi
           if (!closed) observer.observe(target, options);
         },
       };
+    },
+    timeout: (delayMs, callback) => {
+      const guarded = guard(callback);
+      let release = (): void => undefined;
+      const timer = window.setTimeout(() => {
+        release();
+        guarded();
+      }, delayMs);
+      release = defer(() => {
+        window.clearTimeout(timer);
+      });
+      return release;
     },
   };
 }

@@ -92,7 +92,11 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
           dispatch({ type: 'fail', featureId: effect.featureId, run: effect.run });
         };
         // 시작 도중 콜백이 실패해도 'close'가 이 범위를 찾을 수 있게 먼저 둔다.
-        const scope = createScope({ onError: fail, isLive: checkConnection });
+        const scope = createScope({
+          window: deps.context.window,
+          onError: fail,
+          isLive: checkConnection,
+        });
         scopes.set(effect.run, scope);
         try {
           effect.start(scope);

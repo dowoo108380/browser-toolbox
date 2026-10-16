@@ -8,6 +8,7 @@ function setup() {
   const errors: unknown[] = [];
   const state = { live: true };
   const scope = createScope({
+    window,
     onError: (error) => errors.push(error),
     isLive: () => state.live,
   });
@@ -122,6 +123,48 @@ describe('자원 범위', () => {
     target.dispatchEvent(new Event('ping'));
     expect(plain).toHaveBeenCalledTimes(1);
     expect(captured).toHaveBeenCalledTimes(1);
+  });
+
+  describe('타이머', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('정한 시간 뒤에 한 번 부르고, 먼저 취소하거나 범위를 닫으면 부르지 않는다', () => {
+      vi.useFakeTimers();
+      const { scope } = setup();
+      const fired = vi.fn();
+      const cancelled = vi.fn();
+      const closed = vi.fn();
+      scope.timeout(100, fired);
+      const cancel = scope.timeout(100, cancelled);
+      scope.child().timeout(200, closed);
+      cancel();
+      vi.advanceTimersByTime(99);
+      expect(fired).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(fired).toHaveBeenCalledTimes(1);
+      scope.close();
+      vi.advanceTimersByTime(1000);
+      expect(fired).toHaveBeenCalledTimes(1);
+      expect(cancelled).not.toHaveBeenCalled();
+      expect(closed).not.toHaveBeenCalled();
+    });
+
+    it('부른 뒤에는 범위의 정리에 남지 않고, 콜백의 예외는 알린다', () => {
+      vi.useFakeTimers();
+      const { scope, errors } = setup();
+      const clear = vi.spyOn(window, 'clearTimeout');
+      scope.timeout(10, () => {
+        throw new Error('타이머 콜백 실패');
+      });
+      vi.advanceTimersByTime(10);
+      expect(errors).toHaveLength(1);
+      const before = clear.mock.calls.length;
+      scope.close();
+      expect(clear.mock.calls.length).toBe(before);
+      clear.mockRestore();
+    });
   });
 
   describe('닫힌 범위에서는 관찰을 새로 시작하지 않는다', () => {
