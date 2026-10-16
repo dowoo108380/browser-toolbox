@@ -615,6 +615,41 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     expect(button('save').hasAttribute('aria-disabled')).toBe(false);
   });
 
+  it('페이지에 작용하는 실행 기능은 지금 탭에서 쓸 수 있는지 답을 받기 전에는 막혀 있어 눌러도 시작하지 않는다. 작용하지 않는 기능은 기다리지 않는다', async () => {
+    let answer: (result: Result<{ readonly page: PageAccess }, AppError>) => void = () => undefined;
+    const popup = await show({
+      features: withToggle,
+      tabStatus: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    await popup.awake();
+    expect(button('capture').getAttribute('aria-disabled')).toBe('true');
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+    await click(button('capture'));
+    expect(popup.starts).not.toHaveBeenCalled();
+    await act(() => {
+      answer(ok({ page: 'ready' }));
+    });
+    await vi.waitFor(() => {
+      expect(button('capture').hasAttribute('aria-disabled')).toBe(false);
+    });
+  });
+
+  it('지금 탭에서 쓸 수 있는지 답을 받지 못하면 그 까닭을 알리고 이유 없이 연다(결정 0023)', async () => {
+    const popup = await show({
+      features: withToggle,
+      tabStatus: () => Promise.resolve(err(appError('timeout', '확장의 응답이 없다.'))),
+    });
+    await popup.awake();
+    await vi.waitFor(() => {
+      expect(popup.status()).toBe('확장의 응답이 없다.');
+    });
+    expect(button('capture').hasAttribute('aria-disabled')).toBe(false);
+    expect(container.querySelector('#feature-unavailable-capture')).toBeNull();
+  });
+
   it('작업 기록을 읽지 못하면 그 이유를 알리고 막아 둔다. 그 뒤 기록의 바뀜을 받으면 쓸 수 있다', async () => {
     const popup = await show({ features: withToggle, holdTaskRead: true });
     await popup.awake();

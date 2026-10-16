@@ -6,7 +6,8 @@ import type { ActionFeature } from '../contracts/index.ts';
 
 interface ActionItemProps {
   readonly feature: ActionFeature;
-  // 서비스 워커가 깨어나기 전, 지금 탭을 모를 때, 그 탭의 작업 기록을 처음 읽기 전에는 막는다(N-12, 결정 0024).
+  // 아직 쓸 수 있는지 모르면 이유 없이 막는다: 서비스 워커가 깨어나기 전, 지금 탭을 모를 때, 그 탭의 작업 기록을 처음
+  // 읽기 전, 페이지에 작용하는 기능이면 그 탭에서 쓸 수 있는지 답을 받기 전(N-12, 결정 0024).
   readonly waiting: boolean;
   readonly onRun: () => void;
   // 지금 탭에서 쓸 수 없는 이유. 쓸 수 있거나 모르면 null이다.

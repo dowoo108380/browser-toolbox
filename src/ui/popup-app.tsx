@@ -117,9 +117,9 @@ export function PopupApp({
     };
   }, [rememberedCategory, features]);
 
-  // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지. 받기 전이나 받지 못했으면 null이라 이유를 보이지 않는다.
-  // 받지 못한 까닭은 알림으로 보인다. 팝업이 열린 동안 탭이 바뀌어도 다시 묻지 않는다(결정 0023).
-  const [page, setPage] = useState<PageAccess | null>(null);
+  // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지. 답을 받기 전에는 undefined이고, 받지 못했으면 null이다. 둘 다
+  // 이유를 보이지 않는다. 받지 못한 까닭은 알림으로 보인다. 팝업이 열린 동안 탭이 바뀌어도 다시 묻지 않는다(결정 0023).
+  const [page, setPage] = useState<PageAccess | null | undefined>(undefined);
   // 지금 탭. 알기 전이거나 없으면 null이다. 실행 기능은 이 탭에서 작업을 시작한다.
   const [tabId, setTabId] = useState<number | null>(null);
   useEffect(() => {
@@ -132,8 +132,8 @@ export function PopupApp({
     };
     void ask().then((result) => {
       if (!open) return;
-      if (result.ok) setPage(result.value.page);
-      else setNotice({ message: result.error.message });
+      setPage(result.ok ? result.value.page : null);
+      if (!result.ok) setNotice({ message: result.error.message });
     });
     return () => {
       open = false;
@@ -143,8 +143,8 @@ export function PopupApp({
   // 이 탭의 작업(COM-10, 결정 0024). latest는 기록에 있는 것이고, shown은 작업 칸이 보이는 것이다. 끝난 결과는 보인 뒤
   // 서비스 워커가 기록에서 지우지만 팝업을 닫을 때까지 보인다.
   // latest는 그 탭의 기록을 처음 받기 전에는 undefined이고, 받은 뒤 작업이 없으면 null이다. 처음 받기 전에는 실행 단추를
-  // 막는다. 서비스 워커는 새 작업을 시작할 때 끝난 이전 결과를 팝업이 이미 보였다고 보고 바꾸므로, 그 전에 시작하면 보지
-  // 않은 결과가 한 번도 보이지 않고 사라진다(COM-10 기대 동작 3·6).
+  // 막는다(actionReady). 서비스 워커는 새 작업을 시작할 때 끝난 이전 결과를 팝업이 이미 보였다고 보고 바꾸므로, 그 전에
+  // 시작하면 보지 않은 결과가 한 번도 보이지 않고 사라진다(COM-10 기대 동작 3·6).
   const [latest, setLatest] = useState<TaskRecord | null | undefined>(undefined);
   const [shown, setShown] = useState<TaskRecord | null>(null);
   useEffect(() => {
@@ -302,6 +302,15 @@ export function PopupApp({
     setNotice(result.ok ? null : { message: result.error.message });
   };
 
+  // 실행 단추를 쓸 수 있는 때(결정 0024): 서비스 워커가 깨어났고(N-12), 지금 탭을 알고, 그 탭의 작업 기록을 처음 받았고,
+  // 페이지에 작용하는 기능이면 그 탭에서 쓸 수 있는지 답도 받았다. 답을 받기 전에 누르면 쓸 수 없는 페이지에서 작업을
+  // 시작해, 막힌 단추와 이유 대신 실패를 보인다. 답을 받지 못했으면 이유 없이 연다(결정 0023).
+  const actionReady = (feature: ActionFeature) =>
+    awake &&
+    tabId !== null &&
+    latest !== undefined &&
+    (feature.content === null || page !== undefined);
+
   // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치, 실행은 단추다.
   const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
     switch (feature.kind) {
@@ -315,7 +324,7 @@ export function PopupApp({
             onToggle={(enabled) => {
               void toggle(feature.id, enabled);
             }}
-            unavailable={unavailableReason(feature, page)}
+            unavailable={unavailableReason(feature, page ?? null)}
           />
         );
       case 'action':
@@ -323,13 +332,13 @@ export function PopupApp({
           <ActionItem
             key={feature.id}
             feature={feature}
-            waiting={!awake || tabId === null || latest === undefined}
+            waiting={!actionReady(feature)}
             onRun={() => {
               void run(feature);
             }}
             unavailable={
               running === null
-                ? unavailableReason(feature, page)
+                ? unavailableReason(feature, page ?? null)
                 : strings.unavailable(strings.runningHere(nameOf(running.featureId)))
             }
           />
