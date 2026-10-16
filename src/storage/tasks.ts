@@ -94,9 +94,34 @@ export function finishTask(
   return { ...records, [keyOf(tabId)]: finished };
 }
 
-// 그 탭의 기록을 지운 것.
-function withoutTab(records: TaskRecords, tabId: number): TaskRecords {
+// 그 탭의 기록을 지운 것(탭이 닫힘).
+export function withoutTab(records: TaskRecords, tabId: number): TaskRecords {
   return Object.fromEntries(Object.entries(records).filter(([key]) => key !== keyOf(tabId)));
+}
+
+// 서비스 워커가 다시 시작할 때 고친 기록(결정 0024). 열려 있지 않은 탭의 기록은 지운다(닫힘을 놓친 경우). 진행 중이던
+// 작업은 앞 서비스 워커의 메모리에만 있던 일이라 이어 할 수 없으므로 error로 끝낸다. 그대로 두면 그 탭에서 다시는 작업을
+// 시작할 수 없다. 그렇게 끝낸 작업을 함께 돌려준다.
+export function recoveredTasks(
+  records: TaskRecords,
+  isOpen: (tabId: number) => boolean,
+  error: AppError,
+): { readonly records: TaskRecords; readonly interrupted: readonly TaskRecord[] } {
+  const interrupted: TaskRecord[] = [];
+  const entries = Object.entries(records)
+    .filter(([key]) => isOpen(Number(key)))
+    .map(([key, task]): [string, TaskRecord] => {
+      if (task.status !== 'running') return [key, task];
+      const failed: TaskRecord = {
+        id: task.id,
+        featureId: task.featureId,
+        status: 'failed',
+        error,
+      };
+      interrupted.push(failed);
+      return [key, failed];
+    });
+  return { records: Object.fromEntries(entries), interrupted };
 }
 
 // 사용자가 팝업에서 작업 id인 결과를 보았다. 그 탭의 기록이 같은 작업이고 끝났을 때만 지운다. id가 다르거나(늦게 닿은

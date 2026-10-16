@@ -7,8 +7,10 @@ import {
   chromeSessionStore,
   listenInstalled,
   listenRequests,
+  listenTabEvents,
   probePageRuntime,
   retireInAllFrames,
+  setTabBadge,
   tabExists,
 } from '../platform/index.ts';
 import { settingsFormat } from '../storage/index.ts';
@@ -23,6 +25,8 @@ startBackground({
   taskParts,
   randomId: () => crypto.randomUUID(),
   tabExists,
+  setTabBadge,
+  listenTabEvents,
   now: () => Date.now(),
   sleep: (ms) =>
     new Promise((resolve) => {

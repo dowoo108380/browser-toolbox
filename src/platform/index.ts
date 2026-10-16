@@ -13,5 +13,12 @@ export {
   retireInFrame,
   retireTimeoutMs,
 } from './scripting.ts';
-export { currentTabId, tabExists } from './tabs.ts';
+export {
+  type TabEventHandlers,
+  type TabEvents,
+  currentTabId,
+  listenTabEvents,
+  tabExists,
+} from './tabs.ts';
+export { type TabBadge, setTabBadge } from './action.ts';
 export { listenInstalled } from './runtime.ts';

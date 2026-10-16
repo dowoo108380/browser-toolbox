@@ -6,11 +6,13 @@ import {
   type TaskRecords,
   finishTask,
   parseTasks,
+  recoveredTasks,
   seenTask,
   startTask,
   taskOf,
   tasksKey,
   watchTask,
+  withoutTab,
 } from './tasks.ts';
 
 // 탭마다 작업 하나의 기록(COM-10, 결정 0012, 0024).
@@ -185,5 +187,36 @@ describe('확장 화면이 그 탭의 작업을 읽음', () => {
     stop();
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(later).toEqual([]);
+  });
+});
+
+describe('탭이 닫힘', () => {
+  it('그 탭의 기록만 지운다', () => {
+    const records: TaskRecords = { '1': running, '2': succeeded };
+    expect(withoutTab(records, 1)).toEqual({ '2': succeeded });
+    expect(withoutTab(records, 3)).toEqual(records);
+    expect(records).toEqual({ '1': running, '2': succeeded });
+  });
+});
+
+describe('서비스 워커가 다시 시작할 때 고친 기록(결정 0024)', () => {
+  const stopped = appError('unexpected', '다시 시작되었다.');
+
+  it('진행 중이던 작업은 그 오류로 끝내 돌려주고, 끝난 결과는 그대로 두며, 열려 있지 않은 탭의 기록은 지운다', () => {
+    const records: TaskRecords = {
+      '1': running,
+      '2': succeeded,
+      '3': { ...running, id: 'c' },
+      '4': failed,
+    };
+    const recovered = recoveredTasks(records, (tabId) => tabId !== 3 && tabId !== 4, stopped);
+    const ended = { id: 'a', featureId: 'save', status: 'failed', error: stopped } as const;
+    expect(recovered).toEqual({ records: { '1': ended, '2': succeeded }, interrupted: [ended] });
+    expect(records['1']).toEqual(running);
+  });
+
+  it('고칠 것이 없으면 같은 기록과 빈 목록이다', () => {
+    const records: TaskRecords = { '2': succeeded };
+    expect(recoveredTasks(records, () => true, stopped)).toEqual({ records, interrupted: [] });
   });
 });

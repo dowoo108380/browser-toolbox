@@ -10,7 +10,14 @@ import {
   taskSeen,
   taskStart,
 } from '../contracts/index.ts';
-import type { KeyValueStore, PageProbe, Sender } from '../platform/index.ts';
+import type {
+  KeyValueStore,
+  PageProbe,
+  Sender,
+  TabBadge,
+  TabEventHandlers,
+  TabEvents,
+} from '../platform/index.ts';
 import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
 import { createPopupState } from './popup-state.ts';
@@ -33,6 +40,10 @@ export interface BackgroundDeps {
   readonly taskParts: readonly TaskPart[];
   readonly randomId: () => string;
   readonly tabExists: (tabId: number) => Promise<boolean>;
+  // 확장 아이콘의 탭마다의 배지와 제목(결정 0024).
+  readonly setTabBadge: (tabId: number, badge: TabBadge | null) => Promise<void>;
+  // 탭 닫힘과 이동을 듣는다. 처음 실행될 때 바로 불러야 Chrome이 서비스 워커를 깨워 사건을 넘긴다.
+  readonly listenTabEvents: (handlers: TabEventHandlers) => TabEvents;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   // 서비스 워커가 처음 실행될 때 바로 걸어야 하는 Chrome 이벤트를 건다.
@@ -63,12 +74,27 @@ export function startBackground(deps: BackgroundDeps): void {
     record,
     noticeRepair: repairNotice.add,
   });
+  // 탭 사건은 처음 실행될 때 바로 듣는다. 사건은 나중에 오므로 그때 tasks는 만들어져 있다.
+  const tabEvents = deps.listenTabEvents({
+    removed: (tabId) => {
+      tasks.tabRemoved(tabId).catch(() => {
+        record({ featureId: null, kind: 'unexpected' });
+      });
+    },
+    navigated: (tabId) => {
+      tasks.tabNavigated(tabId).catch(() => {
+        record({ featureId: null, kind: 'unexpected' });
+      });
+    },
+  });
   const tasks = createTaskRunner({
     session: deps.session,
     features: deps.features,
     parts: deps.taskParts,
     randomId: deps.randomId,
     tabExists: deps.tabExists,
+    badge: deps.setTabBadge,
+    listenTabs: tabEvents.listen,
     record,
   });
   const popupState = createPopupState({ store: deps.store, record });
@@ -116,6 +142,10 @@ export function startBackground(deps: BackgroundDeps): void {
       .catch(() => {
         record({ featureId: null, kind: 'platform' });
       });
+  });
+  // 앞 서비스 워커가 남긴 작업 기록을 고치고, 기록이 없으면 탭 사건 듣기를 그만둔다(결정 0024).
+  tasks.recover().catch(() => {
+    record({ featureId: null, kind: 'unexpected' });
   });
   // 서비스 워커가 시작할 때 설정을 준비한다(처음 설치, 손상, 옛 형식). 실패 결과도 버리지 않고 기록한다(quality 067).
   // 읽는 쪽은 준비되지 않은 설정을 보면 storage.ensureReady로 다시 부탁한다(결정 0011).

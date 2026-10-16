@@ -3,7 +3,7 @@ import { startTestBackground } from '../../tests/support/background.ts';
 import { specs, stored } from '../../tests/support/settings.ts';
 import { defineFeature, tabStatus, taskStart } from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
-import type { KeyValueStore, PageProbe } from '../platform/index.ts';
+import type { KeyValueStore, PageProbe, TabEventHandlers } from '../platform/index.ts';
 import { type AppError, appError, ok } from '../shared/index.ts';
 import { settingsFormat, settingsKey, tasksKey } from '../storage/index.ts';
 import { defineTaskPart, startBackground } from './index.ts';
@@ -25,6 +25,8 @@ function start(
     taskParts: [],
     randomId: () => 'task',
     tabExists: () => Promise.resolve(true),
+    setTabBadge: () => Promise.resolve(),
+    listenTabEvents: () => ({ listen: () => undefined }),
     now: () => clock.time,
     sleep: (ms) => {
       clock.time += ms;
@@ -224,5 +226,64 @@ describe('결정 0024 실행 기능의 작업(task.start)', () => {
         startTime: 1_790_000_000_000,
       }),
     ).toThrow('실행 기능 save의 일이 0개다.');
+  });
+});
+
+describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
+  const action = defineFeature({
+    id: 'save',
+    requirements: [],
+    name: '저장',
+    description: '시험용',
+    category: 'tabs',
+    kind: 'action',
+    content: null,
+    permissions: [],
+    task: { timeoutMs: 1000 },
+  });
+  const part = defineTaskPart(action, () => new Promise(() => undefined));
+
+  function startWith(session: ReturnType<typeof createFakeStore>) {
+    let handlers: TabEventHandlers | undefined;
+    const listening: boolean[] = [];
+    startTestBackground({
+      store: createFakeStore(),
+      features: [...specs, action],
+      startTime: 1_790_000_000_000,
+      session,
+      taskParts: [part],
+      listenTabEvents: (next) => {
+        handlers = next;
+        return { listen: (on) => listening.push(on) };
+      },
+    });
+    if (handlers === undefined) throw new Error('탭 사건을 처음 실행 때 듣지 않았다.');
+    return { handlers, listening };
+  }
+
+  it('시작할 때 앞 서비스 워커가 남긴 진행 중 작업을 끝내고, 기록이 남으면 탭 사건을 듣는다', async () => {
+    const session = createFakeStore({
+      [tasksKey]: { '3': { id: 'old', featureId: 'save', status: 'running' } },
+    });
+    const { listening } = startWith(session);
+    await vi.waitFor(() => {
+      expect(session.peek(tasksKey)).toMatchObject({ '3': { id: 'old', status: 'failed' } });
+    });
+    expect(listening).toEqual([true]);
+  });
+
+  it('기록이 없으면 시작한 뒤 탭 사건 듣기를 그만두고, 닫힌 탭의 기록은 지운다', async () => {
+    const session = createFakeStore();
+    const { handlers, listening } = startWith(session);
+    await vi.waitFor(() => {
+      expect(listening).toEqual([false]);
+    });
+    await session.set({
+      [tasksKey]: { '3': { id: 'a', featureId: 'save', status: 'succeeded', summary: null } },
+    });
+    handlers.removed(3);
+    await vi.waitFor(() => {
+      expect(session.peek(tasksKey)).toEqual({});
+    });
   });
 });

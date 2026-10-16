@@ -1,6 +1,14 @@
 import { type FeatureDefinition, responseSchema } from '../../src/contracts/index.ts';
 import { type TaskPart, startBackground } from '../../src/background/index.ts';
-import type { KeyValueStore, PageProbe, Requester, Sender } from '../../src/platform/index.ts';
+import type {
+  KeyValueStore,
+  PageProbe,
+  Requester,
+  Sender,
+  TabBadge,
+  TabEventHandlers,
+  TabEvents,
+} from '../../src/platform/index.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import { appError, err } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
@@ -20,6 +28,9 @@ export interface TestBackgroundOptions {
   // 작업 기록을 두는 세션 저장소와 실행 기능의 일(결정 0024). 없으면 빈 가짜 저장소와 일 없음이다.
   readonly session?: KeyValueStore;
   readonly taskParts?: readonly TaskPart[];
+  // 확장 아이콘의 배지와 탭 사건(결정 0024). 없으면 배지는 버리고 탭 사건은 오지 않는다.
+  readonly setTabBadge?: (tabId: number, badge: TabBadge | null) => Promise<void>;
+  readonly listenTabEvents?: (handlers: TabEventHandlers) => TabEvents;
 }
 
 // 확장 화면과 콘텐츠 스크립트가 쓰는 요청 함수를 돌려준다. chromeRequester처럼 메시지를 구조화 복제로 건네고,
@@ -39,6 +50,8 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
       return `task-${String(taskCount)}`;
     },
     tabExists: () => Promise.resolve(true),
+    setTabBadge: options.setTabBadge ?? (() => Promise.resolve()),
+    listenTabEvents: options.listenTabEvents ?? (() => ({ listen: () => undefined })),
     now: () => clock.time,
     sleep: (ms) => {
       clock.time += ms;

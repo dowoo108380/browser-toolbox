@@ -36,6 +36,16 @@ function fakeChrome(
 ) {
   let installed: (() => void) | undefined;
   let onMessage: MessageListener | undefined;
+  // 작업 기록(결정 0024)은 이 시험이 보지 않는다. 비어 있는 세션 저장소와 오지 않는 탭 사건이다.
+  const session = createFakeStore();
+  const event = () => {
+    const listeners = new Set<unknown>();
+    return {
+      addListener: (listener: unknown) => listeners.add(listener),
+      removeListener: (listener: unknown) => listeners.delete(listener),
+      hasListener: (listener: unknown) => listeners.has(listener),
+    };
+  };
   vi.stubGlobal('chrome', {
     storage: {
       local: {
@@ -47,6 +57,13 @@ function fakeChrome(
           if ('problems' in items && problemsSaveMs > 0) await after(problemsSaveMs, null);
           await store.set(items);
         },
+      },
+      session: {
+        get: (key: string) => {
+          const value = session.peek(key);
+          return Promise.resolve(value === undefined ? {} : { [key]: value });
+        },
+        set: (items: Readonly<Record<string, unknown>>) => session.set(items),
       },
       onChanged: { addListener: () => undefined, removeListener: () => undefined },
     },
@@ -64,7 +81,12 @@ function fakeChrome(
         },
       },
     },
-    tabs: { query: () => Promise.resolve(tabs) },
+    tabs: {
+      query: () => Promise.resolve(tabs),
+      get: (tabId: number) => Promise.resolve({ id: tabId }),
+      onRemoved: event(),
+      onUpdated: event(),
+    },
     scripting: { executeScript },
   });
   return {

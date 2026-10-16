@@ -30,8 +30,11 @@ export {
   type TaskWatchHandlers,
   finishTask,
   parseTasks,
+  recoveredTasks,
   seenTask,
   startTask,
+  taskOf,
   tasksKey,
   watchTask,
+  withoutTab,
 } from './tasks.ts';

@@ -1,5 +1,5 @@
 import type { ActionFeature, FeatureDefinition } from '../contracts/index.ts';
-import type { KeyValueStore } from '../platform/index.ts';
+import type { KeyValueStore, TabBadge } from '../platform/index.ts';
 import {
   type AppError,
   type ErrorKind,
@@ -12,12 +12,16 @@ import {
 } from '../shared/index.ts';
 import {
   type TaskOutcome,
+  type TaskRecord,
   type TaskRecords,
   finishTask,
   parseTasks,
+  recoveredTasks,
   seenTask,
   startTask,
+  taskOf,
   tasksKey,
+  withoutTab,
 } from '../storage/index.ts';
 import type { Problem } from './problems.ts';
 import { strings } from './strings.ts';
@@ -25,6 +29,7 @@ import type { TaskPart } from './task-part.ts';
 
 // 실행 기능의 작업을 탭마다 하나씩 끝까지 하고 그 기록을 쓴다(COM-10, 결정 0012, 0024). 작업 기록을 쓰는 곳은 이것 하나다.
 // 기록의 읽고-고치고-쓰기는 들어온 순서대로 하나씩 한다. 일은 그 줄 밖에서 돌고, 끝나면 줄에 서서 결과를 쓴다.
+// 배지와 탭 사건 듣기는 기록을 쓸 때마다 같은 줄에서 기록에 맞춘다(배지는 기록에서 계산한다, 0012).
 
 export interface TaskRunnerDeps {
   readonly session: KeyValueStore;
@@ -33,6 +38,10 @@ export interface TaskRunnerDeps {
   // 작업 id. 서비스 워커는 crypto.randomUUID()를 쓴다(확장의 출처라 늘 보안 문맥이다).
   readonly randomId: () => string;
   readonly tabExists: (tabId: number) => Promise<boolean>;
+  // 그 탭의 확장 아이콘에 배지와 제목을 단다. null이면 지운다. 닫힌 탭이면 할 일이 없다.
+  readonly badge: (tabId: number, badge: TabBadge | null) => Promise<void>;
+  // 탭 닫힘과 이동을 들을지. 작업 기록이 있는 동안만 듣는다(결정 0024).
+  readonly listenTabs: (on: boolean) => void;
   readonly record: (problem: Problem) => void;
 }
 
@@ -44,6 +53,12 @@ export interface TaskRunner {
   ) => Promise<Result<{ readonly taskId: string }, AppError>>;
   // 팝업이 그 탭의 끝난 작업을 보였다. 그 탭의 기록이 같은 작업이고 끝났을 때만 지운다(결정 0012).
   readonly seen: (tabId: number, taskId: string) => Promise<Result<null, AppError>>;
+  // 탭이 닫혔다. 그 탭의 기록을 지우고 진행 중이던 일에 멈춤 신호를 보낸다(COM-10.6).
+  readonly tabRemoved: (tabId: number) => Promise<void>;
+  // 탭이 다른 문서로 이동했다. Chrome이 지운 배지와 제목을 기록대로 다시 단다(결정 0024의 실험 1).
+  readonly tabNavigated: (tabId: number) => Promise<void>;
+  // 서비스 워커가 시작할 때 앞 서비스 워커가 남긴 기록을 고친다: 닫힌 탭의 기록을 지우고, 진행 중이던 작업을 끝낸다.
+  readonly recover: () => Promise<void>;
 }
 
 // 문제 기록에 남기지 않는 실패. 고장이 아니라 상황(쓸 수 없는 페이지 등)이나 사용자의 일을 알리는 종류다(결정 0024).
@@ -52,6 +67,12 @@ const situationalKinds: ReadonlySet<ErrorKind> = new Set<ErrorKind>([
   'invalid-input',
   'cancelled',
 ]);
+
+// 끝났고 아직 보지 않은 작업의 배지. 바탕색은 흰 글자와의 명도 대비가 4.5:1을 넘는다.
+const marks = {
+  succeeded: { text: '✓', color: '#1a7f37' },
+  failed: { text: '!', color: '#c62828' },
+} as const;
 
 // 실행 기능마다 일이 꼭 하나 있어야 한다. 빠지거나 겹치면 결함이므로 시작할 때 드러낸다(quality 066).
 function partsByFeature(
@@ -79,9 +100,28 @@ function partsByFeature(
 export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
   const actions = partsByFeature(deps.features, deps.parts);
   const enqueue = createSerialQueue();
+  // 이 서비스 워커에서 도는 일. 작업 id → 그 탭과 멈춤 단추. 탭이 닫히면 멈춘다.
+  const running = new Map<string, { readonly tabId: number; readonly stop: AbortController }>();
 
   const nameOf = (featureId: string) =>
     deps.features.find((feature) => feature.id === featureId)?.name ?? featureId;
+
+  const badgeOf = (task: TaskRecord | null): TabBadge | null => {
+    if (task === null || task.status === 'running') return null;
+    return {
+      ...marks[task.status],
+      title: strings.badgeTitle[task.status](nameOf(task.featureId)),
+    };
+  };
+
+  // 배지를 달지 못해도 기록은 맞다. 숨기지 않고 기록한다(quality 067).
+  const showBadge = async (tabId: number, task: TaskRecord | null) => {
+    try {
+      await deps.badge(tabId, badgeOf(task));
+    } catch {
+      deps.record({ featureId: task?.featureId ?? null, kind: 'platform' });
+    }
+  };
 
   // 읽은 기록의 모양이 틀리면 결함이다(쓰는 곳이 여기 하나다). 기록하고 빈 기록에서 다시 시작한다(결정 0024).
   const load = async (): Promise<Result<TaskRecords, AppError>> => {
@@ -97,24 +137,31 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     return ok({});
   };
 
-  const save = async (records: TaskRecords): Promise<Result<null, AppError>> => {
+  // 기록을 쓰고, 그 탭들의 배지와 탭 사건 듣기를 새 기록에 맞춘다.
+  const commit = async (
+    records: TaskRecords,
+    tabIds: readonly number[],
+  ): Promise<Result<null, AppError>> => {
     try {
       await deps.session.set({ [tasksKey]: records });
-      return ok(null);
     } catch {
       return err(appError('platform', strings.writeFailed));
     }
+    deps.listenTabs(Object.keys(records).length > 0);
+    for (const tabId of tabIds) await showBadge(tabId, taskOf(records, tabId));
+    return ok(null);
   };
 
-  // 일을 제한 시간 안에서 한다. 던진 예외도 끝으로 바꾼다. 늦게 온 결과는 withTimeout이 버린다.
+  // 일을 제한 시간 안에서 한다. 탭이 닫혀도 멈춘다. 던진 예외도 끝으로 바꾼다. 늦게 온 결과는 withTimeout이 버린다.
   const runPart = async (
     feature: ActionFeature,
     part: TaskPart,
     tabId: number,
+    stop: AbortSignal,
   ): Promise<TaskOutcome> => {
-    const timed = await withTimeout(feature.task.timeoutMs, async (signal) => {
+    const timed = await withTimeout(feature.task.timeoutMs, async (timeout) => {
       try {
-        return await part.run({ tabId, signal });
+        return await part.run({ tabId, signal: AbortSignal.any([timeout, stop]) });
       } catch {
         return err(appError('unexpected', strings.unexpected));
       }
@@ -124,7 +171,7 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
   };
 
   // 끝을 쓴다. 그 탭의 기록이 이 작업일 때만 쓰고, 그때만 실패를 문제로 남긴다. 탭을 닫아 생긴 실패를 고장으로 남기지 않는다.
-  // 끝을 쓰지 못하면 기록은 진행 중으로 남는다. 서비스 워커가 다시 시작할 때 고친다(결정 0024).
+  // 끝을 쓰지 못하면 기록은 진행 중으로 남는다. 서비스 워커가 다시 시작할 때 고친다(recover).
   const finish = (featureId: string, tabId: number, id: string, outcome: TaskOutcome) =>
     enqueue(async () => {
       const loaded = await load();
@@ -134,8 +181,8 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
       }
       const next = finishTask(loaded.value, tabId, id, outcome);
       if (next === null) return;
-      const saved = await save(next);
-      if (!saved.ok) {
+      const committed = await commit(next, [tabId]);
+      if (!committed.ok) {
         deps.record({ featureId, kind: 'platform' });
         return;
       }
@@ -157,12 +204,16 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
         if (!started.ok) {
           return err(appError('unavailable', strings.running(nameOf(started.error.featureId))));
         }
-        const saved = await save(started.value);
-        if (!saved.ok) return saved;
+        // 이전 결과의 배지는 새 작업의 기록으로 지워진다(진행 중에는 배지가 없다).
+        const committed = await commit(started.value, [tabId]);
+        if (!committed.ok) return committed;
         // 일은 줄 밖에서 돈다. 그동안 다른 탭의 시작과 확인이 기다리지 않는다.
-        void runPart(action.feature, action.part, tabId).then((outcome) =>
-          finish(featureId, tabId, id, outcome),
-        );
+        const stop = new AbortController();
+        running.set(id, { tabId, stop });
+        void runPart(action.feature, action.part, tabId, stop.signal).then((outcome) => {
+          running.delete(id);
+          return finish(featureId, tabId, id, outcome);
+        });
         return ok({ taskId: id });
       }),
 
@@ -171,7 +222,63 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
         const loaded = await load();
         if (!loaded.ok) return loaded;
         const next = seenTask(loaded.value, tabId, taskId);
-        return next === null ? ok(null) : save(next);
+        return next === null ? ok(null) : commit(next, [tabId]);
+      }),
+
+    tabRemoved: (tabId) =>
+      enqueue(async () => {
+        for (const task of running.values()) if (task.tabId === tabId) task.stop.abort();
+        const loaded = await load();
+        if (!loaded.ok) {
+          deps.record({ featureId: null, kind: 'platform' });
+          return;
+        }
+        if (taskOf(loaded.value, tabId) === null) return;
+        // 닫힌 탭에는 배지를 달 수 없고 Chrome이 지운다.
+        const committed = await commit(withoutTab(loaded.value, tabId), []);
+        if (!committed.ok) deps.record({ featureId: null, kind: 'platform' });
+      }),
+
+    tabNavigated: (tabId) =>
+      enqueue(async () => {
+        const loaded = await load();
+        if (!loaded.ok) return;
+        const task = taskOf(loaded.value, tabId);
+        if (task !== null && task.status !== 'running') await showBadge(tabId, task);
+      }),
+
+    recover: () =>
+      enqueue(async () => {
+        const loaded = await load();
+        if (!loaded.ok) {
+          // 읽지 못하면 탭 사건을 그대로 듣는다(처음에 듣고 있다). 기록이 있을 수 있기 때문이다.
+          deps.record({ featureId: null, kind: 'platform' });
+          return;
+        }
+        const tabIds = Object.keys(loaded.value).map(Number);
+        const open = new Set<number>();
+        for (const tabId of tabIds) if (await deps.tabExists(tabId)) open.add(tabId);
+        const { records, interrupted } = recoveredTasks(
+          loaded.value,
+          (tabId) => open.has(tabId),
+          appError('unexpected', strings.interrupted),
+        );
+        // 고칠 것이 없으면 쓰지 않는다(서비스 워커는 자주 다시 시작한다). 배지는 서비스 워커가 멈춰도 남는다.
+        if (interrupted.length === 0 && open.size === tabIds.length) {
+          deps.listenTabs(tabIds.length > 0);
+          return;
+        }
+        // 끝낸 작업의 탭에 실패 배지를 단다. 닫힌 탭은 Chrome이 배지를 지웠다.
+        const endedTabs = [...open].filter(
+          (tabId) => taskOf(loaded.value, tabId)?.status === 'running',
+        );
+        const committed = await commit(records, endedTabs);
+        if (!committed.ok) {
+          deps.record({ featureId: null, kind: 'platform' });
+          return;
+        }
+        for (const task of interrupted)
+          deps.record({ featureId: task.featureId, kind: 'unexpected' });
       }),
   };
 }
