@@ -51,20 +51,30 @@ function outcomeOf(outcome: Release['outcome']): TaskOutcome {
   }
 }
 
-// 그 기능의 끝이 쓰일 때까지 기다린다. 멈춤 신호(탭 닫힘, 제한 시간)가 오면 그만둔다.
+// 그 기능의 끝이 쓰일 때까지 기다린다. 일이 기다리기 시작하기 전에 쓰인 끝도 가져간다. 시험은 팝업이 진행 중을 보인 바로
+// 뒤에 끝을 쓰는데, 그때 서비스 워커는 아직 이 일을 시작하지 않았을 수 있다(기록을 쓰고 배지를 단 뒤에 시작한다).
+// 가져간 끝은 지워 다음 작업이 다시 가져가지 않는다. 멈춤 신호(탭 닫힘, 제한 시간)가 오면 그만둔다.
 function waitForRelease(featureId: string, signal: AbortSignal): Promise<TaskOutcome> {
   return new Promise((resolve) => {
-    const stop = chromeSessionStore().onChanged(releaseKey, (value) => {
-      const release = releaseSchema.safeParse(value);
-      if (!release.success || release.data.featureId !== featureId) return;
+    const store = chromeSessionStore();
+    let settled = false;
+    const finish = (outcome: TaskOutcome) => {
+      settled = true;
       stop();
-      resolve(outcomeOf(release.data.outcome));
-    });
+      resolve(outcome);
+    };
+    const take = (value: unknown) => {
+      const release = releaseSchema.safeParse(value);
+      if (settled || !release.success || release.data.featureId !== featureId) return;
+      void store.set({ [releaseKey]: null });
+      finish(outcomeOf(release.data.outcome));
+    };
+    const stop = store.onChanged(releaseKey, take);
+    void store.get(releaseKey).then(take);
     signal.addEventListener(
       'abort',
       () => {
-        stop();
-        resolve(err(appError('cancelled', '시험 작업을 멈췄다.')));
+        if (!settled) finish(err(appError('cancelled', '시험 작업을 멈췄다.')));
       },
       { once: true },
     );
