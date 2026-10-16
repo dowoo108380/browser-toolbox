@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fixtureElementFeature } from '../extension/fixture-elements.ts';
 import { fixtureOther, fixtureTask } from '../extension/fixture-tasks.ts';
 import {
   distPath,
@@ -99,9 +100,11 @@ test('결정 0025 배포 빌드(dist/)에는 시험 빌드의 시험 기능이 �
   // 비교 대상이 맞는지: 시험 빌드에는 들어 있다.
   const fixtureWorker = readFileSync(path.join(fixtureDistPath, 'sw.js'), 'utf8');
   expect(fixtureWorker.includes(fixtureTask.id)).toBe(true);
+  const fixtureContent = readFileSync(path.join(fixtureDistPath, 'content-common.js'), 'utf8');
+  expect(fixtureContent.includes(fixtureElementFeature.id)).toBe(true);
   const found = ['sw.js', 'popup.js', 'content-common.js', 'manifest.json'].flatMap((file) => {
     const text = readFileSync(path.join(distPath, file), 'utf8');
-    return [fixtureTask.id, fixtureOther.id]
+    return [fixtureTask.id, fixtureOther.id, fixtureElementFeature.id]
       .filter((id) => text.includes(id))
       .map((id) => `${file}: ${id}`);
   });

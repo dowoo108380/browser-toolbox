@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청(404)이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>외부 화면 요소가 있는 페이지</title>
+    <!--
+      COM-6(결정 0026)의 시험 페이지. 시험 빌드의 "시험 요소 기능"이 기대는 "시험 대상 영역"(역할 region, aria-label)과,
+      같은 페이지의 다른 기능(미디어 배속)이 쓸 영상이 있다. 특정 사이트를 본뜨지 않았다. 시험이 영역을 지우고 다시 붙인다.
+    -->
+    <style>
+      video {
+        display: block;
+        width: 320px;
+        height: 180px;
+        background: #222;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section role="region" aria-label="시험 대상 영역">
+        <p>시험 대상</p>
+      </section>
+      <video id="video"></video>
+    </main>
+  </body>
+</html>

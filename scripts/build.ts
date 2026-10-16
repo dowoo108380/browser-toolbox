@@ -7,8 +7,9 @@ import { createManifest, minimumChromeVersion } from './manifest.ts';
 import { syncGenerated } from './registry.ts';
 
 // dist/에 압축 해제된 확장을 만든다(결정 0002, 아키텍처 10장).
-// --fixture이면 시험 빌드를 dist-fixture/에 만든다(결정 0025): 진입점이 가져오는 기능 목록과 서비스 워커의 등록 목록만
-// tests/extension/의 것(제품의 목록에 시험 기능을 덧붙인 것)으로 바꾸고 나머지는 제품과 같다. 배포물은 늘 dist/다.
+// --fixture이면 시험 빌드를 dist-fixture/에 만든다(결정 0025): 진입점이 가져오는 기능 목록과 서비스 워커·콘텐츠
+// 스크립트의 등록 목록만 tests/extension/의 것(제품의 목록에 시험 기능을 덧붙인 것)으로 바꾸고 나머지는 제품과 같다.
+// 배포물은 늘 dist/다.
 
 const root = process.cwd();
 const fixture = process.argv.includes('--fixture');
@@ -19,7 +20,7 @@ const features = fixture
   ? (await import('../tests/extension/features.ts')).features
   : productFeatures;
 
-// 진입점(src/entries/)이 가져오는 두 목록을 시험 빌드의 것으로 바꾼다. 시험 빌드의 목록이 제품의 목록을 가져올 때는
+// 진입점(src/entries/)이 가져오는 세 목록을 시험 빌드의 것으로 바꾼다. 시험 빌드의 목록이 제품의 목록을 가져올 때는
 // 바꾸지 않는다(가져오는 곳이 진입점이 아니다).
 const fixtureLists: Plugin = {
   name: 'fixture-lists',
@@ -31,6 +32,7 @@ const fixtureLists: Plugin = {
         : undefined;
     builder.onResolve({ filter: /\/features\/list\.ts$/ }, replace('features.ts'));
     builder.onResolve({ filter: /\/generated\/sw\.ts$/ }, replace('task-parts.ts'));
+    builder.onResolve({ filter: /\/generated\/content-common\.ts$/ }, replace('page-parts.ts'));
   },
 };
 
