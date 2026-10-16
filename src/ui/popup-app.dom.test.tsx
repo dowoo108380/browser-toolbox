@@ -54,11 +54,18 @@ function toggleFeature(id: string, category: Category, name: string): FeatureDef
 }
 
 // 초점이 있는 요소에서 키를 누른다(keydown). 확장 화면의 키 처리는 모두 keydown에서 한다.
-async function press(key: string, modifiers: { readonly ctrlKey?: boolean } = {}) {
+async function press(
+  key: string,
+  options: {
+    readonly ctrlKey?: boolean;
+    readonly code?: string;
+    readonly isComposing?: boolean;
+  } = {},
+) {
   const target = document.activeElement ?? document.body;
   await act(() => {
     target.dispatchEvent(
-      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers }),
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options }),
     );
   });
 }
@@ -274,6 +281,103 @@ describe('COM-2 범주 목록(결정 0023)', () => {
     );
     expect(description?.textContent).toBe('시험용');
     expect(popup.toggle().labels?.[0]?.textContent).toBe('시험 기능');
+  });
+});
+
+describe('COM-2 기능 검색(결정 0023)', () => {
+  function searchBox(): HTMLInputElement {
+    const input = container.querySelector<HTMLInputElement>('[role=combobox]');
+    if (input === null) throw new Error('검색 칸이 없다.');
+    return input;
+  }
+
+  // 검색 칸에 글자를 넣는다(input 이벤트).
+  async function typeQuery(text: string) {
+    searchBox().focus();
+    await act(() => {
+      searchBox().value = text;
+      searchBox().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  const resultNames = () =>
+    [...container.querySelectorAll('[role=option] .name')].map((element) => element.textContent);
+
+  it('COM-2.1 어디에 초점이 있든 Ctrl+K를 누르면 검색 칸에 초점이 간다', async () => {
+    const popup = await show({ features: manyCategories });
+    popup.tab('미디어').focus();
+    // 한글 자판에서는 같은 자리의 글자가 'ㅏ'다. 자리(code)로 본다.
+    await press('ㅏ', { ctrlKey: true, code: 'KeyK' });
+    expect(document.activeElement).toBe(searchBox());
+  });
+
+  it('COM-2.1 검색어가 이름이나 설명에 들어간 기능만 보이고, Enter를 누르면 첫 기능의 범주를 골라 그 스위치에 초점을 둔다', async () => {
+    const popup = await show({ features: manyCategories });
+    await typeQuery('숨김');
+    expect(container.querySelector('[role=tablist]')).toBeNull();
+    expect(resultNames()).toEqual(['숨김 기능']);
+    expect(searchBox().getAttribute('aria-expanded')).toBe('true');
+    await press('Enter');
+    expect(searchBox().value).toBe('');
+    expect(popup.selectedTab()).toBe('페이지');
+    expect(document.activeElement).toBe(container.querySelector('[data-feature="hide"]'));
+    // 검색으로 간 범주도 고른 범주다.
+    expect(popup.remembers.mock.calls).toEqual([['page']]);
+  });
+
+  it('결과는 범주 순서이고, 방향키로 고른 기능으로 Enter가 간다', async () => {
+    const popup = await show({ features: manyCategories });
+    // 모든 기능의 설명에 '설명'이 들어 있다.
+    await typeQuery('설명');
+    expect(resultNames()).toEqual(['배속 기능', '음량 기능', '숨김 기능', '대화 기능']);
+    await press('ArrowDown');
+    await press('ArrowDown');
+    const chosen = container.querySelector('[role=option][aria-selected=true]');
+    expect(chosen?.querySelector('.name')?.textContent).toBe('음량 기능');
+    expect(searchBox().getAttribute('aria-activedescendant')).toBe(chosen?.id);
+    // 초점은 검색 칸에 남는다.
+    expect(document.activeElement).toBe(searchBox());
+    await press('Enter');
+    expect(popup.selectedTab()).toBe('미디어');
+    expect(document.activeElement).toBe(container.querySelector('[data-feature="volume"]'));
+  });
+
+  it('결과를 누르면 그 기능으로 간다', async () => {
+    const popup = await show({ features: manyCategories });
+    await typeQuery('대화');
+    await act(() => {
+      container.querySelector<HTMLElement>('[role=option]')?.click();
+    });
+    expect(popup.selectedTab()).toBe('ChatGPT');
+    expect(document.activeElement).toBe(container.querySelector('[data-feature="chat"]'));
+  });
+
+  it('Esc는 검색어를 지우고 범주 화면으로 돌아간다', async () => {
+    const popup = await show({ features: manyCategories });
+    await typeQuery('숨김');
+    await press('Escape');
+    expect(searchBox().value).toBe('');
+    expect(popup.selectedTab()).toBe('미디어');
+    expect(document.activeElement).toBe(searchBox());
+  });
+
+  it('맞는 기능이 없으면 그렇다고 보이고 목록은 펼치지 않는다. Enter는 아무 데도 가지 않는다', async () => {
+    await show({ features: manyCategories });
+    await typeQuery('자막');
+    expect(container.querySelector('.no-results')?.textContent).toBe('맞는 기능이 없다.');
+    expect(container.querySelector('[role=listbox]')).toBeNull();
+    expect(searchBox().getAttribute('aria-expanded')).toBe('false');
+    expect(searchBox().hasAttribute('aria-controls')).toBe(false);
+    await press('Enter');
+    expect(searchBox().value).toBe('자막');
+  });
+
+  it('N-01 한글을 조합하는 중의 Enter는 조합을 끝내는 데 쓰이므로 기능으로 가지 않는다', async () => {
+    await show({ features: manyCategories });
+    await typeQuery('숨김');
+    await press('Enter', { isComposing: true });
+    expect(searchBox().value).toBe('숨김');
+    expect(resultNames()).toEqual(['숨김 기능']);
   });
 });
 

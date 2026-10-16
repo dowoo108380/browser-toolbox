@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Category, FeatureDefinition } from '../contracts/index.ts';
 import type { AppError, Result } from '../shared/index.ts';
 import {
@@ -15,9 +15,12 @@ import {
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
 import { FeatureItem } from './feature-item.tsx';
+import { SearchBox, SearchResults } from './feature-search.tsx';
+import { isSearchShortcut, searchFeatures } from './search.ts';
 import { strings } from './strings.ts';
 
-// 팝업(COM-2, 결정 0023). 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목을 보인다.
+// 팝업(COM-2, 결정 0023). 위에 기능 검색 칸, 그 아래 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목을 보인다.
+// 검색어가 있으면 범주 대신 검색 결과를 보인다.
 
 interface PopupProps {
   readonly features: readonly FeatureDefinition[];
@@ -95,6 +98,51 @@ export function PopupApp({
     void rememberCategory(next);
   };
 
+  const [query, setQuery] = useState('');
+  // 검색 결과에서 고른 것의 자리. 고른 것이 없으면 null이다.
+  const [active, setActive] = useState<number | null>(null);
+  const results = searchFeatures(features, query);
+  const searching = query.trim() !== '';
+  const changeQuery = (next: string) => {
+    setQuery(next);
+    setActive(null);
+  };
+
+  const root = useRef<HTMLElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  // 검색에서 간 기능. 그 기능 항목을 그린 뒤 첫 조작 요소에 초점을 둔다.
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  useEffect(() => {
+    if (focusTarget === null) return;
+    root.current
+      ?.querySelector<HTMLElement>(`[data-feature="${CSS.escape(focusTarget)}"]`)
+      ?.focus();
+    setFocusTarget(null);
+  }, [focusTarget]);
+
+  // 검색 결과의 그 기능 화면으로 간다: 검색어를 지우고, 그 기능의 범주를 고르고, 그 기능 항목의 첫 조작 요소에
+  // 초점을 둔다(결정 0023). 그래서 Ctrl+K, 검색어, Enter, Space로 기능을 켜고 끈다.
+  const goTo = (feature: FeatureDefinition) => {
+    changeQuery('');
+    selectCategory(feature.category);
+    setFocusTarget(feature.id);
+  };
+
+  // 팝업 어디서든 Ctrl+K는 검색 칸으로 간다(COM-2.1).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const input = searchInput.current;
+      if (input === null || !isSearchShortcut(event)) return;
+      event.preventDefault();
+      input.focus();
+      input.select();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
   useEffect(
     () =>
       subscribe({
@@ -169,41 +217,56 @@ export function PopupApp({
   };
 
   return (
-    <main>
+    <main ref={root}>
       {snapshot === null || !categoryRead ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (
-        category !== undefined && (
-          <div class="layout">
-            <CategoryTabs
-              categories={shownCategories}
-              selected={category}
-              onSelect={selectCategory}
-            />
-            <section
-              role="tabpanel"
-              id={categoryPanelId(category)}
-              aria-labelledby={categoryTabId(category)}
-              class="panel"
-            >
-              <ul class="features">
-                {features
-                  .filter((feature) => feature.category === category)
-                  .map((feature) => (
-                    <FeatureItem
-                      key={feature.id}
-                      feature={feature}
-                      enabled={settingsOf(snapshot, feature).enabled}
-                      disabled={!awake}
-                      onToggle={(enabled) => {
-                        void toggle(feature.id, enabled);
-                      }}
-                    />
-                  ))}
-              </ul>
-            </section>
-          </div>
-        )
+        <>
+          <SearchBox
+            inputRef={searchInput}
+            query={query}
+            results={results}
+            active={active}
+            onQuery={changeQuery}
+            onActive={setActive}
+            onGo={goTo}
+          />
+          {searching ? (
+            <SearchResults results={results} active={active} onGo={goTo} />
+          ) : (
+            category !== undefined && (
+              <div class="layout">
+                <CategoryTabs
+                  categories={shownCategories}
+                  selected={category}
+                  onSelect={selectCategory}
+                />
+                <section
+                  role="tabpanel"
+                  id={categoryPanelId(category)}
+                  aria-labelledby={categoryTabId(category)}
+                  class="panel"
+                >
+                  <ul class="features">
+                    {features
+                      .filter((feature) => feature.category === category)
+                      .map((feature) => (
+                        <FeatureItem
+                          key={feature.id}
+                          feature={feature}
+                          enabled={settingsOf(snapshot, feature).enabled}
+                          disabled={!awake}
+                          onToggle={(enabled) => {
+                            void toggle(feature.id, enabled);
+                          }}
+                        />
+                      ))}
+                  </ul>
+                </section>
+              </div>
+            )
+          )}
+        </>
       )}
       {snapshot !== null && categoryRead && notice !== null && (
         <p role="status">{notice.message}</p>

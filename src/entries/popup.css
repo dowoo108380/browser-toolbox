@@ -11,6 +11,52 @@ body {
   padding: 12px;
 }
 
+/* 위에 검색 칸, 검색어가 있으면 그 아래에 결과(결정 0023). */
+.search {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results [role='option'] {
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* 고른 결과. 시스템 색이라 어느 테마에서도 대비가 맞다. */
+.results [role='option'][aria-selected='true'] {
+  background: Highlight;
+  color: HighlightText;
+}
+
+.results .name {
+  font-weight: 600;
+}
+
+.results .category {
+  margin-inline-start: 8px;
+}
+
+.results .description {
+  display: block;
+}
+
+.no-results {
+  margin: 0;
+}
+
 /* 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목(결정 0023). */
 .layout {
   display: grid;

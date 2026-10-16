@@ -7,6 +7,10 @@ export const strings = {
   on: '켜짐',
   off: '꺼짐',
   categoriesLabel: '범주',
+  searchLabel: '기능 검색',
+  searchPlaceholder: '기능 검색(Ctrl+K)',
+  searchResultsLabel: '검색 결과',
+  noResults: '맞는 기능이 없다.',
   categories: {
     media: '미디어',
     youtube: 'YouTube',
