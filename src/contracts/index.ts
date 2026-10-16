@@ -9,8 +9,10 @@ export {
   featuresWithSettings,
 } from './feature.ts';
 export {
+  type ElementRef,
   type PageAccess,
   type RequestDefinition,
+  elementRefSchema,
   noticeTextLimit,
   popupPort,
   popupRemember,

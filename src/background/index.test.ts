@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startTestBackground } from '../../tests/support/background.ts';
 import { specs, stored } from '../../tests/support/settings.ts';
-import { defineFeature, tabStatus, taskStart } from '../contracts/index.ts';
+import { defineFeature, problemReport, tabStatus, taskStart } from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
 import type { KeyValueStore, PageProbe, TabEventHandlers } from '../platform/index.ts';
 import { type AppError, appError, err, ok } from '../shared/index.ts';
@@ -140,6 +140,26 @@ describe('설치·갱신 때 옛 스크립트 정리(결정 0008)', () => {
     await vi.waitFor(() => {
       expect(recordedKinds(failing)).toEqual(['platform']);
     });
+  });
+});
+
+describe('결정 0026 콘텐츠 스크립트가 알린 문제(problem.report)', () => {
+  it('COM-5 기대 동작 2 찾지 못한 외부 화면 요소의 이름표와 이름을 기록하고, 64자를 넘는 이름은 받지 않는다', async () => {
+    const store = createFakeStore();
+    const request = startTestBackground({ store, features: specs, startTime: 1_790_000_000_000 });
+    const element = { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' };
+    expect(
+      await request(problemReport, { featureId: 'sample', kind: 'not-found', element }),
+    ).toEqual(ok(null));
+    const tooLong = await request(problemReport, {
+      featureId: 'sample',
+      kind: 'not-found',
+      element: { id: 'chatgpt.thread', name: '가'.repeat(65) },
+    });
+    expect(tooLong.ok ? null : tooLong.error.kind).toBe('invalid-input');
+    expect(store.peek('problems')).toMatchObject([
+      { featureId: 'sample', kind: 'not-found', element },
+    ]);
   });
 });
 

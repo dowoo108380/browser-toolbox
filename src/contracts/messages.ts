@@ -56,11 +56,24 @@ export const repairNoticeDismiss = defineRequest({
   senders: 'extension',
 });
 
+// 기능이 기대는 외부 화면 요소의 이름표(id)와 사람이 알아볼 이름(결정 0026). 사이트 모듈의 코드에 적힌 짧은 글이다.
+// 콘텐츠 스크립트가 보내므로 길이를 검증한다(결정 0006).
+const elementLabelLimit = 64;
+
+export const elementRefSchema = z.object({
+  id: z.string().check(z.maxLength(elementLabelLimit)),
+  name: z.string().check(z.maxLength(elementLabelLimit)),
+});
+
+export type ElementRef = z.infer<typeof elementRefSchema>;
+
 export const problemReport = defineRequest({
   type: 'problem.report',
   payload: z.object({
     featureId: z.nullable(z.string()),
     kind: z.enum(errorKinds),
+    // 찾지 못한 외부 화면 요소(kind가 not-found일 때, COM-5 기대 동작 2).
+    element: z.optional(elementRefSchema),
   }),
   value: z.null(),
   senders: 'any',
