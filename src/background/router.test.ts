@@ -6,6 +6,7 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskSeen,
   taskStart,
 } from '../contracts/index.ts';
 import type { Sender } from '../platform/index.ts';
@@ -29,6 +30,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(popupRemember, () => Promise.resolve(ok(null))),
       route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
       route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
+      route(taskSeen, () => Promise.resolve(ok(null))),
     ],
     (error) => unexpected.push(error),
   );
@@ -78,13 +80,17 @@ describe('요청 검증(결정 0006)', () => {
     if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
   });
 
-  it('결정 0024 작업은 확장 화면만 시작할 수 있다', async () => {
+  it('결정 0024 작업의 시작과 결과 확인은 확장 화면만 보낼 수 있다', async () => {
     const { router } = setup();
     const start = { type: 'task.start', payload: { featureId: 'save', tabId: 3 } };
+    const seen = { type: 'task.seen', payload: { tabId: 3, taskId: 't' } };
     expect(await router(start, extension)).toEqual(ok({ taskId: 't' }));
-    const fromContent = await router(start, content);
-    expect(fromContent.ok).toBe(false);
-    if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+    expect(await router(seen, extension)).toEqual(ok(null));
+    for (const message of [start, seen]) {
+      const fromContent = await router(message, content);
+      expect(fromContent.ok).toBe(false);
+      if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+    }
   });
 
   it('콘텐츠 스크립트도 준비 요청과 문제 기록은 보낼 수 있다', async () => {
@@ -138,6 +144,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(popupRemember, () => Promise.resolve(ok(null))),
         route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
         route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
+        route(taskSeen, () => Promise.resolve(ok(null))),
       ],
       (error) => unexpected.push(error),
     );

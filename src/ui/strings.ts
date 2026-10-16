@@ -36,4 +36,12 @@ export const strings = {
   repairConfirm: '확인',
   newer:
     '더 새 버전의 확장이 저장한 설정이라 이 버전에서는 기능을 쓸 수 없다. 새 버전을 다시 설치한다.',
+  // 이 탭의 작업(COM-10, 결정 0024). 실패 이유와 짧은 결과는 서비스 워커와 기능이 만든 글이다.
+  taskRunning: (name: string) => `${name}: 진행 중이다.`,
+  taskSucceeded: (name: string, summary: string | null) =>
+    summary === null ? `${name}: 끝났다.` : `${name}: 끝났다. ${summary}`,
+  taskFailed: (name: string, reason: string) => `${name}: 실패했다. ${reason}`,
+  taskCancelled: (name: string, reason: string) => `${name}: 취소했다. ${reason}`,
+  // 다른 실행 기능이 쓸 수 없는 이유(COM-10.7). '쓸 수 없음:' 뒤에 붙는다.
+  runningHere: (name: string) => `이 탭에서 ${name} 진행 중`,
 };

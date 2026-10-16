@@ -19,6 +19,7 @@ export {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskSeen,
   taskStart,
 } from './messages.ts';
 export { pageRuntimeKey, retireEventName } from './events.ts';

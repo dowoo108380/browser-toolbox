@@ -1,10 +1,11 @@
 import * as z from 'zod/mini';
-import { type AppError, type Result, err, errorKinds, ok } from '../shared/index.ts';
+import type { KeyValueStore } from '../platform/index.ts';
+import { type AppError, type Result, appError, err, errorKinds, ok } from '../shared/index.ts';
 
 // 탭마다 작업 하나의 기록(COM-10, 결정 0012, 0024). storage.session의 tasks 키 하나에 탭 id(문자열) → 그 탭의 작업으로
 // 둔다. 쓰는 곳은 서비스 워커 하나다. storage.session은 확장을 다시 불러오거나 갱신하거나 브라우저를 다시 시작하면 비므로
 // 이 모양은 판 사이에 이어지지 않는다(형식 버전이 없다).
-// 여기 함수는 기록을 받아 새 기록을 만드는 순수 함수다. 받은 기록을 고치지 않는다.
+// 기록을 바꾸는 함수는 기록을 받아 새 기록을 만드는 순수 함수다. 받은 기록을 고치지 않는다. watchTask는 확장 화면이 읽는 도우미다.
 
 export const tasksKey = 'tasks';
 
@@ -91,4 +92,56 @@ export function finishTask(
     ? { id, featureId, status: 'succeeded', summary: outcome.value.summary }
     : { id, featureId, status: 'failed', error: outcome.error };
   return { ...records, [keyOf(tabId)]: finished };
+}
+
+// 그 탭의 기록을 지운 것.
+function withoutTab(records: TaskRecords, tabId: number): TaskRecords {
+  return Object.fromEntries(Object.entries(records).filter(([key]) => key !== keyOf(tabId)));
+}
+
+// 사용자가 팝업에서 작업 id인 결과를 보았다. 그 탭의 기록이 같은 작업이고 끝났을 때만 지운다. id가 다르거나(늦게 닿은
+// 확인) 진행 중이면 null이다. 그래서 확인은 자기가 본 결과에만 작용한다(결정 0012, COM-10.8).
+export function seenTask(records: TaskRecords, tabId: number, id: string): TaskRecords | null {
+  const current = taskOf(records, tabId);
+  if (current?.id !== id || current.status === 'running') return null;
+  return withoutTab(records, tabId);
+}
+
+export interface TaskWatchHandlers {
+  // 그 탭의 작업. 없으면 null이다.
+  readonly task: (record: TaskRecord | null) => void;
+  readonly problem: (error: AppError) => void;
+}
+
+// 확장 화면이 그 탭의 작업 기록을 읽는다. 바뀜 알림을 먼저 듣고 읽는다. 알림이 읽기 결과보다 먼저 오면 읽기 결과(더 옛
+// 값일 수 있다)는 버린다. 모양이 틀린 기록은 작업이 없는 것으로 보인다(쓰는 서비스 워커가 기록한다). 그만둔 뒤에는
+// 알리지 않는다(COM-7).
+export function watchTask(
+  store: Pick<KeyValueStore, 'get' | 'onChanged'>,
+  tabId: number,
+  handlers: TaskWatchHandlers,
+): () => void {
+  let stopped = false;
+  let changed = false;
+  const receive = (raw: unknown) => {
+    const records = parseTasks(raw);
+    handlers.task(records === null ? null : taskOf(records, tabId));
+  };
+  const unsubscribe = store.onChanged(tasksKey, (raw) => {
+    if (stopped) return;
+    changed = true;
+    receive(raw);
+  });
+  store.get(tasksKey).then(
+    (raw) => {
+      if (!stopped && !changed) receive(raw);
+    },
+    () => {
+      if (!stopped) handlers.problem(appError('platform', '작업 기록을 읽지 못했다.'));
+    },
+  );
+  return () => {
+    stopped = true;
+    unsubscribe();
+  };
 }

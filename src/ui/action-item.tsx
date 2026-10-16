@@ -18,7 +18,7 @@ export function ActionItem({ feature, waiting, onRun, unavailable }: ActionItemP
   const reasonId = `feature-unavailable-${feature.id}`;
   const blocked = waiting || unavailable !== null;
   return (
-    <li class="feature">
+    <li class="feature action-item">
       <div class="row">
         <button
           type="button"

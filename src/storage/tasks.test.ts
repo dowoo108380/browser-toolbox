@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createFakeStore } from '../platform/fake.ts';
 import { appError, err, ok } from '../shared/index.ts';
-import { type TaskRecords, finishTask, parseTasks, startTask, taskOf } from './tasks.ts';
+import {
+  type TaskRecord,
+  type TaskRecords,
+  finishTask,
+  parseTasks,
+  seenTask,
+  startTask,
+  taskOf,
+  tasksKey,
+  watchTask,
+} from './tasks.ts';
 
 // 탭마다 작업 하나의 기록(COM-10, 결정 0012, 0024).
 
@@ -88,5 +99,91 @@ describe('작업 끝남', () => {
     ['같은 id가 이미 끝남', { '1': succeeded }],
   ])('%s이면 늦게 온 결과를 버린다(null)', (_name, records: TaskRecords) => {
     expect(finishTask(records, 1, 'a', ok({ summary: null }))).toBeNull();
+  });
+});
+
+describe('결과 확인(결정 0012)', () => {
+  it.each([
+    ['성공', succeeded],
+    ['실패', failed],
+  ])('같은 작업의 끝난 결과(%s)면 그 탭의 기록만 지운다', (_name, finished) => {
+    const records: TaskRecords = { '1': finished, '2': running };
+    expect(seenTask(records, 1, 'a')).toEqual({ '2': running });
+    expect(records).toEqual({ '1': finished, '2': running });
+  });
+
+  it.each([
+    ['다른 작업의 확인(늦게 닿음, COM-10.8)', { '1': { ...succeeded, id: 'b' } }],
+    ['진행 중', { '1': running }],
+    ['기록이 없음', {}],
+  ])('%s이면 null이다(아무것도 지우지 않는다)', (_name, records: TaskRecords) => {
+    expect(seenTask(records, 1, 'a')).toBeNull();
+  });
+});
+
+describe('확장 화면이 그 탭의 작업을 읽음', () => {
+  it('그 탭의 작업을 읽고, 바뀌면 그 탭의 작업을 다시 준다. 없으면 null이다', async () => {
+    const store = createFakeStore({ [tasksKey]: { '1': running, '2': failed } });
+    const seen: (TaskRecord | null)[] = [];
+    const stop = watchTask(store, 1, { task: (task) => seen.push(task), problem: () => undefined });
+    await vi.waitFor(() => {
+      expect(seen).toEqual([running]);
+    });
+    await store.set({ [tasksKey]: { '1': succeeded } });
+    await store.set({ [tasksKey]: { '2': failed } });
+    expect(seen).toEqual([running, succeeded, null]);
+    stop();
+    await store.set({ [tasksKey]: { '1': running } });
+    expect(seen).toEqual([running, succeeded, null]);
+  });
+
+  it('모양이 틀린 기록은 작업이 없는 것으로 준다', async () => {
+    const store = createFakeStore({ [tasksKey]: 'x' });
+    const seen: (TaskRecord | null)[] = [];
+    watchTask(store, 1, { task: (task) => seen.push(task), problem: () => undefined });
+    await vi.waitFor(() => {
+      expect(seen).toEqual([null]);
+    });
+  });
+
+  it('바뀜 알림이 읽기 결과보다 먼저 오면 늦게 온 읽기 결과(옛 값)는 버린다', async () => {
+    const store = createFakeStore({ [tasksKey]: { '1': running } });
+    let release: () => void = () => undefined;
+    const slow = {
+      ...store,
+      get: async (key: string) => {
+        const value = await store.get(key);
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return value;
+      },
+    };
+    const seen: (TaskRecord | null)[] = [];
+    watchTask(slow, 1, { task: (task) => seen.push(task), problem: () => undefined });
+    await store.set({ [tasksKey]: { '1': succeeded } });
+    release();
+    await vi.waitFor(() => {
+      expect(seen).toEqual([succeeded]);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(seen).toEqual([succeeded]);
+  });
+
+  it('읽지 못하면 그 까닭을 알리고, 그만둔 뒤에는 알리지 않는다', async () => {
+    const failing = { ...createFakeStore(), get: () => Promise.reject(new Error('x')) };
+    const problems: string[] = [];
+    watchTask(failing, 1, { task: () => undefined, problem: (error) => problems.push(error.kind) });
+    await vi.waitFor(() => {
+      expect(problems).toEqual(['platform']);
+    });
+    const later: string[] = [];
+    const stop = watchTask(failing, 1, {
+      task: () => undefined,
+      problem: (error) => later.push(error.kind),
+    });
+    stop();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(later).toEqual([]);
   });
 });

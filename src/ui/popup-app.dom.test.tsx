@@ -15,6 +15,8 @@ import type {
   RepairScope,
   SettingsReaderHandlers,
   Snapshot,
+  TaskRecord,
+  TaskWatchHandlers,
 } from '../storage/index.ts';
 import { PopupApp, keepAwakeIntervalMs } from './popup-app.tsx';
 
@@ -98,6 +100,7 @@ interface Options {
   readonly currentTab?: () => Promise<number | null>;
   readonly tabStatus?: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
   readonly startTask?: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
+  readonly taskSeen?: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
 }
 
 async function show({
@@ -109,9 +112,21 @@ async function show({
   currentTab = () => Promise.resolve(7),
   tabStatus = () => Promise.resolve(ok({ page: 'ready' as const })),
   startTask = () => Promise.resolve(ok(null)),
+  taskSeen = () => Promise.resolve(ok(null)),
 }: Options = {}) {
   const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
   const starts = vi.fn(startTask);
+  const seens = vi.fn(taskSeen);
+  // 작업 기록은 시험이 보낸다(task). 팝업이 어느 탭의 기록을 들었는지 남긴다.
+  let taskHandlers: TaskWatchHandlers | undefined;
+  const watchedTabs: number[] = [];
+  const watchTask = (tabId: number, next: TaskWatchHandlers) => {
+    watchedTabs.push(tabId);
+    taskHandlers = next;
+    return () => {
+      if (taskHandlers === next) taskHandlers = undefined;
+    };
+  };
   const wakes = vi.fn(wake);
   const remembers = vi.fn(remember);
   const statuses = vi.fn(tabStatus);
@@ -136,6 +151,8 @@ async function show({
         currentTab={currentTab}
         tabStatus={statuses}
         startTask={starts}
+        watchTask={watchTask}
+        taskSeen={seens}
       />,
       container,
     );
@@ -158,6 +175,14 @@ async function show({
     remembers,
     statuses,
     starts,
+    seens,
+    watchedTabs,
+    // 그 탭의 작업 기록이 바뀐 것처럼 보낸다.
+    task: (record: TaskRecord | null) =>
+      act(() => {
+        taskHandlers?.task(record);
+      }),
+    taskText: () => container.querySelector('.task')?.textContent ?? '',
     state: () => container.querySelector('.state')?.textContent,
     status: () => container.querySelector('[role=status]')?.textContent,
     apply: (snapshot: Snapshot) => act(() => handlers?.apply(snapshot)),
@@ -560,6 +585,91 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     expect(popup.status()).toBe(running.message);
   });
 
+  it('COM-10.3 지금 탭의 작업 기록을 듣고, 진행 중이면 작업 칸에 보이며 모든 실행 단추를 막고 이유를 잇는다(COM-10.7)', async () => {
+    const popup = await show({ features: withToggle });
+    await popup.awake();
+    expect(popup.watchedTabs).toEqual([7]);
+    await popup.task({ id: 't1', featureId: 'save', status: 'running' });
+    expect(popup.taskText()).toBe('자막 저장: 진행 중이다.');
+    for (const id of ['save', 'capture']) {
+      expect(button(id).getAttribute('aria-disabled')).toBe('true');
+      expect(container.querySelector(`#feature-unavailable-${id}`)?.textContent).toBe(
+        '쓸 수 없음: 이 탭에서 자막 저장 진행 중',
+      );
+    }
+    await click(button('capture'));
+    expect(popup.starts).not.toHaveBeenCalled();
+    // 켜고 끄기는 막지 않는다(모든 탭에 대한 설정이다).
+    expect(popup.toggle().disabled).toBe(false);
+    expect(popup.seens).not.toHaveBeenCalled();
+  });
+
+  it('작업 칸은 처음부터 있는 알림 영역이다(내용이 바뀌면 화면 낭독기가 읽는다)', async () => {
+    const popup = await show({ features: withToggle });
+    expect(container.querySelector('.task')?.getAttribute('aria-live')).toBe('polite');
+    expect(popup.taskText()).toBe('');
+  });
+
+  it('끝난 결과를 보이고 그 작업 id로 확인을 한 번만 보낸다. 기록이 지워져도 팝업을 닫을 때까지 보인다', async () => {
+    const popup = await show({ features: withToggle });
+    await popup.awake();
+    await popup.task({ id: 't1', featureId: 'save', status: 'running' });
+    const done = { id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' } as const;
+    await popup.task(done);
+    expect(popup.taskText()).toBe('자막 저장: 끝났다. 영상.txt');
+    expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
+    // 같은 결과가 다시 와도(예: 다른 탭의 기록이 바뀜) 두 번 보내지 않는다.
+    await popup.task(done);
+    await popup.task(null);
+    expect(popup.taskText()).toBe('자막 저장: 끝났다. 영상.txt');
+    expect(popup.seens).toHaveBeenCalledTimes(1);
+    // 단추는 다시 쓸 수 있다.
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it.each([
+    [
+      '실패',
+      appError('unavailable', '자막이 없는 영상이다.'),
+      '자막 저장: 실패했다. 자막이 없는 영상이다.',
+    ],
+    [
+      '취소',
+      appError('cancelled', '다른 영상으로 이동했다.'),
+      '자막 저장: 취소했다. 다른 영상으로 이동했다.',
+    ],
+  ])('%s한 결과는 그 이유와 함께 보인다', async (_name, error, text) => {
+    const popup = await show({ features: withToggle });
+    await popup.task({ id: 't1', featureId: 'save', status: 'failed', error });
+    expect(popup.taskText()).toBe(text);
+    expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
+  });
+
+  it('결과를 보인 뒤 새 작업이 시작되면 그 작업을 보이고, 끝나면 그 결과도 확인한다', async () => {
+    const popup = await show({ features: withToggle });
+    await popup.task({ id: 't1', featureId: 'save', status: 'succeeded', summary: null });
+    await popup.task({ id: 't2', featureId: 'capture', status: 'running' });
+    expect(popup.taskText()).toBe('캡처: 진행 중이다.');
+    await popup.task({ id: 't2', featureId: 'capture', status: 'succeeded', summary: null });
+    expect(popup.taskText()).toBe('캡처: 끝났다.');
+    expect(popup.seens.mock.calls).toEqual([
+      [7, 't1'],
+      [7, 't2'],
+    ]);
+  });
+
+  it('진행 중이던 작업이 기록에서 사라지면(탭이 닫힘) 작업 칸을 비운다', async () => {
+    const popup = await show({ features: withToggle });
+    await popup.task({ id: 't1', featureId: 'save', status: 'running' });
+    await popup.task(null);
+    expect(popup.taskText()).toBe('');
+  });
+
+  it('지금 탭을 알 수 없으면 작업 기록을 듣지 않는다', async () => {
+    const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(null) });
+    expect(popup.watchedTabs).toEqual([]);
+  });
+
   it('검색에서 간 실행 기능은 그 단추에 초점이 간다', async () => {
     await show({ features: withToggle });
     const search = container.querySelector<HTMLInputElement>('[role=combobox]');
@@ -685,6 +795,8 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           currentTab={() => Promise.resolve(1)}
           tabStatus={() => Promise.resolve(ok({ page: 'ready' as const }))}
           startTask={() => Promise.resolve(ok(null))}
+          watchTask={() => () => undefined}
+          taskSeen={() => Promise.resolve(ok(null))}
         />,
         container,
       );

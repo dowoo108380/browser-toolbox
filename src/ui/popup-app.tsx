@@ -7,6 +7,8 @@ import {
   type RepairScope,
   type SettingsReaderHandlers,
   type Snapshot,
+  type TaskRecord,
+  type TaskWatchHandlers,
   isEmptyRepair,
   mergeRepairs,
   noRepair,
@@ -20,6 +22,7 @@ import { FeatureItem } from './feature-item.tsx';
 import { SearchBox, SearchResults } from './feature-search.tsx';
 import { isSearchShortcut, searchFeatures } from './search.ts';
 import { strings } from './strings.ts';
+import { TaskStatus } from './task-status.tsx';
 
 // 팝업(COM-2, 결정 0023). 위에 기능 검색 칸, 그 아래 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목을 보인다.
 // 검색어가 있으면 범주 대신 검색 결과를 보인다.
@@ -47,6 +50,10 @@ interface PopupProps {
   readonly tabStatus: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
   // 그 탭에서 실행 기능의 작업을 시작한다(결정 0024). 진행과 결과는 작업 기록으로 받는다.
   readonly startTask: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
+  // 그 탭의 작업 기록을 받는다(storage.session, 결정 0024).
+  readonly watchTask: (tabId: number, handlers: TaskWatchHandlers) => () => void;
+  // 그 탭의 끝난 작업(작업 id)을 보였다고 서비스 워커에 알린다(결정 0012).
+  readonly taskSeen: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -70,6 +77,8 @@ export function PopupApp({
   currentTab,
   tabStatus,
   startTask,
+  watchTask,
+  taskSeen,
 }: PopupProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -125,6 +134,39 @@ export function PopupApp({
       open = false;
     };
   }, [currentTab, tabStatus]);
+
+  // 이 탭의 작업(COM-10, 결정 0024). latest는 기록에 있는 것이고, shown은 작업 칸이 보이는 것이다. 끝난 결과는 보인 뒤
+  // 서비스 워커가 기록에서 지우지만 팝업을 닫을 때까지 보인다.
+  const [latest, setLatest] = useState<TaskRecord | null>(null);
+  const [shown, setShown] = useState<TaskRecord | null>(null);
+  useEffect(() => {
+    if (tabId === null) return undefined;
+    return watchTask(tabId, {
+      task: setLatest,
+      problem: (error) => {
+        setNotice({ message: error.message });
+      },
+    });
+  }, [tabId, watchTask]);
+  // 확인을 보낸 결과의 id. 같은 결과에 두 번 보내지 않는다.
+  const confirmedTask = useRef<string | null>(null);
+  useEffect(() => {
+    if (latest === null) {
+      // 진행 중이던 작업이 기록에서 사라지면(탭이 닫힘) 감춘다. 끝난 결과는 확인으로 지워진 것이라 그대로 보인다.
+      setShown((previous) => (previous?.status === 'running' ? null : previous));
+      return;
+    }
+    setShown(latest);
+    if (latest.status === 'running' || tabId === null || confirmedTask.current === latest.id)
+      return;
+    confirmedTask.current = latest.id;
+    // 그린 뒤에 보낸다(결과를 보인 뒤 지운다). 확인을 알리지 못하면 기록이 남아 다음에 열 때 다시 보이므로 따로 알리지 않는다.
+    void taskSeen(tabId, latest.id);
+  }, [latest, tabId, taskSeen]);
+  const running = latest?.status === 'running' ? latest : null;
+
+  const nameOf = (featureId: string) =>
+    features.find((feature) => feature.id === featureId)?.name ?? featureId;
 
   const selectCategory = (next: Category) => {
     setCategory(next);
@@ -263,7 +305,11 @@ export function PopupApp({
             onRun={() => {
               void run(feature);
             }}
-            unavailable={unavailableReason(feature, page)}
+            unavailable={
+              running === null
+                ? unavailableReason(feature, page)
+                : strings.unavailable(strings.runningHere(nameOf(running.featureId)))
+            }
           />
         );
     }
@@ -272,8 +318,6 @@ export function PopupApp({
   const loggedRepair =
     repairLog === null || repairLog.stamp === confirmedStamp ? noRepair : repairLog;
   const repair = mergeRepairs(loggedRepair, seenRepair);
-  const nameOf = (featureId: string) =>
-    features.find((feature) => feature.id === featureId)?.name ?? featureId;
 
   // 확인하면 본 기록만 지운다. 그 뒤에 서비스 워커가 더한 손상은 새 기록으로 다시 보인다.
   const confirmRepair = async () => {
@@ -290,6 +334,7 @@ export function PopupApp({
 
   return (
     <main ref={root}>
+      <TaskStatus task={shown} nameOf={nameOf} />
       {snapshot === null || !categoryRead ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (

@@ -118,6 +118,29 @@ body {
   opacity: 0.8;
 }
 
+/* 실행 기능: 기능 이름이 적힌 단추(결정 0024). 막혔으면(aria-disabled) 누를 수 없음을 모양으로도 보인다. */
+.feature .action {
+  padding: 2px 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.feature .action[aria-disabled='true'] {
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.action-item .description {
+  margin-inline-start: 0;
+}
+
+/* 위쪽의 작업 칸(결정 0024). 비면 자리를 차지하지 않는다. */
+.task p {
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+
 .repair {
   margin-top: 12px;
   padding: 8px;

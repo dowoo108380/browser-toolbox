@@ -8,14 +8,17 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskSeen,
   taskStart,
 } from '../../src/contracts/index.ts';
+import { createFakeStore } from '../../src/platform/fake.ts';
 import type { KeyValueStore, Requester } from '../../src/platform/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
   startSettingsReader,
   watchRepairNotice,
+  watchTask,
 } from '../../src/storage/index.ts';
 import { PopupApp } from '../../src/ui/index.ts';
 
@@ -29,11 +32,21 @@ export interface TestPopupOptions {
   readonly features: readonly FeatureDefinition[];
   // 복구 알림 읽기만 다른 저장소 창을 쓰게 할 수 있다. 없으면 store다.
   readonly noticeStore?: Pick<KeyValueStore, 'get' | 'onChanged'>;
+  // 작업 기록을 읽는 세션 저장소와 팝업이 보는 탭(결정 0024). 없으면 빈 저장소와 탭 1이다.
+  readonly session?: KeyValueStore;
+  readonly tabId?: number;
 }
 
 export async function renderTestPopup(
   container: HTMLElement,
-  { store, request, features, noticeStore = store }: TestPopupOptions,
+  {
+    store,
+    request,
+    features,
+    noticeStore = store,
+    session = createFakeStore(),
+    tabId = 1,
+  }: TestPopupOptions,
 ): Promise<void> {
   await act(() => {
     render(
@@ -50,10 +63,12 @@ export async function renderTestPopup(
         dismissRepair: (stamp) => request(repairNoticeDismiss, { stamp }),
         rememberedCategory: () => readRememberedCategory(store),
         rememberCategory: (category) => request(popupRemember, { category }),
-        // 지금 탭은 시험이 정하지 않는다. 탐침 결과는 서비스 워커의 probePage가 정한다.
-        currentTab: () => Promise.resolve(1),
+        // 탐침 결과는 서비스 워커의 probePage가 정한다.
+        currentTab: () => Promise.resolve(tabId),
         tabStatus: (tabId) => request(tabStatus, { tabId }),
-        startTask: (featureId, tabId) => request(taskStart, { featureId, tabId }),
+        startTask: (featureId, tab) => request(taskStart, { featureId, tabId: tab }),
+        watchTask: (tab, handlers) => watchTask(session, tab, handlers),
+        taskSeen: (tab, taskId) => request(taskSeen, { tabId: tab, taskId }),
       }),
       container,
     );

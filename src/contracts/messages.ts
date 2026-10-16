@@ -98,6 +98,15 @@ export const taskStart = defineRequest({
   senders: 'extension',
 });
 
+// 팝업이 그 탭의 끝난 작업(작업 id)을 보였다(COM-10 기대 동작 3, 결정 0012). 서비스 워커는 그 탭의 기록이 같은 작업이고
+// 끝났을 때만 기록과 배지를 지운다. 늦게 닿아도 그 뒤에 시작한 작업을 지우지 않는다(COM-10.8).
+export const taskSeen = defineRequest({
+  type: 'task.seen',
+  payload: z.object({ tabId: z.int(), taskId: z.string() }),
+  value: z.null(),
+  senders: 'extension',
+});
+
 export const requests = [
   settingsUpdate,
   storageEnsureReady,
@@ -106,4 +115,5 @@ export const requests = [
   popupRemember,
   tabStatus,
   taskStart,
+  taskSeen,
 ] as const;

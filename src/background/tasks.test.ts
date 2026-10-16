@@ -283,6 +283,41 @@ describe('작업 끝남', () => {
   });
 });
 
+describe('결과 확인(task.seen, 결정 0012)', () => {
+  async function finished() {
+    const context = setup();
+    await context.runner.start('save', 4);
+    await vi.waitFor(() => {
+      expect(context.saving.calls).toHaveLength(1);
+    });
+    context.saving.call(0).finish(ok({ summary: null }));
+    await vi.waitFor(() => {
+      expect(context.records()).toMatchObject({ '4': { status: 'succeeded' } });
+    });
+    return context;
+  }
+
+  it('같은 작업의 끝난 결과면 그 탭의 기록을 지운다', async () => {
+    const { runner, records } = await finished();
+    expect(await runner.seen(4, 't1')).toEqual(ok(null));
+    expect(records()).toEqual({});
+  });
+
+  it('COM-10.8 다음 작업이 시작된 뒤 늦게 닿은 확인은 그 작업을 지우지 않는다', async () => {
+    const { runner, records } = await finished();
+    await runner.start('copy', 4);
+    expect(await runner.seen(4, 't1')).toEqual(ok(null));
+    expect(records()).toEqual({ '4': { id: 't2', featureId: 'copy', status: 'running' } });
+  });
+
+  it('진행 중인 작업의 확인은 아무것도 하지 않는다', async () => {
+    const { runner, records } = setup();
+    await runner.start('save', 4);
+    expect(await runner.seen(4, 't1')).toEqual(ok(null));
+    expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+  });
+});
+
 describe('실행 기능과 일의 짝(quality 066)', () => {
   const start = (parts: readonly TaskPart[]) => () =>
     createTaskRunner({

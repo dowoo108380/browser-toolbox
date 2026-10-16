@@ -7,6 +7,7 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskSeen,
   taskStart,
 } from '../contracts/index.ts';
 import type { KeyValueStore, PageProbe, Sender } from '../platform/index.ts';
@@ -95,6 +96,7 @@ export function startBackground(deps: BackgroundDeps): void {
         }
       }),
       route(taskStart, (payload) => tasks.start(payload.featureId, payload.tabId)),
+      route(taskSeen, (payload) => tasks.seen(payload.tabId, payload.taskId)),
     ],
     () => {
       record({ featureId: null, kind: 'unexpected' });

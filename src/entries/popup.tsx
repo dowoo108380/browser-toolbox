@@ -6,20 +6,28 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskSeen,
   taskStart,
 } from '../contracts/index.ts';
 import { features } from '../features/list.ts';
-import { chromeLocalStore, chromeRequester, currentTabId } from '../platform/index.ts';
+import {
+  chromeLocalStore,
+  chromeRequester,
+  chromeSessionStore,
+  currentTabId,
+} from '../platform/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
   startSettingsReader,
   watchRepairNotice,
+  watchTask,
 } from '../storage/index.ts';
 import { PopupApp } from '../ui/index.ts';
 
 const request = chromeRequester();
 const store = chromeLocalStore();
+const session = chromeSessionStore();
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('팝업 문서에 #root가 없다.');
@@ -43,6 +51,8 @@ render(
     currentTab={currentTabId}
     tabStatus={(tabId) => request(tabStatus, { tabId })}
     startTask={(featureId, tabId) => request(taskStart, { featureId, tabId })}
+    watchTask={(tabId, handlers) => watchTask(session, tabId, handlers)}
+    taskSeen={(tabId, taskId) => request(taskSeen, { tabId, taskId })}
   />,
   root,
 );

@@ -25,9 +25,13 @@ export {
 } from './repair-notice.ts';
 export {
   type TaskOutcome,
+  type TaskRecord,
   type TaskRecords,
+  type TaskWatchHandlers,
   finishTask,
   parseTasks,
+  seenTask,
   startTask,
   tasksKey,
+  watchTask,
 } from './tasks.ts';

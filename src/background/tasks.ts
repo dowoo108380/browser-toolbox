@@ -15,6 +15,7 @@ import {
   type TaskRecords,
   finishTask,
   parseTasks,
+  seenTask,
   startTask,
   tasksKey,
 } from '../storage/index.ts';
@@ -41,6 +42,8 @@ export interface TaskRunner {
     featureId: string,
     tabId: number,
   ) => Promise<Result<{ readonly taskId: string }, AppError>>;
+  // 팝업이 그 탭의 끝난 작업을 보였다. 그 탭의 기록이 같은 작업이고 끝났을 때만 지운다(결정 0012).
+  readonly seen: (tabId: number, taskId: string) => Promise<Result<null, AppError>>;
 }
 
 // 문제 기록에 남기지 않는 실패. 고장이 아니라 상황(쓸 수 없는 페이지 등)이나 사용자의 일을 알리는 종류다(결정 0024).
@@ -161,6 +164,14 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
           finish(featureId, tabId, id, outcome),
         );
         return ok({ taskId: id });
+      }),
+
+    seen: (tabId, taskId) =>
+      enqueue(async () => {
+        const loaded = await load();
+        if (!loaded.ok) return loaded;
+        const next = seenTask(loaded.value, tabId, taskId);
+        return next === null ? ok(null) : save(next);
       }),
   };
 }
