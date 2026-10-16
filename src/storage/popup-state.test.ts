@@ -8,6 +8,11 @@ describe('결정 0023 팝업이 마지막으로 고른 범주 읽기', () => {
     expect(await readRememberedCategory(store)).toBe('page');
   });
 
+  it('저장 키 이름은 popup이다(결정 0011의 표. 바꾸면 앞의 판이 남긴 값을 읽지 못한다)', async () => {
+    const store = createFakeLocalStore({ popup: { category: 'chatgpt' } });
+    expect(await readRememberedCategory(store)).toBe('chatgpt');
+  });
+
   it('없거나 모양이 틀리면 알리지 않고 null이다(첫 범주로 연다)', async () => {
     for (const value of [
       undefined,

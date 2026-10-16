@@ -54,6 +54,14 @@ describe('COM-2 기대 동작 3 검색 칸의 키', () => {
   it('아래·위는 결과를 고르고, 끝에서는 반대쪽 끝으로 간다. 고른 것이 없으면 처음·끝에서 시작한다', () => {
     expect(searchKeyAction('ArrowDown', state)).toEqual({ kind: 'select', index: 0 });
     expect(searchKeyAction('ArrowUp', state)).toEqual({ kind: 'select', index: 2 });
+    expect(searchKeyAction('ArrowDown', { ...state, active: 0 })).toEqual({
+      kind: 'select',
+      index: 1,
+    });
+    expect(searchKeyAction('ArrowUp', { ...state, active: 2 })).toEqual({
+      kind: 'select',
+      index: 1,
+    });
     expect(searchKeyAction('ArrowDown', { ...state, active: 2 })).toEqual({
       kind: 'select',
       index: 0,
