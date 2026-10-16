@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
+import { type PageStatus, pageRuntimeKey, retireEventName } from '../contracts/index.ts';
 import {
   type NamedElement,
   claimAttribute,
@@ -36,6 +36,9 @@ function setup(parts: readonly PagePart[], connected = true) {
   // 서비스 워커가 보낸 작업 결과 알림(결정 0024). 시험이 notice로 보낸다.
   let showNotice: ((text: string) => void) | undefined;
   let noticeListeners = 0;
+  // 서비스 워커가 지금 상태를 물으면 답하는 함수(결정 0026). 시험이 status로 묻는다.
+  let answerStatus: (() => PageStatus) | undefined;
+  let statusListeners = 0;
   const deps = {
     parts,
     context: { window, document },
@@ -58,6 +61,13 @@ function setup(parts: readonly PagePart[], connected = true) {
         noticeListeners -= 1;
       };
     },
+    listenStatus: (answer: () => PageStatus) => {
+      answerStatus = answer;
+      statusListeners += 1;
+      return () => {
+        statusListeners -= 1;
+      };
+    },
   };
   startPageRuntime(deps);
   started.push(deps);
@@ -71,6 +81,8 @@ function setup(parts: readonly PagePart[], connected = true) {
     unsubscribed: () => unsubscribed,
     notice: (text: string) => showNotice?.(text),
     noticeListeners: () => noticeListeners,
+    status: () => answerStatus?.(),
+    statusListeners: () => statusListeners,
   };
 }
 
@@ -723,6 +735,35 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     } finally {
       document.removeEventListener('visibilitychange', showRegion);
     }
+  });
+
+  it('COM-6 기대 동작 2 서비스 워커가 물으면 지금 찾지 못한 기능과 그 요소를 답하고, 다시 찾으면 목록에서 뺀다', async () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    // 찾는 중(15초 전)에는 찾지 못함이 아니다.
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(runtime.status()).toEqual({ notFound: [] });
+    vi.advanceTimersByTime(1);
+    expect(runtime.status()).toEqual({
+      notFound: [{ featureId: 'region', element: { id: 'test.region', name: '시험 영역' } }],
+    });
+    add('시험 영역');
+    await settle();
+    expect(runtime.status()).toEqual({ notFound: [] });
+  });
+
+  it('찾지 못한 기능을 끄면 목록에서 빠지고, 물러나면 묻기를 듣지 않는다', () => {
+    const feature = regionPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ region: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    runtime.apply(snapshot({ region: { enabled: false } }));
+    expect(runtime.status()).toEqual({ notFound: [] });
+    expect(runtime.statusListeners()).toBe(1);
+    runtime.deps.isConnected = () => false;
+    document.dispatchEvent(new Event(retireEventName));
+    expect(runtime.statusListeners()).toBe(0);
   });
 
   it('quality 083 찾지 못한 기능을 끄면 지켜보기도 그친다', async () => {

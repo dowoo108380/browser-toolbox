@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ActionFeature, Category, FeatureDefinition, PageAccess } from '../contracts/index.ts';
+import type { ActionFeature, Category, FeatureDefinition, TabStatus } from '../contracts/index.ts';
 import type { PopupAnnouncement } from '../platform/index.ts';
 import { type AppError, type Result, appError, err } from '../shared/index.ts';
 import {
@@ -47,8 +47,8 @@ interface PopupProps {
   readonly rememberCategory: (category: Category) => Promise<Result<unknown, AppError>>;
   // 팝업이 붙은 창의 지금 탭. 없으면 null이다.
   readonly currentTab: () => Promise<number | null>;
-  // 그 탭에서 페이지에 작용하는 기능을 쓸 수 있는지 서비스 워커에 묻는다(결정 0023).
-  readonly tabStatus: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
+  // 그 탭에서 페이지에 작용하는 기능을 쓸 수 있는지, 찾지 못한 기능이 있는지 서비스 워커에 묻는다(결정 0023, 0026).
+  readonly tabStatus: (tabId: number) => Promise<Result<TabStatus, AppError>>;
   // 그 탭에서 실행 기능의 작업을 시작한다(결정 0024). 진행과 결과는 작업 기록으로 받는다.
   readonly startTask: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
   // 그 탭의 작업 기록을 받는다(storage.session, 결정 0024).
@@ -117,9 +117,10 @@ export function PopupApp({
     };
   }, [rememberedCategory, features]);
 
-  // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지. 답을 받기 전에는 undefined이고, 받지 못했으면 null이다. 둘 다
-  // 이유를 보이지 않는다. 받지 못한 까닭은 알림으로 보인다. 팝업이 열린 동안 탭이 바뀌어도 다시 묻지 않는다(결정 0023).
-  const [page, setPage] = useState<PageAccess | null | undefined>(undefined);
+  // 지금 탭의 상태(페이지에 작용하는 기능을 쓸 수 있는지, 찾지 못한 기능). 답을 받기 전에는 undefined이고, 받지 못했으면
+  // null이다. 둘 다 이유를 보이지 않는다. 받지 못한 까닭은 알림으로 보인다. 팝업이 열린 동안 탭이 바뀌거나 기능이 찾지
+  // 못함이 되어도 다시 묻지 않는다(결정 0023, 0026).
+  const [tabState, setTabState] = useState<TabStatus | null | undefined>(undefined);
   // 지금 탭. 알기 전이거나 없으면 null이다. 실행 기능은 이 탭에서 작업을 시작한다.
   const [tabId, setTabId] = useState<number | null>(null);
   useEffect(() => {
@@ -132,7 +133,7 @@ export function PopupApp({
     };
     void ask().then((result) => {
       if (!open) return;
-      setPage(result.ok ? result.value.page : null);
+      setTabState(result.ok ? result.value : null);
       if (!result.ok) setNotice({ message: result.error.message });
     });
     return () => {
@@ -309,7 +310,7 @@ export function PopupApp({
     awake &&
     tabId !== null &&
     latest !== undefined &&
-    (feature.content === null || page !== undefined);
+    (feature.content === null || tabState !== undefined);
 
   // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치, 실행은 단추다.
   const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
@@ -324,7 +325,7 @@ export function PopupApp({
             onToggle={(enabled) => {
               void toggle(feature.id, enabled);
             }}
-            unavailable={unavailableReason(feature, page ?? null)}
+            unavailable={unavailableReason(feature, tabState ?? null)}
           />
         );
       case 'action':
@@ -338,7 +339,7 @@ export function PopupApp({
             }}
             unavailable={
               running === null
-                ? unavailableReason(feature, page ?? null)
+                ? unavailableReason(feature, tabState ?? null)
                 : strings.unavailable(strings.runningHere(nameOf(running.featureId)))
             }
           />

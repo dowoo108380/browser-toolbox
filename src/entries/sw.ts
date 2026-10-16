@@ -1,5 +1,5 @@
 import { startBackground } from '../background/index.ts';
-import { pageRuntimeKey, retireEventName, taskNotice } from '../contracts/index.ts';
+import { pageRuntimeKey, pageStatus, retireEventName, taskNotice } from '../contracts/index.ts';
 import { claimAttribute, pageElementAttribute } from '../dom/index.ts';
 import { features } from '../features/list.ts';
 import {
@@ -32,7 +32,7 @@ startBackground({
   listenTabEvents,
   watchPopups,
   isTabActive,
-  notifyTab: (tabId, text) => sendToTab(taskNotice, tabId, { text }),
+  notifyTab: async (tabId, text) => (await sendToTab(taskNotice, tabId, { text })).delivery,
   now: () => Date.now(),
   sleep: (ms) =>
     new Promise((resolve) => {
@@ -46,4 +46,5 @@ startBackground({
       report,
     ),
   probePage: (tabId) => probePageRuntime(tabId, pageRuntimeKey),
+  askPage: (tabId, timeoutMs) => sendToTab(pageStatus, tabId, {}, timeoutMs),
 });

@@ -87,18 +87,24 @@ export const popupRemember = defineRequest({
   senders: 'extension',
 });
 
+// 실행 틀이 지금 기대는 외부 화면 요소를 찾지 못한 기능과 그 요소(결정 0026).
+const notFoundSchema = z.array(z.object({ featureId: z.string(), element: elementRefSchema }));
+
 // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지(결정 0023). ready: 이 확장의 실행 틀이 그 탭의 최상위 문서에서
-// 돈다. reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시 불러오기 전에 연 페이지, 새로 고치면 쓸 수 있다).
-// denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
-const pageAccesses = ['ready', 'reload', 'denied'] as const;
+// 돈다. 그 실행 틀이 찾지 못한 기능도 함께 싣는다(결정 0026). reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시
+// 불러오기 전에 연 페이지, 새로 고치면 쓸 수 있다). denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
+const tabStatusSchema = z.union([
+  z.object({ page: z.literal('ready'), notFound: notFoundSchema }),
+  z.object({ page: z.enum(['reload', 'denied']) }),
+]);
 
-export type PageAccess = (typeof pageAccesses)[number];
+export type TabStatus = z.infer<typeof tabStatusSchema>;
 
-// 팝업이 자기 창의 지금 탭의 상태를 묻는다(COM-2 기대 동작 4, COM-7 기대 동작 2, 결정 0023).
+// 팝업이 자기 창의 지금 탭의 상태를 묻는다(COM-2 기대 동작 4, COM-6 기대 동작 2, COM-7 기대 동작 2, 결정 0023, 0026).
 export const tabStatus = defineRequest({
   type: 'tab.status',
   payload: z.object({ tabId: z.int() }),
-  value: z.object({ page: z.enum(pageAccesses) }),
+  value: tabStatusSchema,
   senders: 'extension',
 });
 
@@ -144,6 +150,16 @@ export const taskNotice = defineRequest({
   value: z.null(),
   senders: 'extension',
 });
+
+// 서비스 워커가 실행 틀(최상위 프레임)에 지금 찾지 못한 기능을 묻는다. 팝업의 tab.status에 싣는다(결정 0026).
+export const pageStatus = defineRequest({
+  type: 'page.status',
+  payload: z.object({}),
+  value: z.object({ notFound: notFoundSchema }),
+  senders: 'extension',
+});
+
+export type PageStatus = z.infer<typeof pageStatus.value>;
 
 // 팝업이 열려 있는 동안 서비스 워커에 여는 연결(chrome.runtime.connect)의 이름과 첫 메시지. 서비스 워커는 연결이 열린
 // 동안 그 탭을 "팝업이 보는 탭"으로 안다(결정 0024).

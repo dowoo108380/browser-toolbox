@@ -15,6 +15,8 @@ export const strings = {
   unavailable: (reason: string) => `쓸 수 없음: ${reason}`,
   pageDenied: '확장이 이 페이지에 접근할 수 없음',
   pageReload: '이 탭을 새로 고쳐야 쓸 수 있음',
+  // 기능이 기대는 외부 화면 요소를 제한 시간 안에 찾지 못했다(COM-6, 용어집). '찾지 못함'은 모든 화면에서 같은 상태 문구다.
+  notFound: (elementName: string) => `찾지 못함: ${elementName}`,
   noCurrentTab: '지금 탭을 알 수 없어 기능을 쓸 수 있는지 확인하지 못했다.',
   categories: {
     media: '미디어',

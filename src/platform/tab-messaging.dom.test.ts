@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { popupPort, taskNotice } from '../contracts/index.ts';
+import { pageStatus, popupPort, taskNotice } from '../contracts/index.ts';
 import { appError, err, ok } from '../shared/index.ts';
 import { announcePopup, watchPopups } from './popup-port.ts';
 import { listenExtensionRequest, sendToTab } from './tab-messaging.ts';
@@ -23,9 +23,12 @@ describe('탭에 보내기(sendToTab)', () => {
     return send;
   }
 
-  it('그 탭의 최상위 프레임에 보내고, 형식에 맞는 답이면 delivered다', async () => {
+  it('그 탭의 최상위 프레임에 보내고, 형식에 맞는 성공 답이면 delivered와 그 값이다', async () => {
     const send = fakeTabs(() => Promise.resolve(ok(null)));
-    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toBe('delivered');
+    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toEqual({
+      delivery: 'delivered',
+      value: null,
+    });
     expect(send).toHaveBeenCalledWith(
       4,
       { type: 'task.notice', payload: { text: '끝났다.' } },
@@ -37,14 +40,32 @@ describe('탭에 보내기(sendToTab)', () => {
     fakeTabs(() =>
       Promise.reject(new Error('Could not establish connection. Receiving end does not exist.')),
     );
-    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toBe('unreachable');
+    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toEqual({
+      delivery: 'unreachable',
+    });
   });
 
-  it('그 밖의 거절과 형식이 틀린 답은 failed다', async () => {
+  it('그 밖의 거절, 형식이 틀린 답, 받는 쪽이 실패로 한 답은 failed다', async () => {
+    const failed = { delivery: 'failed' };
     fakeTabs(() => Promise.reject(new Error('Something else')));
-    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toBe('failed');
+    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toEqual(failed);
     fakeTabs(() => Promise.resolve(undefined));
-    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toBe('failed');
+    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toEqual(failed);
+    fakeTabs(() => Promise.resolve(err(appError('invalid-input', '요청 내용이 맞지 않는다.'))));
+    expect(await sendToTab(taskNotice, 4, { text: '끝났다.' })).toEqual(failed);
+  });
+
+  it('결정 0026 받는 쪽이 답한 값을 그 요청의 정의로 검증해 돌려준다', async () => {
+    const notFound = [
+      { featureId: 'gpt', element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } },
+    ];
+    fakeTabs(() => Promise.resolve(ok({ notFound })));
+    expect(await sendToTab(pageStatus, 4, {}, 1000)).toEqual({
+      delivery: 'delivered',
+      value: { notFound },
+    });
+    fakeTabs(() => Promise.resolve(ok({ notFound: [{ featureId: 'gpt' }] })));
+    expect(await sendToTab(pageStatus, 4, {}, 1000)).toEqual({ delivery: 'failed' });
   });
 
   it('제한 시간(기본 5초) 안에 답이 없으면 timeout이다', async () => {
@@ -52,7 +73,7 @@ describe('탭에 보내기(sendToTab)', () => {
     fakeTabs(() => new Promise(() => undefined));
     const pending = sendToTab(taskNotice, 4, { text: '끝났다.' });
     await vi.advanceTimersByTimeAsync(5000);
-    expect(await pending).toBe('timeout');
+    expect(await pending).toEqual({ delivery: 'timeout' });
   });
 });
 

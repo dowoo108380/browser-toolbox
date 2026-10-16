@@ -1,4 +1,4 @@
-import { featuresWithSettings, problemReport, taskNotice } from '../contracts/index.ts';
+import { featuresWithSettings, pageStatus, problemReport, taskNotice } from '../contracts/index.ts';
 import { features } from '../features/list.ts';
 import { startPageRuntime } from '../page/index.ts';
 import {
@@ -35,4 +35,5 @@ startPageRuntime({
       show(text);
       return ok(null);
     }),
+  listenStatus: (answer) => listenExtensionRequest(pageStatus, () => ok(answer())),
 });

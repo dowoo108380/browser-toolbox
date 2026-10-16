@@ -10,10 +10,12 @@ export {
 } from './feature.ts';
 export {
   type ElementRef,
-  type PageAccess,
+  type PageStatus,
   type RequestDefinition,
+  type TabStatus,
   elementRefSchema,
   noticeTextLimit,
+  pageStatus,
   popupPort,
   popupRemember,
   problemReport,

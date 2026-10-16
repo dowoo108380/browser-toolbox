@@ -5,7 +5,7 @@ import * as z from 'zod/mini';
 import {
   type Category,
   type FeatureDefinition,
-  type PageAccess,
+  type TabStatus,
   defineFeature,
 } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
@@ -98,7 +98,7 @@ interface Options {
   readonly readRemembered?: () => Promise<Category | null>;
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
   readonly currentTab?: () => Promise<number | null>;
-  readonly tabStatus?: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
+  readonly tabStatus?: (tabId: number) => Promise<Result<TabStatus, AppError>>;
   readonly startTask?: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
   readonly taskSeen?: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
   // 그 탭의 작업 기록을 처음 받는 것을 시험이 붙잡는다(task로 보낸다). 붙잡지 않으면 듣자마자 작업이 없다고 받는다.
@@ -112,7 +112,7 @@ async function show({
   readRemembered = () => Promise.resolve(null),
   remember = () => Promise.resolve(ok(null)),
   currentTab = () => Promise.resolve(7),
-  tabStatus = () => Promise.resolve(ok({ page: 'ready' as const })),
+  tabStatus = () => Promise.resolve(ok({ page: 'ready' as const, notFound: [] })),
   startTask = () => Promise.resolve(ok(null)),
   taskSeen = () => Promise.resolve(ok(null)),
   holdTaskRead = false,
@@ -493,6 +493,26 @@ describe('COM-2 기대 동작 4 지금 탭에서 쓸 수 없는 기능의 이유
     expect(reasonOf('on-pages')).toBe('쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음');
   });
 
+  it('COM-6 기대 동작 2 결정 0026 그 기능이 기대는 외부 화면 요소를 찾지 못했으면 "찾지 못함: (요소 이름)"을 스위치의 설명으로 잇고, 스위치는 막지 않는다', async () => {
+    const element = { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' };
+    const popup = await show({
+      features: both,
+      tabStatus: () =>
+        Promise.resolve(
+          ok({ page: 'ready' as const, notFound: [{ featureId: 'on-pages', element }] }),
+        ),
+    });
+    await popup.awake();
+    expect(reasonOf('on-pages')).toBe('찾지 못함: ChatGPT 대화 열');
+    expect(reasonOf('sample')).toBeNull();
+    const toggle = container.querySelector<HTMLInputElement>('[data-feature="on-pages"]');
+    const described = (toggle?.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent);
+    expect(described).toEqual(['시험용', '찾지 못함: ChatGPT 대화 열']);
+    expect(toggle?.disabled).toBe(false);
+  });
+
   it('쓸 수 있는 탭이면 이유가 없다', async () => {
     const popup = await show({ features: both });
     expect(popup.statuses).toHaveBeenCalledTimes(1);
@@ -616,7 +636,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
   });
 
   it('페이지에 작용하는 실행 기능은 지금 탭에서 쓸 수 있는지 답을 받기 전에는 막혀 있어 눌러도 시작하지 않는다. 작용하지 않는 기능은 기다리지 않는다', async () => {
-    let answer: (result: Result<{ readonly page: PageAccess }, AppError>) => void = () => undefined;
+    let answer: (result: Result<TabStatus, AppError>) => void = () => undefined;
     const popup = await show({
       features: withToggle,
       tabStatus: () =>
@@ -630,7 +650,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     await click(button('capture'));
     expect(popup.starts).not.toHaveBeenCalled();
     await act(() => {
-      answer(ok({ page: 'ready' }));
+      answer(ok({ page: 'ready', notFound: [] }));
     });
     await vi.waitFor(() => {
       expect(button('capture').hasAttribute('aria-disabled')).toBe(false);
@@ -916,7 +936,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           rememberedCategory={() => Promise.resolve(null)}
           rememberCategory={() => Promise.resolve(ok(null))}
           currentTab={() => Promise.resolve(1)}
-          tabStatus={() => Promise.resolve(ok({ page: 'ready' as const }))}
+          tabStatus={() => Promise.resolve(ok({ page: 'ready' as const, notFound: [] }))}
           startTask={() => Promise.resolve(ok(null))}
           watchTask={() => () => undefined}
           taskSeen={() => Promise.resolve(ok(null))}

@@ -42,7 +42,9 @@ export async function run(tabs: TabIds): Promise<TabContractResult> {
     closedBadgeError = error instanceof Error ? error.message : String(error);
   }
   return {
-    deliveries: await each((tabId) => sendToTab(taskNotice, tabId, { text: '계약 시험' })),
+    deliveries: await each(
+      async (tabId) => (await sendToTab(taskNotice, tabId, { text: '계약 시험' })).delivery,
+    ),
     exists: await each(tabExists),
     active: await each(isTabActive),
     closedBadgeError,

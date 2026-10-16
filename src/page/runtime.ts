@@ -1,4 +1,9 @@
-import { type ElementRef, pageRuntimeKey, retireEventName } from '../contracts/index.ts';
+import {
+  type ElementRef,
+  type PageStatus,
+  pageRuntimeKey,
+  retireEventName,
+} from '../contracts/index.ts';
 import {
   type NamedElement,
   type Scope,
@@ -14,6 +19,7 @@ import {
   type LifecycleEffect,
   type LifecycleEvent,
   initialLifecycle,
+  notFoundOf,
   transition,
 } from './lifecycle.ts';
 import { createNoticeBoard } from './notice.ts';
@@ -36,6 +42,8 @@ interface PageRuntimeDeps {
   readonly isConnected: () => boolean;
   // 서비스 워커가 보낸 작업 결과 알림의 글을 받는다(결정 0024). 돌려준 함수로 듣기를 그만둔다.
   readonly listenNotices: (show: (text: string) => void) => () => void;
+  // 서비스 워커가 지금 상태(찾지 못한 기능)를 물으면 answer로 답한다(결정 0026). 돌려준 함수로 듣기를 그만둔다.
+  readonly listenStatus: (answer: () => PageStatus) => () => void;
 }
 
 // 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4).
@@ -239,6 +247,14 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     if (checkConnection()) notices.show(text);
   });
 
+  // 팝업이 열릴 때 서비스 워커가 최상위 프레임에 묻는다(결정 0026). 상태 기계의 지금 상태에서 계산한다.
+  const stopStatus = deps.listenStatus(() => ({
+    notFound: notFoundOf(lifecycle).map(({ featureId, element }) => ({
+      featureId,
+      element: { id: element.id, name: element.name },
+    })),
+  }));
+
   unsubscribe = deps.subscribe({
     apply,
     // 손상은 서비스 워커가 고쳐 쓰면서 한 번 기록한다. 프레임마다 기록하지 않는다.
@@ -262,6 +278,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     recheckTimers.clear();
     unsubscribe();
     stopNotices();
+    stopStatus();
     notices.close();
     stopAll();
     Reflect.deleteProperty(globalThis, runtimeMarker);

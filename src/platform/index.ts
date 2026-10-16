@@ -21,7 +21,12 @@ export {
   listenTabEvents,
   tabExists,
 } from './tabs.ts';
-export { type Delivery, listenExtensionRequest, sendToTab } from './tab-messaging.ts';
+export {
+  type Delivery,
+  type TabResponse,
+  listenExtensionRequest,
+  sendToTab,
+} from './tab-messaging.ts';
 export {
   type PopupAnnouncement,
   type PopupWatch,

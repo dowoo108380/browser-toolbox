@@ -7,10 +7,15 @@ import { type AppError, type Result, appError, err, withTimeout } from '../share
 
 const defaultTimeoutMs = 5000;
 
-// 보낸 결과. delivered: 받는 쪽이 받아 형식에 맞게 답했다. unreachable: 받는 쪽이 없다(이 확장이 스크립트를 넣을 수 없는
-// 페이지, 새로 고치기 전의 탭, 닫힌 탭. 결정 0024의 실험 3). timeout: 제한 시간 안에 답이 없다(페이지의 주 스레드가
-// 붙잡힘 등). failed: 그 밖의 실패.
+// 보낸 결과. delivered: 받는 쪽이 받아 형식에 맞게 성공으로 답했다. unreachable: 받는 쪽이 없다(이 확장이 스크립트를
+// 넣을 수 없는 페이지, 새로 고치기 전의 탭, 닫힌 탭. 결정 0024의 실험 3). timeout: 제한 시간 안에 답이 없다(페이지의
+// 주 스레드가 붙잡힘 등). failed: 그 밖의 실패(받는 쪽이 실패로 답함, 형식이 틀린 답 포함).
 export type Delivery = 'delivered' | 'unreachable' | 'timeout' | 'failed';
+
+// 받는 쪽의 답. 성공으로 답했을 때만 그 값이 있다.
+export type TabResponse<Value> =
+  | { readonly delivery: 'delivered'; readonly value: Value }
+  | { readonly delivery: Exclude<Delivery, 'delivered'> };
 
 // 받는 쪽이 없으면 Chrome이 이 문구로 거절한다. 닫힌 탭도 같다(결정 0024의 실험 3).
 function isUnreachable(error: unknown): boolean {
@@ -23,17 +28,18 @@ export async function sendToTab<Payload, Value>(
   tabId: number,
   payload: Payload,
   timeoutMs: number = defaultTimeoutMs,
-): Promise<Delivery> {
+): Promise<TabResponse<Value>> {
   try {
     const response = await withTimeout(timeoutMs, (): Promise<unknown> =>
       chrome.tabs.sendMessage(tabId, { type: definition.type, payload }, { frameId: 0 }),
     );
-    if (!response.done) return 'timeout';
-    return responseSchema(definition.value).safeParse(response.value).success
-      ? 'delivered'
-      : 'failed';
+    if (!response.done) return { delivery: 'timeout' };
+    const parsed = responseSchema(definition.value).safeParse(response.value);
+    return parsed.success && parsed.data.ok
+      ? { delivery: 'delivered', value: parsed.data.value }
+      : { delivery: 'failed' };
   } catch (error) {
-    return isUnreachable(error) ? 'unreachable' : 'failed';
+    return { delivery: isUnreachable(error) ? 'unreachable' : 'failed' };
   }
 }
 

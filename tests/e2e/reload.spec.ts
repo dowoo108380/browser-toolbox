@@ -175,7 +175,10 @@ for (const { label, origin, secure } of origins) {
     const reopened = await openPopupOn(context, extensionId, page);
     await expect(reopened.getByText('쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음')).toBeVisible();
     await page.reload();
-    expect(await tabStatusOf(reopened, page)).toEqual({ ok: true, value: { page: 'ready' } });
+    expect(await tabStatusOf(reopened, page)).toEqual({
+      ok: true,
+      value: { page: 'ready', notFound: [] },
+    });
   });
 }
 

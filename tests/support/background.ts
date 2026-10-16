@@ -1,4 +1,8 @@
-import { type FeatureDefinition, responseSchema } from '../../src/contracts/index.ts';
+import {
+  type FeatureDefinition,
+  type PageStatus,
+  responseSchema,
+} from '../../src/contracts/index.ts';
 import { type TaskPart, startBackground } from '../../src/background/index.ts';
 import type {
   Delivery,
@@ -9,6 +13,7 @@ import type {
   TabBadge,
   TabEventHandlers,
   TabEvents,
+  TabResponse,
 } from '../../src/platform/index.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import { appError, err } from '../../src/shared/index.ts';
@@ -26,6 +31,8 @@ export interface TestBackgroundOptions {
   readonly deliver?: (type: string, send: () => Promise<unknown>) => Promise<unknown>;
   // 탭의 탐침 결과(결정 0023). 없으면 모든 탭에서 실행 틀이 돈다.
   readonly probePage?: (tabId: number) => Promise<PageProbe>;
+  // 실행 틀에 지금 상태를 물은 답(결정 0026). 없으면 찾지 못한 기능이 없다고 답한다.
+  readonly askPage?: (tabId: number, timeoutMs: number) => Promise<TabResponse<PageStatus>>;
   // 작업 기록을 두는 세션 저장소와 실행 기능의 일(결정 0024). 없으면 빈 가짜 저장소와 일 없음이다.
   readonly session?: KeyValueStore;
   readonly taskParts?: readonly TaskPart[];
@@ -74,6 +81,9 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
     onInstalled: () => undefined,
     retireOldScripts: () => Promise.resolve(),
     probePage: options.probePage ?? (() => Promise.resolve({ status: 'ran', runtime: true })),
+    askPage:
+      options.askPage ??
+      (() => Promise.resolve({ delivery: 'delivered', value: { notFound: [] } } as const)),
   });
   const deliver = options.deliver ?? ((_type, send) => send());
   return async (definition, payload) => {

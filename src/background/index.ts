@@ -1,5 +1,6 @@
 import {
   type FeatureDefinition,
+  type PageStatus,
   featuresWithSettings,
   popupRemember,
   problemReport,
@@ -19,6 +20,7 @@ import type {
   TabBadge,
   TabEventHandlers,
   TabEvents,
+  TabResponse,
 } from '../platform/index.ts';
 import { type AppError, type ErrorKind, ok } from '../shared/index.ts';
 import type { SettingsFormat } from '../storage/index.ts';
@@ -63,7 +65,12 @@ export interface BackgroundDeps {
   readonly retireOldScripts: (report: (problem: AppError) => void) => Promise<void>;
   // 그 탭의 최상위 문서에 탐침을 넣어 이 확장의 실행 틀이 도는지 본다(결정 0023).
   readonly probePage: (tabId: number) => Promise<PageProbe>;
+  // 그 탭의 최상위 프레임의 실행 틀에 지금 상태(찾지 못한 기능)를 묻는다(page.status, 결정 0026).
+  readonly askPage: (tabId: number, timeoutMs: number) => Promise<TabResponse<PageStatus>>;
 }
+
+// 실행 틀에 묻는 제한 시간. 팝업의 tab.status 요청(5초) 안에 탐침과 함께 끝나게 짧게 둔다(결정 0026).
+const askPageTimeoutMs = 1000;
 
 export function startBackground(deps: BackgroundDeps): void {
   const problems = createProblemLog({ store: deps.store, now: deps.now });
@@ -109,6 +116,20 @@ export function startBackground(deps: BackgroundDeps): void {
     record,
   });
   const popupState = createPopupState({ store: deps.store, record });
+  // 실행 틀이 찾지 못한 기능(결정 0026). 묻지 못하면 비워 답한다. 받는 쪽이 없는 것(탐침 뒤에 물러남)은 기록하지 않는다.
+  const notFoundOn = async (tabId: number): Promise<PageStatus['notFound']> => {
+    const response = await deps.askPage(tabId, askPageTimeoutMs);
+    switch (response.delivery) {
+      case 'delivered':
+        return response.value.notFound;
+      case 'unreachable':
+        return [];
+      case 'timeout':
+      case 'failed':
+        record({ featureId: null, kind: response.delivery === 'timeout' ? 'timeout' : 'platform' });
+        return [];
+    }
+  };
   const router = createRouter(
     [
       route(settingsUpdate, (payload) => settings.updateFeature(payload.featureId, payload.patch)),
@@ -123,7 +144,9 @@ export function startBackground(deps: BackgroundDeps): void {
         const probe = await deps.probePage(payload.tabId);
         switch (probe.status) {
           case 'ran':
-            return ok({ page: probe.runtime ? 'ready' : 'reload' });
+            return probe.runtime
+              ? ok({ page: 'ready', notFound: await notFoundOn(payload.tabId) })
+              : ok({ page: 'reload' });
           case 'unavailable':
             return ok({ page: 'denied' });
           case 'failed':

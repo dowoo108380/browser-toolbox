@@ -28,7 +28,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
       route(problemReport, () => Promise.resolve(ok(null))),
       route(popupRemember, () => Promise.resolve(ok(null))),
-      route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
+      route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const, notFound: [] }))),
       route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
       route(taskSeen, () => Promise.resolve(ok(null))),
     ],
@@ -74,7 +74,7 @@ describe('요청 검증(결정 0006)', () => {
   it('결정 0023 지금 탭의 상태는 확장 화면만 물을 수 있다', async () => {
     const { router } = setup();
     const status = { type: 'tab.status', payload: { tabId: 3 } };
-    expect(await router(status, extension)).toEqual(ok({ page: 'ready' }));
+    expect(await router(status, extension)).toEqual(ok({ page: 'ready', notFound: [] }));
     const fromContent = await router(status, content);
     expect(fromContent.ok).toBe(false);
     if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
@@ -142,7 +142,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(repairNoticeDismiss, () => Promise.resolve(ok(null))),
         route(problemReport, () => Promise.resolve(ok(null))),
         route(popupRemember, () => Promise.resolve(ok(null))),
-        route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const }))),
+        route(tabStatus, () => Promise.resolve(ok({ page: 'ready' as const, notFound: [] }))),
         route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
         route(taskSeen, () => Promise.resolve(ok(null))),
       ],

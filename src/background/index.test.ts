@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startTestBackground } from '../../tests/support/background.ts';
 import { specs, stored } from '../../tests/support/settings.ts';
-import { defineFeature, problemReport, tabStatus, taskStart } from '../contracts/index.ts';
+import {
+  type PageStatus,
+  defineFeature,
+  problemReport,
+  tabStatus,
+  taskStart,
+} from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
-import type { KeyValueStore, PageProbe, TabEventHandlers } from '../platform/index.ts';
+import type { KeyValueStore, PageProbe, TabEventHandlers, TabResponse } from '../platform/index.ts';
 import { type AppError, appError, err, ok } from '../shared/index.ts';
 import { settingsFormat, settingsKey, tasksKey } from '../storage/index.ts';
 import { defineTaskPart, startBackground } from './index.ts';
@@ -41,6 +47,7 @@ function start(
     },
     retireOldScripts: retire,
     probePage: () => Promise.resolve({ status: 'ran', runtime: true }),
+    askPage: () => Promise.resolve({ delivery: 'delivered', value: { notFound: [] } }),
   });
   return () => {
     installed();
@@ -164,9 +171,13 @@ describe('결정 0026 콘텐츠 스크립트가 알린 문제(problem.report)', 
 });
 
 describe('결정 0023 지금 탭의 상태(tab.status)', () => {
-  async function statusWith(probe: PageProbe) {
+  async function statusWith(
+    probe: PageProbe,
+    answer: TabResponse<PageStatus> = { delivery: 'delivered', value: { notFound: [] } },
+  ) {
     const store = createFakeStore();
     const probed: number[] = [];
+    const asked: [number, number][] = [];
     const request = startTestBackground({
       store,
       features: specs,
@@ -175,15 +186,19 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
         probed.push(tabId);
         return Promise.resolve(probe);
       },
+      askPage: (tabId, timeoutMs) => {
+        asked.push([tabId, timeoutMs]);
+        return Promise.resolve(answer);
+      },
     });
     const result = await request(tabStatus, { tabId: 7 });
     await settle();
-    return { result, probed, recorded: recordedKinds(store) };
+    return { result, probed, asked, recorded: recordedKinds(store) };
   }
 
   it('그 탭의 최상위 문서에 실행 틀이 있으면 ready, 넣을 수는 있는데 없으면 reload다', async () => {
     const ready = await statusWith({ status: 'ran', runtime: true });
-    expect(ready.result).toEqual({ ok: true, value: { page: 'ready' } });
+    expect(ready.result).toEqual({ ok: true, value: { page: 'ready', notFound: [] } });
     expect(ready.probed).toEqual([7]);
     const reload = await statusWith({ status: 'ran', runtime: false });
     expect(reload.result).toEqual({ ok: true, value: { page: 'reload' } });
@@ -200,6 +215,42 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
     const failed = await statusWith({ status: 'failed' });
     expect(failed.result).toEqual({ ok: true, value: { page: 'denied' } });
     expect(failed.recorded).toEqual(['platform']);
+  });
+
+  it('COM-6 기대 동작 2 결정 0026 실행 틀이 있는 탭은 그 최상위 프레임의 실행 틀에 1초 안에 물어 찾지 못한 기능을 함께 답한다', async () => {
+    const notFound = [
+      { featureId: 'sample', element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } },
+    ];
+    const ready = await statusWith(
+      { status: 'ran', runtime: true },
+      { delivery: 'delivered', value: { notFound } },
+    );
+    expect(ready.result).toEqual({ ok: true, value: { page: 'ready', notFound } });
+    expect(ready.asked).toEqual([[7, 1000]]);
+    expect(ready.recorded).toEqual([]);
+  });
+
+  it('결정 0026 실행 틀이 없거나 넣을 수 없는 탭에는 묻지 않는다', async () => {
+    for (const probe of [
+      { status: 'ran', runtime: false },
+      { status: 'unavailable' },
+      { status: 'failed' },
+    ] as const) {
+      expect((await statusWith(probe)).asked).toEqual([]);
+    }
+  });
+
+  it('quality 067 실행 틀이 답하지 못하면 찾지 못함 없이 ready로 답하고, 받는 쪽이 없는 것(탐침 뒤에 물러남)이 아니면 기록한다', async () => {
+    const cases = [
+      ['unreachable', []],
+      ['timeout', ['timeout']],
+      ['failed', ['platform']],
+    ] as const;
+    for (const [delivery, recorded] of cases) {
+      const answered = await statusWith({ status: 'ran', runtime: true }, { delivery });
+      expect(answered.result).toEqual({ ok: true, value: { page: 'ready', notFound: [] } });
+      expect(answered.recorded).toEqual(recorded);
+    }
   });
 });
 
