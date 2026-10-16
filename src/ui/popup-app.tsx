@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ActionFeature, Category, FeatureDefinition, PageAccess } from '../contracts/index.ts';
+import type { PopupAnnouncement } from '../platform/index.ts';
 import { type AppError, type Result, appError, err } from '../shared/index.ts';
 import {
   type RepairNotice,
@@ -54,6 +55,9 @@ interface PopupProps {
   readonly watchTask: (tabId: number, handlers: TaskWatchHandlers) => () => void;
   // 그 탭의 끝난 작업(작업 id)을 보였다고 서비스 워커에 알린다(결정 0012).
   readonly taskSeen: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
+  // 그 탭을 본다고 서비스 워커에 알린다(팝업의 연결, 결정 0024). 그 탭에서 끝난 작업은 페이지 위에 알리지 않고 이 팝업이
+  // 보인다. renew는 연결이 끊겼으면(서비스 워커가 다시 시작함) 다시 잇는다.
+  readonly announceTab: (tabId: number) => PopupAnnouncement;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -79,6 +83,7 @@ export function PopupApp({
   startTask,
   watchTask,
   taskSeen,
+  announceTab,
 }: PopupProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -164,6 +169,18 @@ export function PopupApp({
     void taskSeen(tabId, latest.id);
   }, [latest, tabId, taskSeen]);
   const running = latest?.status === 'running' ? latest : null;
+
+  // 지금 탭을 알면 그 탭을 본다고 알리고, 팝업이 닫히면 연결을 닫는다. 깨울 때마다 끊긴 연결을 다시 잇는다(아래).
+  const announcement = useRef<{ readonly renew: () => void } | null>(null);
+  useEffect(() => {
+    if (tabId === null) return undefined;
+    const opened = announceTab(tabId);
+    announcement.current = opened;
+    return () => {
+      announcement.current = null;
+      opened.close();
+    };
+  }, [tabId, announceTab]);
 
   const nameOf = (featureId: string) =>
     features.find((feature) => feature.id === featureId)?.name ?? featureId;
@@ -254,6 +271,7 @@ export function PopupApp({
       const result = await wake();
       // 깨우지 못했으면 이유를 보인다. 스위치를 누르면 그 요청이 다시 깨우고 결과를 알린다.
       if (open && !result.ok) setNotice({ message: result.error.message });
+      if (open && result.ok) announcement.current?.renew();
     };
     void wakeAndReport().then(() => {
       if (open) setAwake(true);

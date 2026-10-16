@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as z from 'zod/mini';
 import { defineFeature } from '../contracts/index.ts';
 import { type FakeStore, createFakeStore } from '../platform/fake.ts';
-import type { TabBadge } from '../platform/index.ts';
+import type { Delivery, TabBadge } from '../platform/index.ts';
 import { type AppError, appError, err, ok } from '../shared/index.ts';
 import { type TaskOutcome, tasksKey } from '../storage/index.ts';
 import type { Problem } from './problems.ts';
@@ -66,6 +66,9 @@ function setup(
     readonly tabExists?: (tabId: number) => Promise<boolean>;
     readonly session?: FakeStore;
     readonly badge?: (tabId: number, badge: TabBadge | null) => Promise<void>;
+    readonly popupViewing?: (tabId: number) => boolean;
+    readonly isTabActive?: (tabId: number) => Promise<boolean>;
+    readonly notify?: (tabId: number, text: string) => Promise<Delivery>;
   } = {},
 ) {
   const saving = controlledPart(save);
@@ -74,6 +77,8 @@ function setup(
   const problems: Problem[] = [];
   const badges: [number, TabBadge | null][] = [];
   const listening: boolean[] = [];
+  // 보낸 페이지 위 알림(탭, 글).
+  const notices: [number, string][] = [];
   let ids = 0;
   const runner = createTaskRunner({
     session,
@@ -91,6 +96,14 @@ function setup(
         return Promise.resolve();
       }),
     listenTabs: (on) => listening.push(on),
+    popupViewing: options.popupViewing ?? (() => false),
+    isTabActive: options.isTabActive ?? (() => Promise.resolve(true)),
+    notify:
+      options.notify ??
+      ((tabId, text) => {
+        notices.push([tabId, text]);
+        return Promise.resolve('delivered');
+      }),
     record: (problem) => problems.push(problem),
   });
   return {
@@ -101,6 +114,7 @@ function setup(
     copying,
     badges,
     listening,
+    notices,
     records: () => session.peek(tasksKey),
   };
 }
@@ -173,6 +187,9 @@ describe('작업 시작', () => {
       tabExists: () => Promise.resolve(true),
       badge: () => Promise.resolve(),
       listenTabs: () => undefined,
+      popupViewing: () => false,
+      isTabActive: () => Promise.resolve(true),
+      notify: () => Promise.resolve('delivered' as const),
       record: () => undefined,
     });
     const result = await runner.start('save', 4);
@@ -351,6 +368,9 @@ describe('실행 기능과 일의 짝(quality 066)', () => {
       tabExists: () => Promise.resolve(true),
       badge: () => Promise.resolve(),
       listenTabs: () => undefined,
+      popupViewing: () => false,
+      isTabActive: () => Promise.resolve(true),
+      notify: () => Promise.resolve('delivered' as const),
       record: () => undefined,
     });
 
@@ -563,5 +583,109 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     await runner.recover();
     expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
     expect(listening).toEqual([]);
+  });
+});
+
+describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
+  it('그 탭을 보는 팝업이 없고 창의 지금 탭이면 끝난 결과를 그 탭에 보낸다', async () => {
+    const { runner, saving, notices } = setup();
+    await runner.start('save', 4);
+    await finishLast(saving, ok({ summary: '영상.txt' }));
+    await vi.waitFor(() => {
+      expect(notices).toEqual([[4, '자막 저장: 끝났다. 영상.txt']]);
+    });
+  });
+
+  it.each([
+    [
+      appError('unavailable', '자막이 없는 영상이다.'),
+      '자막 저장: 실패했다. 자막이 없는 영상이다.',
+    ],
+    [
+      appError('cancelled', '다른 영상으로 이동했다.'),
+      '자막 저장: 취소했다. 다른 영상으로 이동했다.',
+    ],
+  ])('실패(%o)는 그 이유를 담는다', async (error, text) => {
+    const { runner, saving, notices } = setup();
+    await runner.start('save', 4);
+    await finishLast(saving, err(error));
+    await vi.waitFor(() => {
+      expect(notices).toEqual([[4, text]]);
+    });
+  });
+
+  it('그 탭을 보는 팝업이 열려 있거나 그 탭이 창의 지금 탭이 아니면 보내지 않는다(팝업과 배지가 알린다)', async () => {
+    for (const options of [
+      { popupViewing: (tabId: number) => tabId === 4 },
+      { isTabActive: () => Promise.resolve(false) },
+    ]) {
+      const { runner, saving, notices, records } = setup(options);
+      await runner.start('save', 4);
+      await finishLast(saving, ok({ summary: null }));
+      await vi.waitFor(() => {
+        expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
+      });
+      await runner.start('copy', 5);
+      expect(notices).toEqual([]);
+    }
+  });
+
+  it('끝을 쓰지 않은 결과(탭이 닫힘)는 보내지 않는다', async () => {
+    const { runner, saving, notices } = setup();
+    await runner.start('save', 4);
+    await vi.waitFor(() => {
+      expect(saving.calls).toHaveLength(1);
+    });
+    await runner.tabRemoved(4);
+    saving.call(0).finish(ok({ summary: null }));
+    await runner.start('copy', 5);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(notices).toEqual([]);
+  });
+
+  it.each([
+    ['delivered', []],
+    ['unreachable', []],
+    ['timeout', [{ featureId: 'save', kind: 'timeout' }]],
+    ['failed', [{ featureId: 'save', kind: 'platform' }]],
+  ] as const)(
+    '보낸 결과가 %s이면 그에 맞게 기록한다(받는 쪽이 없는 탭은 배지만 쓰는 경우라 기록하지 않는다)',
+    async (delivery, recorded) => {
+      const sent: string[] = [];
+      const { runner, saving, problems } = setup({
+        notify: (_tabId, text) => {
+          sent.push(text);
+          return Promise.resolve(delivery);
+        },
+      });
+      await runner.start('save', 4);
+      await finishLast(saving, ok({ summary: null }));
+      await vi.waitFor(() => {
+        expect(sent).toHaveLength(1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(problems).toEqual(recorded);
+    },
+  );
+
+  it('알림이 늦게 답해도 다른 탭의 시작과 확인은 기다리지 않는다(줄 밖에서 보낸다)', async () => {
+    const { runner, saving, records } = setup({ notify: () => new Promise(() => undefined) });
+    await runner.start('save', 4);
+    await finishLast(saving, ok({ summary: null }));
+    await vi.waitFor(() => {
+      expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
+    });
+    expect(await runner.start('copy', 5)).toEqual(ok({ taskId: 't2' }));
+    expect(await runner.seen(4, 't1')).toEqual(ok(null));
+  });
+
+  it('글이 길면 알림의 한도에서 자른다', async () => {
+    const { runner, saving, notices } = setup();
+    await runner.start('save', 4);
+    await finishLast(saving, ok({ summary: '가'.repeat(600) }));
+    await vi.waitFor(() => {
+      expect(notices).toHaveLength(1);
+    });
+    expect(notices[0]?.[1]).toHaveLength(500);
   });
 });

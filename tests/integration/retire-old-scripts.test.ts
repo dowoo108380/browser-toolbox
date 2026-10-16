@@ -80,6 +80,8 @@ function fakeChrome(
           installed = listener;
         },
       },
+      // 팝업의 연결(결정 0024)은 이 시험에서 오지 않는다.
+      onConnect: { addListener: () => undefined },
     },
     tabs: {
       query: () => Promise.resolve(tabs),

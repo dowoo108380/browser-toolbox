@@ -120,6 +120,23 @@ async function show({
   // 작업 기록은 시험이 보낸다(task). 팝업이 어느 탭의 기록을 들었는지 남긴다.
   let taskHandlers: TaskWatchHandlers | undefined;
   const watchedTabs: number[] = [];
+  // 팝업의 연결(결정 0024): 알린 탭, 다시 잇기, 닫기를 센다.
+  const announced: { tabs: number[]; renews: number; closes: number } = {
+    tabs: [],
+    renews: 0,
+    closes: 0,
+  };
+  const announceTab = (tabId: number) => {
+    announced.tabs.push(tabId);
+    return {
+      renew: () => {
+        announced.renews += 1;
+      },
+      close: () => {
+        announced.closes += 1;
+      },
+    };
+  };
   const watchTask = (tabId: number, next: TaskWatchHandlers) => {
     watchedTabs.push(tabId);
     taskHandlers = next;
@@ -153,6 +170,7 @@ async function show({
         startTask={starts}
         watchTask={watchTask}
         taskSeen={seens}
+        announceTab={announceTab}
       />,
       container,
     );
@@ -177,6 +195,7 @@ async function show({
     starts,
     seens,
     watchedTabs,
+    announced,
     // 그 탭의 작업 기록이 바뀐 것처럼 보낸다.
     task: (record: TaskRecord | null) =>
       act(() => {
@@ -665,6 +684,43 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     expect(popup.taskText()).toBe('');
   });
 
+  it('지금 탭을 알면 그 탭을 본다고 서비스 워커에 알리고, 닫히면 그 연결을 닫는다', async () => {
+    const popup = await show({ features: withToggle });
+    await popup.awake();
+    expect(popup.announced.tabs).toEqual([7]);
+    expect(popup.announced.closes).toBe(0);
+    await act(() => {
+      render(null, container);
+    });
+    expect(popup.announced.closes).toBe(1);
+  });
+
+  it('깨울 때마다 끊긴 연결을 다시 잇는다(서비스 워커가 다시 시작했을 수 있다). 깨우지 못하면 잇지 않는다', async () => {
+    vi.useFakeTimers();
+    let wakes = 0;
+    const popup = await show({
+      features: withToggle,
+      wake: () => {
+        wakes += 1;
+        return Promise.resolve(
+          wakes === 2 ? err(appError('timeout', '확장의 응답이 없다.')) : ok(null),
+        );
+      },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const afterOpen = popup.announced.renews;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(keepAwakeIntervalMs);
+    });
+    expect(popup.announced.renews).toBe(afterOpen);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(keepAwakeIntervalMs);
+    });
+    expect(popup.announced.renews).toBe(afterOpen + 1);
+  });
+
   it('지금 탭을 알 수 없으면 작업 기록을 듣지 않는다', async () => {
     const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(null) });
     expect(popup.watchedTabs).toEqual([]);
@@ -797,6 +853,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           startTask={() => Promise.resolve(ok(null))}
           watchTask={() => () => undefined}
           taskSeen={() => Promise.resolve(ok(null))}
+          announceTab={() => ({ renew: () => undefined, close: () => undefined })}
         />,
         container,
       );

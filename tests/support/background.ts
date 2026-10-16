@@ -1,6 +1,7 @@
 import { type FeatureDefinition, responseSchema } from '../../src/contracts/index.ts';
 import { type TaskPart, startBackground } from '../../src/background/index.ts';
 import type {
+  Delivery,
   KeyValueStore,
   PageProbe,
   Requester,
@@ -31,6 +32,11 @@ export interface TestBackgroundOptions {
   // 확장 아이콘의 배지와 탭 사건(결정 0024). 없으면 배지는 버리고 탭 사건은 오지 않는다.
   readonly setTabBadge?: (tabId: number, badge: TabBadge | null) => Promise<void>;
   readonly listenTabEvents?: (handlers: TabEventHandlers) => TabEvents;
+  // 팝업이 그 탭을 보는지, 그 탭이 창의 지금 탭인지, 페이지 위 알림을 보낸 결과. 없으면 보는 팝업이 없고, 지금 탭이며,
+  // 받는 쪽이 없다.
+  readonly popupViewing?: (tabId: number) => boolean;
+  readonly isTabActive?: (tabId: number) => Promise<boolean>;
+  readonly notifyTab?: (tabId: number, text: string) => Promise<Delivery>;
 }
 
 // 확장 화면과 콘텐츠 스크립트가 쓰는 요청 함수를 돌려준다. chromeRequester처럼 메시지를 구조화 복제로 건네고,
@@ -52,6 +58,9 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
     tabExists: () => Promise.resolve(true),
     setTabBadge: options.setTabBadge ?? (() => Promise.resolve()),
     listenTabEvents: options.listenTabEvents ?? (() => ({ listen: () => undefined })),
+    watchPopups: () => ({ viewing: options.popupViewing ?? (() => false) }),
+    isTabActive: options.isTabActive ?? (() => Promise.resolve(true)),
+    notifyTab: options.notifyTab ?? (() => Promise.resolve('unreachable' as const)),
     now: () => clock.time,
     sleep: (ms) => {
       clock.time += ms;

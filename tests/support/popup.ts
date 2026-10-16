@@ -12,7 +12,7 @@ import {
   taskStart,
 } from '../../src/contracts/index.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
-import type { KeyValueStore, Requester } from '../../src/platform/index.ts';
+import type { KeyValueStore, PopupAnnouncement, Requester } from '../../src/platform/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
@@ -35,6 +35,8 @@ export interface TestPopupOptions {
   // 작업 기록을 읽는 세션 저장소와 팝업이 보는 탭(결정 0024). 없으면 빈 저장소와 탭 1이다.
   readonly session?: KeyValueStore;
   readonly tabId?: number;
+  // 팝업의 연결(결정 0024). 없으면 아무것도 하지 않는다.
+  readonly announceTab?: (tabId: number) => PopupAnnouncement;
 }
 
 export async function renderTestPopup(
@@ -46,6 +48,7 @@ export async function renderTestPopup(
     noticeStore = store,
     session = createFakeStore(),
     tabId = 1,
+    announceTab = () => ({ renew: () => undefined, close: () => undefined }),
   }: TestPopupOptions,
 ): Promise<void> {
   await act(() => {
@@ -69,6 +72,7 @@ export async function renderTestPopup(
         startTask: (featureId, tab) => request(taskStart, { featureId, tabId: tab }),
         watchTask: (tab, handlers) => watchTask(session, tab, handlers),
         taskSeen: (tab, taskId) => request(taskSeen, { tabId: tab, taskId }),
+        announceTab,
       }),
       container,
     );

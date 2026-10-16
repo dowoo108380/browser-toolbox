@@ -17,8 +17,16 @@ export {
   type TabEventHandlers,
   type TabEvents,
   currentTabId,
+  isTabActive,
   listenTabEvents,
   tabExists,
 } from './tabs.ts';
+export { type Delivery, listenExtensionRequest, sendToTab } from './tab-messaging.ts';
+export {
+  type PopupAnnouncement,
+  type PopupWatch,
+  announcePopup,
+  watchPopups,
+} from './popup-port.ts';
 export { type TabBadge, setTabBadge } from './action.ts';
 export { listenInstalled } from './runtime.ts';

@@ -117,3 +117,24 @@ export const requests = [
   taskStart,
   taskSeen,
 ] as const;
+
+// 서비스 워커가 콘텐츠 스크립트에 보내는 요청(chrome.tabs.sendMessage). 콘텐츠 스크립트는 이 확장의 서비스 워커가 보낸
+// 것만 받는다(결정 0006).
+
+// 작업이 끝났을 때 그 탭을 보는 팝업이 없고 그 탭이 창의 지금 탭이면, 최상위 프레임에 그 결과를 3초 보이라고 한다
+// (COM-10 기대 동작 4, 결정 0024). 글은 서비스 워커가 만든다.
+export const noticeTextLimit = 500;
+
+export const taskNotice = defineRequest({
+  type: 'task.notice',
+  payload: z.object({ text: z.string().check(z.maxLength(noticeTextLimit)) }),
+  value: z.null(),
+  senders: 'extension',
+});
+
+// 팝업이 열려 있는 동안 서비스 워커에 여는 연결(chrome.runtime.connect)의 이름과 첫 메시지. 서비스 워커는 연결이 열린
+// 동안 그 탭을 "팝업이 보는 탭"으로 안다(결정 0024).
+export const popupPort = {
+  name: 'popup',
+  hello: z.object({ tabId: z.int() }),
+} as const;

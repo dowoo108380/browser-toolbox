@@ -545,6 +545,7 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
         return Promise.resolve(ok(null));
       },
       isConnected: () => connected.value,
+      listenNotices: () => () => undefined,
     });
     handlers?.apply(enabled);
     return reports;

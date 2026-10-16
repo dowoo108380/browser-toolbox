@@ -11,8 +11,10 @@ import {
   taskStart,
 } from '../contracts/index.ts';
 import type {
+  Delivery,
   KeyValueStore,
   PageProbe,
+  PopupWatch,
   Sender,
   TabBadge,
   TabEventHandlers,
@@ -44,6 +46,11 @@ export interface BackgroundDeps {
   readonly setTabBadge: (tabId: number, badge: TabBadge | null) => Promise<void>;
   // 탭 닫힘과 이동을 듣는다. 처음 실행될 때 바로 불러야 Chrome이 서비스 워커를 깨워 사건을 넘긴다.
   readonly listenTabEvents: (handlers: TabEventHandlers) => TabEvents;
+  // 팝업의 연결을 듣는다. 처음 실행될 때 부른다(결정 0024).
+  readonly watchPopups: () => PopupWatch;
+  readonly isTabActive: (tabId: number) => Promise<boolean>;
+  // 그 탭의 최상위 프레임에 작업 결과 알림을 보낸다(task.notice).
+  readonly notifyTab: (tabId: number, text: string) => Promise<Delivery>;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   // 서비스 워커가 처음 실행될 때 바로 걸어야 하는 Chrome 이벤트를 건다.
@@ -87,6 +94,7 @@ export function startBackground(deps: BackgroundDeps): void {
       });
     },
   });
+  const popups = deps.watchPopups();
   const tasks = createTaskRunner({
     session: deps.session,
     features: deps.features,
@@ -95,6 +103,9 @@ export function startBackground(deps: BackgroundDeps): void {
     tabExists: deps.tabExists,
     badge: deps.setTabBadge,
     listenTabs: tabEvents.listen,
+    popupViewing: popups.viewing,
+    isTabActive: deps.isTabActive,
+    notify: deps.notifyTab,
     record,
   });
   const popupState = createPopupState({ store: deps.store, record });

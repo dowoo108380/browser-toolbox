@@ -27,6 +27,9 @@ function start(
     tabExists: () => Promise.resolve(true),
     setTabBadge: () => Promise.resolve(),
     listenTabEvents: () => ({ listen: () => undefined }),
+    watchPopups: () => ({ viewing: () => false }),
+    isTabActive: () => Promise.resolve(true),
+    notifyTab: () => Promise.resolve('unreachable' as const),
     now: () => clock.time,
     sleep: (ms) => {
       clock.time += ms;

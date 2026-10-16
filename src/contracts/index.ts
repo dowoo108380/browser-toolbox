@@ -11,6 +11,8 @@ export {
 export {
   type PageAccess,
   type RequestDefinition,
+  noticeTextLimit,
+  popupPort,
   popupRemember,
   problemReport,
   repairNoticeDismiss,
@@ -19,6 +21,7 @@ export {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  taskNotice,
   taskSeen,
   taskStart,
 } from './messages.ts';

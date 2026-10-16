@@ -31,6 +31,9 @@ function setup(parts: readonly PagePart[], connected = true) {
   let subscriptions = 0;
   let unsubscribed = 0;
   const reports: { featureId: string | null; kind: ErrorKind }[] = [];
+  // 서비스 워커가 보낸 작업 결과 알림(결정 0024). 시험이 notice로 보낸다.
+  let showNotice: ((text: string) => void) | undefined;
+  let noticeListeners = 0;
   const deps = {
     parts,
     context: { window, document },
@@ -46,6 +49,13 @@ function setup(parts: readonly PagePart[], connected = true) {
       return Promise.resolve(ok(null));
     },
     isConnected: () => connected,
+    listenNotices: (show: (text: string) => void) => {
+      showNotice = show;
+      noticeListeners += 1;
+      return () => {
+        noticeListeners -= 1;
+      };
+    },
   };
   startPageRuntime(deps);
   started.push(deps);
@@ -57,6 +67,8 @@ function setup(parts: readonly PagePart[], connected = true) {
     newer: (version: number) => handlers?.newer(version),
     subscriptions: () => subscriptions,
     unsubscribed: () => unsubscribed,
+    notice: (text: string) => showNotice?.(text),
+    noticeListeners: () => noticeListeners,
   };
 }
 
@@ -190,6 +202,36 @@ describe('콘텐츠 스크립트 실행 틀', () => {
     runtime.apply(snapshot({ a: { enabled: true } }));
     document.dispatchEvent(new Event(retireEventName));
     expect(a.counts.disposed).toBe(1);
+    expect(runtime.unsubscribed()).toBe(1);
+  });
+});
+
+describe('결정 0024 작업 결과 알림', () => {
+  const notices = () =>
+    document.querySelectorAll(`${hostTagName}[${pageElementAttribute}="task-notice"]`);
+
+  it('서비스 워커가 보낸 글을 페이지 위에 띄운다', () => {
+    const runtime = setup([]);
+    expect(runtime.noticeListeners()).toBe(1);
+    runtime.notice('자막 저장: 끝났다.');
+    expect(notices()).toHaveLength(1);
+  });
+
+  it('COM-7.2 물러나면 알림 듣기를 그만두고 남은 알림을 지운다', () => {
+    let connected = true;
+    const runtime = setup([]);
+    runtime.deps.isConnected = () => connected;
+    runtime.notice('자막 저장: 끝났다.');
+    connected = false;
+    document.dispatchEvent(new Event(retireEventName));
+    expect(runtime.noticeListeners()).toBe(0);
+    expect(notices()).toHaveLength(0);
+  });
+
+  it('연결이 끊긴 뒤에 온 알림은 띄우지 않고 물러난다', () => {
+    const runtime = setup([], false);
+    runtime.notice('자막 저장: 끝났다.');
+    expect(notices()).toHaveLength(0);
     expect(runtime.unsubscribed()).toBe(1);
   });
 });

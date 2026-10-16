@@ -48,3 +48,13 @@ export function listenTabEvents(handlers: TabEventHandlers): TabEvents {
   listen(true);
   return { listen };
 }
+
+// 그 탭이 창의 지금 탭인지. 닫힌 탭이면 거짓이다.
+export async function isTabActive(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return tab.active;
+  } catch {
+    return false;
+  }
+}

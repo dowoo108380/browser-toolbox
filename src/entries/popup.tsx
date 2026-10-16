@@ -11,6 +11,7 @@ import {
 } from '../contracts/index.ts';
 import { features } from '../features/list.ts';
 import {
+  announcePopup,
   chromeLocalStore,
   chromeRequester,
   chromeSessionStore,
@@ -53,6 +54,7 @@ render(
     startTask={(featureId, tabId) => request(taskStart, { featureId, tabId })}
     watchTask={(tabId, handlers) => watchTask(session, tabId, handlers)}
     taskSeen={(tabId, taskId) => request(taskSeen, { tabId, taskId })}
+    announceTab={announcePopup}
   />,
   root,
 );

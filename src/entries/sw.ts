@@ -1,17 +1,20 @@
 import { startBackground } from '../background/index.ts';
-import { pageRuntimeKey, retireEventName } from '../contracts/index.ts';
+import { pageRuntimeKey, retireEventName, taskNotice } from '../contracts/index.ts';
 import { claimAttribute, pageElementAttribute } from '../dom/index.ts';
 import { features } from '../features/list.ts';
 import {
   chromeLocalStore,
   chromeSessionStore,
+  isTabActive,
   listenInstalled,
   listenRequests,
   listenTabEvents,
   probePageRuntime,
   retireInAllFrames,
+  sendToTab,
   setTabBadge,
   tabExists,
+  watchPopups,
 } from '../platform/index.ts';
 import { settingsFormat } from '../storage/index.ts';
 import { taskParts } from './generated/sw.ts';
@@ -27,6 +30,9 @@ startBackground({
   tabExists,
   setTabBadge,
   listenTabEvents,
+  watchPopups,
+  isTabActive,
+  notifyTab: (tabId, text) => sendToTab(taskNotice, tabId, { text }),
   now: () => Date.now(),
   sleep: (ms) =>
     new Promise((resolve) => {

@@ -8,6 +8,7 @@ import {
   initialLifecycle,
   transition,
 } from './lifecycle.ts';
+import { createNoticeBoard } from './notice.ts';
 import type { PageContext, PagePart } from './part.ts';
 
 // 콘텐츠 스크립트 실행 틀(아키텍처 2·3장). 설정을 구독해 기능을 시작하고 정리한다.
@@ -18,6 +19,8 @@ interface PageRuntimeDeps {
   readonly subscribe: (handlers: SettingsReaderHandlers) => () => void;
   readonly report: (featureId: string | null, kind: ErrorKind) => Promise<Result<null, AppError>>;
   readonly isConnected: () => boolean;
+  // 서비스 워커가 보낸 작업 결과 알림의 글을 받는다(결정 0024). 돌려준 함수로 듣기를 그만둔다.
+  readonly listenNotices: (show: (text: string) => void) => () => void;
 }
 
 // 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4).
@@ -164,6 +167,12 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   deps.context.document.addEventListener('visibilitychange', onVisibilityChange);
   navigation.addEventListener('currententrychange', onNavigation);
 
+  // 작업 결과 알림(결정 0024). 서비스 워커는 최상위 프레임에만 보낸다.
+  const notices = createNoticeBoard(deps.context);
+  const stopNotices = deps.listenNotices((text) => {
+    if (checkConnection()) notices.show(text);
+  });
+
   unsubscribe = deps.subscribe({
     apply,
     // 손상은 서비스 워커가 고쳐 쓰면서 한 번 기록한다. 프레임마다 기록하지 않는다.
@@ -186,6 +195,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     for (const timer of recheckTimers) deps.context.window.clearTimeout(timer);
     recheckTimers.clear();
     unsubscribe();
+    stopNotices();
+    notices.close();
     stopAll();
     Reflect.deleteProperty(globalThis, runtimeMarker);
   }

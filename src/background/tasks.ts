@@ -1,5 +1,5 @@
-import type { ActionFeature, FeatureDefinition } from '../contracts/index.ts';
-import type { KeyValueStore, TabBadge } from '../platform/index.ts';
+import { type ActionFeature, type FeatureDefinition, noticeTextLimit } from '../contracts/index.ts';
+import type { Delivery, KeyValueStore, TabBadge } from '../platform/index.ts';
 import {
   type AppError,
   type ErrorKind,
@@ -42,6 +42,11 @@ export interface TaskRunnerDeps {
   readonly badge: (tabId: number, badge: TabBadge | null) => Promise<void>;
   // 탭 닫힘과 이동을 들을지. 작업 기록이 있는 동안만 듣는다(결정 0024).
   readonly listenTabs: (on: boolean) => void;
+  // 그 탭을 보는 팝업이 열려 있는지(팝업의 연결, 결정 0024).
+  readonly popupViewing: (tabId: number) => boolean;
+  readonly isTabActive: (tabId: number) => Promise<boolean>;
+  // 그 탭의 최상위 프레임에 결과를 짧게 보이라고 한다(task.notice).
+  readonly notify: (tabId: number, text: string) => Promise<Delivery>;
   readonly record: (problem: Problem) => void;
 }
 
@@ -172,24 +177,45 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
 
   // 끝을 쓴다. 그 탭의 기록이 이 작업일 때만 쓰고, 그때만 실패를 문제로 남긴다. 탭을 닫아 생긴 실패를 고장으로 남기지 않는다.
   // 끝을 쓰지 못하면 기록은 진행 중으로 남는다. 서비스 워커가 다시 시작할 때 고친다(recover).
+  // 쓴 끝(그 탭의 새 기록)을 돌려준다. 쓰지 않았으면 null이다.
   const finish = (featureId: string, tabId: number, id: string, outcome: TaskOutcome) =>
-    enqueue(async () => {
+    enqueue(async (): Promise<TaskRecord | null> => {
       const loaded = await load();
       if (!loaded.ok) {
         deps.record({ featureId, kind: 'platform' });
-        return;
+        return null;
       }
       const next = finishTask(loaded.value, tabId, id, outcome);
-      if (next === null) return;
+      if (next === null) return null;
       const committed = await commit(next, [tabId]);
       if (!committed.ok) {
         deps.record({ featureId, kind: 'platform' });
-        return;
+        return null;
       }
       if (!outcome.ok && !situationalKinds.has(outcome.error.kind)) {
         deps.record({ featureId, kind: outcome.error.kind });
       }
+      return taskOf(next, tabId);
     });
+
+  // 팝업이 닫힌 동안 끝났고 그 탭이 창의 지금 탭이면 페이지 위에 알린다(COM-10 기대 동작 4). 줄 밖에서 한다. 페이지가
+  // 붙잡혀 답이 늦어도 다른 일이 기다리지 않는다. 받는 쪽이 없는 탭은 배지만 쓰는 경우라 기록하지 않는다.
+  const announce = async (tabId: number, task: TaskRecord) => {
+    if (task.status === 'running' || deps.popupViewing(tabId)) return;
+    if (!(await deps.isTabActive(tabId))) return;
+    const name = nameOf(task.featureId);
+    const text =
+      task.status === 'succeeded'
+        ? strings.notice.succeeded(name, task.summary)
+        : strings.notice.failed(name, task.error);
+    const delivery = await deps.notify(tabId, text.slice(0, noticeTextLimit));
+    if (delivery === 'timeout' || delivery === 'failed') {
+      deps.record({
+        featureId: task.featureId,
+        kind: delivery === 'timeout' ? 'timeout' : 'platform',
+      });
+    }
+  };
 
   return {
     start: (featureId, tabId) =>
@@ -210,10 +236,12 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
         // 일은 줄 밖에서 돈다. 그동안 다른 탭의 시작과 확인이 기다리지 않는다.
         const stop = new AbortController();
         running.set(id, { tabId, stop });
-        void runPart(action.feature, action.part, tabId, stop.signal).then((outcome) => {
-          running.delete(id);
-          return finish(featureId, tabId, id, outcome);
-        });
+        void runPart(action.feature, action.part, tabId, stop.signal)
+          .then((outcome) => {
+            running.delete(id);
+            return finish(featureId, tabId, id, outcome);
+          })
+          .then((ended) => (ended === null ? undefined : announce(tabId, ended)));
         return ok({ taskId: id });
       }),
 

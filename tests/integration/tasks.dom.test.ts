@@ -11,7 +11,8 @@ import { renderTestPopup } from '../support/popup.ts';
 
 // 작업 결과 알림(COM-10, 결정 0012, 0024)을 실제 모듈끼리 연결해 본다. 팝업(실행 단추, 작업 칸, 작업 기록 읽기)과
 // 서비스 워커(라우터, 작업 실행, 작업 기록 쓰기)는 실제 코드이고, 가짜는 저장소와 메시지 통로뿐이다. 일의 끝은 시험이 정한다.
-// 파일 저장(COM-10.1), 배지와 페이지 위 알림은 그 부분을 만든 뒤와 확장 전체 시험(시험 빌드, 결정 0025)에서 본다.
+// 팝업의 연결은 실제 팝업이 여는 announceTab을 시험이 받아 서비스 워커의 "팝업이 보는 탭"으로 잇는다. 파일 저장(COM-10.1)은
+// 그 기능에서, 배지와 실제 페이지 위 알림은 확장 전체 시험(시험 빌드, 결정 0025)에서 본다.
 
 const containers: HTMLElement[] = [];
 
@@ -69,15 +70,35 @@ function startExtension(
   const session = createFakeStore();
   const saving = controlled(save);
   const copying = controlled(copy);
+  // 팝업의 연결(결정 0024): 열린 팝업이 본다고 알린 탭. 실제처럼 팝업이 닫히면 빠진다.
+  const viewed = new Map<number, number>();
+  // 페이지 위 알림으로 보낸 것(탭, 글). 모든 탭이 창의 지금 탭이고 받는 쪽이 있다.
+  const notices: [number, string][] = [];
   const request = startTestBackground({
     store,
     session,
     features: [save, copy],
     taskParts: [saving.part, copying.part],
     startTime: 1_790_000_000_000,
+    popupViewing: (tabId) => (viewed.get(tabId) ?? 0) > 0,
+    notifyTab: (tabId, text) => {
+      notices.push([tabId, text]);
+      return Promise.resolve('delivered');
+    },
     ...(options.deliver === undefined ? {} : { deliver: options.deliver }),
   });
-  return { store, session, request, saving, copying };
+  const announceTab = (tabId: number) => {
+    viewed.set(tabId, (viewed.get(tabId) ?? 0) + 1);
+    let open = true;
+    return {
+      renew: () => undefined,
+      close: () => {
+        if (open) viewed.set(tabId, (viewed.get(tabId) ?? 1) - 1);
+        open = false;
+      },
+    };
+  };
+  return { store, session, request, saving, copying, notices, announceTab };
 }
 
 async function openPopup(extension: ReturnType<typeof startExtension>, tabId: number) {
@@ -90,6 +111,7 @@ async function openPopup(extension: ReturnType<typeof startExtension>, tabId: nu
     request: extension.request,
     features: [save, copy],
     tabId,
+    announceTab: extension.announceTab,
   });
   const button = (featureId: string) => {
     const found = container.querySelector<HTMLButtonElement>(`button[data-feature="${featureId}"]`);
@@ -148,6 +170,26 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
 
     const third = await openPopup(extension, 1);
     expect(third.text()).toBe('');
+  });
+
+  it('COM-10.1 팝업이 닫힌 동안 끝난 작업은 페이지 위에 알리고, 그 탭의 팝업이 열린 동안 끝나면 알리지 않는다', async () => {
+    const extension = startExtension();
+    const watching = await openPopup(extension, 1);
+    await watching.run('save');
+    await extension.saving.finish(ok({ summary: null }));
+    await vi.waitFor(() => {
+      expect(watching.text()).toBe('자막 저장: 끝났다.');
+    });
+    // 다른 탭의 팝업만 열려 있으면 그 탭에는 알린다.
+    const other = await openPopup(extension, 2);
+    await other.run('copy');
+    other.close();
+    const elsewhere = await openPopup(extension, 3);
+    await extension.copying.finish(ok({ summary: '복사함' }));
+    await vi.waitFor(() => {
+      expect(extension.notices).toEqual([[2, '자막 복사: 끝났다. 복사함']]);
+    });
+    elsewhere.close();
   });
 
   it('COM-10.2 실패한 작업은 다시 연 팝업에 그 이유가 보인다', async () => {
