@@ -1,8 +1,9 @@
 import type { KeyValueStore } from '../../src/platform/index.ts';
 
-// KeyValueStore(chrome.storage.local을 감싼 경계)의 계약(quality 047). 같은 사례를 가짜(src/platform/fake.ts)에는
-// 단위 시험으로(src/platform/storage-contract.test.ts), 실제(chromeLocalStore)에는 확장의 서비스 워커 안에서
-// 돌린다(tests/e2e/storage-contract.spec.ts). 확장 안에서도 돌아야 하므로 Vitest를 쓰지 않고, 틀리면 던진다.
+// KeyValueStore(chrome.storage의 local과 session을 감싼 경계)의 계약(quality 047). 같은 사례를 가짜
+// (src/platform/fake.ts)에는 단위 시험으로(src/platform/storage-contract.test.ts), 실제(chromeLocalStore,
+// chromeSessionStore)에는 확장의 서비스 워커 안에서 돌린다(tests/e2e/storage-contract.spec.ts). 확장 안에서도 돌아야
+// 하므로 Vitest를 쓰지 않고, 틀리면 던진다.
 // 바뀜 알림이 set의 완료보다 먼저 오는지 늦게 오는지는 계약이 아니다(Chrome 문서에 없음). 그래서 사례는
 // 알림을 기다려서 본다. 쓰는 쪽과 읽는 쪽은 순서에 기대지 않는다(결정 0011의 revision, 0016의 stamp).
 
@@ -154,3 +155,21 @@ export const storeContract: readonly ContractCase[] = [
     },
   },
 ];
+
+// 두 영역의 저장소는 서로의 바뀜을 알리지 않는다. chrome.storage.onChanged는 모든 영역의 바뀜을 한 곳에서 알리므로
+// 실제 저장소에서만 뜻이 있다(가짜는 저장소마다 따로다). 확장 안에서 local과 session으로 돌린다.
+export async function checkAreaIsolation(
+  first: KeyValueStore,
+  second: KeyValueStore,
+  key: (name: string) => string,
+): Promise<void> {
+  const changes = record(second, key('shared'));
+  await first.set({ [key('shared')]: 'first' });
+  // 표식: 둘째 영역에 쓰고 그 알림까지 기다린다. 첫 영역의 바뀜이 왔다면 그 앞에 있다.
+  await second.set({ [key('shared')]: 'second' });
+  await changes.waitFor(1, '표식');
+  same(changes.values, ['second'], '둘째 영역의 알림');
+  same(await second.get(key('shared')), 'second', '둘째 영역의 값');
+  same(await first.get(key('shared')), 'first', '첫 영역의 값');
+  changes.stop();
+}
