@@ -471,12 +471,42 @@ describe('탭 사건은 기록이 있는 동안만 듣는다(결정 0024)', () =
   it('기록을 쓸 때마다 기록이 있는지에 따라 듣거나 그만둔다', async () => {
     const { runner, saving, listening } = setup();
     await runner.start('save', 4);
+    // 시작은 탭이 있는지 보기 전에 듣기 시작하고, 진행 중을 쓴 뒤에도 듣는다.
+    expect(listening).toEqual([true, true]);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
-      expect(listening).toEqual([true, true]);
+      expect(listening).toEqual([true, true, true]);
     });
     await runner.seen(4, 't1');
-    expect(listening).toEqual([true, true, false]);
+    expect(listening).toEqual([true, true, true, false]);
+  });
+
+  it('시작은 탭이 있는지 보기 전부터 듣고, 시작하지 않으면 읽은 기록에 맞춰 되돌린다', async () => {
+    // 탭을 볼 때 이미 듣고 있다. 그래야 탭을 본 뒤에 닫혀도 놓치지 않는다(COM-10.6).
+    let listeningWhenChecked: readonly boolean[] = [];
+    const missing = setup({
+      tabExists: () => {
+        listeningWhenChecked = [...missing.listening];
+        return Promise.resolve(false);
+      },
+    });
+    await missing.runner.start('save', 4);
+    expect(listeningWhenChecked).toEqual([true]);
+    expect(missing.listening).toEqual([true, false]);
+
+    // 진행 중인 작업이 있어 시작하지 않으면 기록이 있으므로 계속 듣는다.
+    const busy = setup();
+    await busy.runner.start('save', 4);
+    await busy.runner.start('copy', 4);
+    expect(busy.listening).toEqual([true, true, true, true]);
+
+    // 기록을 쓰지 못하면 쓰기 전의 기록(없음)에 맞춰 그만둔다.
+    const fake = createFakeStore();
+    const unwritable = setup({
+      session: { ...fake, set: () => Promise.reject(new Error('quota')) },
+    });
+    expect((await unwritable.runner.start('save', 4)).ok).toBe(false);
+    expect(unwritable.listening).toEqual([true, false]);
   });
 });
 

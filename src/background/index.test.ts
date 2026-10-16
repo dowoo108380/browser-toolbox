@@ -4,7 +4,7 @@ import { specs, stored } from '../../tests/support/settings.ts';
 import { defineFeature, tabStatus, taskStart } from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
 import type { KeyValueStore, PageProbe, TabEventHandlers } from '../platform/index.ts';
-import { type AppError, appError, ok } from '../shared/index.ts';
+import { type AppError, appError, err, ok } from '../shared/index.ts';
 import { settingsFormat, settingsKey, tasksKey } from '../storage/index.ts';
 import { defineTaskPart, startBackground } from './index.ts';
 
@@ -273,6 +273,81 @@ describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
       expect(session.peek(tasksKey)).toMatchObject({ '3': { id: 'old', status: 'failed' } });
     });
     expect(listening).toEqual([true]);
+  });
+
+  it('COM-10.6 첫 작업의 기록을 쓰는 사이에 탭이 닫혀도 그 닫힘을 들어, 그 일을 멈추고 기록을 지운다', async () => {
+    // 첫 기록(진행 중) 쓰기를 시험이 붙잡는다.
+    const backing = createFakeStore();
+    let releaseWrite: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let writes = 0;
+    const session: KeyValueStore = {
+      ...backing,
+      set: async (values) => {
+        writes += 1;
+        if (writes === 1) await held;
+        await backing.set(values);
+      },
+    };
+    // 멈춤 신호를 받으면 취소로 끝나는 일.
+    const signals: AbortSignal[] = [];
+    const stoppable = defineTaskPart(action, ({ signal }) => {
+      signals.push(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', () => {
+          resolve(err(appError('cancelled', '탭이 닫혔다.')));
+        });
+      });
+    });
+    // Chrome처럼 듣는 동안만 탭 닫힘을 넘긴다. 듣지 않는 동안 닫힌 탭의 사건은 오지 않는다(결정 0024의 실험 6).
+    const open = new Set([3]);
+    let handlers: TabEventHandlers | undefined;
+    let listening = true;
+    const local = createFakeStore();
+    const request = startTestBackground({
+      store: local,
+      features: [...specs, action],
+      startTime: 1_790_000_000_000,
+      session,
+      taskParts: [stoppable],
+      tabExists: (tabId) => Promise.resolve(open.has(tabId)),
+      listenTabEvents: (next) => {
+        handlers = next;
+        return {
+          listen: (on) => {
+            listening = on;
+          },
+        };
+      },
+    });
+    const closeTab = (tabId: number) => {
+      open.delete(tabId);
+      if (listening) handlers?.removed(tabId);
+    };
+    // 기록이 없어 탭 사건 듣기를 그만둔 서비스 워커에서 첫 작업을 시작한다.
+    await vi.waitFor(() => {
+      expect(listening).toBe(false);
+    });
+    const started = request(taskStart, { featureId: 'save', tabId: 3 });
+    await vi.waitFor(() => {
+      expect(writes).toBe(1);
+    });
+    closeTab(3);
+    releaseWrite();
+    expect(await started).toEqual(ok({ taskId: 'task-1' }));
+    // 들은 닫힘은 시작 뒤에 줄을 서서 그 일에 멈춤 신호를 보내고 기록을 지운다.
+    await vi.waitFor(() => {
+      expect(signals[0]?.aborted).toBe(true);
+    });
+    await vi.waitFor(() => {
+      expect(backing.peek(tasksKey)).toEqual({});
+    });
+    expect(listening).toBe(false);
+    // 탭을 닫아 생긴 취소는 고장이 아니다.
+    await settle();
+    expect(recordedKinds(local)).toEqual([]);
   });
 
   it('기록이 없으면 시작한 뒤 탭 사건 듣기를 그만두고, 닫힌 탭의 기록은 지운다', async () => {

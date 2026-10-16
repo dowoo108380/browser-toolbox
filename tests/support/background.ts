@@ -15,7 +15,7 @@ import { appError, err } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
 
 // 실제 모듈끼리 연결한 시험(tests/integration)이 실제 서비스 워커(startBackground)를 시작한다. 가짜는 Chrome 경계뿐이다:
-// 저장소(받은 것), 메시지 통로(돌려주는 요청 함수), 시계(startTime에서 시작해 기다린 만큼만 간다), 탭(모든 탭이 있다),
+// 저장소(받은 것), 메시지 통로(돌려주는 요청 함수), 시계(startTime에서 시작해 기다린 만큼만 간다), 탭(받지 않으면 모든 탭이 있다),
 // 작업 id(차례로 task-1, task-2, …). 설치 이벤트와 옛 스크립트 정리는 하지 않는다. 테스트에서만 가져온다.
 
 export interface TestBackgroundOptions {
@@ -29,6 +29,8 @@ export interface TestBackgroundOptions {
   // 작업 기록을 두는 세션 저장소와 실행 기능의 일(결정 0024). 없으면 빈 가짜 저장소와 일 없음이다.
   readonly session?: KeyValueStore;
   readonly taskParts?: readonly TaskPart[];
+  // 탭이 열려 있는지. 없으면 모든 탭이 있다.
+  readonly tabExists?: (tabId: number) => Promise<boolean>;
   // 확장 아이콘의 배지와 탭 사건(결정 0024). 없으면 배지는 버리고 탭 사건은 오지 않는다.
   readonly setTabBadge?: (tabId: number, badge: TabBadge | null) => Promise<void>;
   readonly listenTabEvents?: (handlers: TabEventHandlers) => TabEvents;
@@ -55,7 +57,7 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
       taskCount += 1;
       return `task-${String(taskCount)}`;
     },
-    tabExists: () => Promise.resolve(true),
+    tabExists: options.tabExists ?? (() => Promise.resolve(true)),
     setTabBadge: options.setTabBadge ?? (() => Promise.resolve()),
     listenTabEvents: options.listenTabEvents ?? (() => ({ listen: () => undefined })),
     watchPopups: () => ({ viewing: options.popupViewing ?? (() => false) }),

@@ -79,6 +79,9 @@ const marks = {
   failed: { text: '!', color: '#c62828' },
 } as const;
 
+// 탭 사건을 들어야 하는지. 작업 기록(진행 중이거나 아직 보지 않은 결과)이 있는 동안만 듣는다(결정 0024).
+const hasTasks = (records: TaskRecords) => Object.keys(records).length > 0;
+
 // 실행 기능마다 일이 꼭 하나 있어야 한다. 빠지거나 겹치면 결함이므로 시작할 때 드러낸다(quality 066).
 function partsByFeature(
   features: readonly FeatureDefinition[],
@@ -152,7 +155,7 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     } catch {
       return err(appError('platform', strings.writeFailed));
     }
-    deps.listenTabs(Object.keys(records).length > 0);
+    deps.listenTabs(hasTasks(records));
     for (const tabId of tabIds) await showBadge(tabId, taskOf(records, tabId));
     return ok(null);
   };
@@ -217,32 +220,47 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     }
   };
 
+  // 탭이 열려 있고 그 탭에 진행 중인 작업이 없으면 진행 중을 쓰고 일을 시작한다. 줄 안에서 읽은 기록으로 부른다.
+  const begin = async (
+    { feature, part }: { readonly feature: ActionFeature; readonly part: TaskPart },
+    tabId: number,
+    records: TaskRecords,
+  ): Promise<Result<{ readonly taskId: string }, AppError>> => {
+    if (!(await deps.tabExists(tabId))) return err(appError('unavailable', strings.noTab));
+    const id = deps.randomId();
+    const started = startTask(records, tabId, { id, featureId: feature.id });
+    if (!started.ok) {
+      return err(appError('unavailable', strings.running(nameOf(started.error.featureId))));
+    }
+    // 이전 결과의 배지는 새 작업의 기록으로 지워진다(진행 중에는 배지가 없다).
+    const committed = await commit(started.value, [tabId]);
+    if (!committed.ok) return committed;
+    // 일은 줄 밖에서 돈다. 그동안 다른 탭의 시작과 확인이 기다리지 않는다.
+    const stop = new AbortController();
+    running.set(id, { tabId, stop });
+    void runPart(feature, part, tabId, stop.signal)
+      .then((outcome) => {
+        running.delete(id);
+        return finish(feature.id, tabId, id, outcome);
+      })
+      .then((ended) => (ended === null ? undefined : announce(tabId, ended)));
+    return ok({ taskId: id });
+  };
+
   return {
     start: (featureId, tabId) =>
       enqueue(async () => {
         const action = actions.get(featureId);
         if (action === undefined) return err(appError('invalid-input', strings.notAction));
-        if (!(await deps.tabExists(tabId))) return err(appError('unavailable', strings.noTab));
         const loaded = await load();
         if (!loaded.ok) return loaded;
-        const id = deps.randomId();
-        const started = startTask(loaded.value, tabId, { id, featureId });
-        if (!started.ok) {
-          return err(appError('unavailable', strings.running(nameOf(started.error.featureId))));
-        }
-        // 이전 결과의 배지는 새 작업의 기록으로 지워진다(진행 중에는 배지가 없다).
-        const committed = await commit(started.value, [tabId]);
-        if (!committed.ok) return committed;
-        // 일은 줄 밖에서 돈다. 그동안 다른 탭의 시작과 확인이 기다리지 않는다.
-        const stop = new AbortController();
-        running.set(id, { tabId, stop });
-        void runPart(action.feature, action.part, tabId, stop.signal)
-          .then((outcome) => {
-            running.delete(id);
-            return finish(featureId, tabId, id, outcome);
-          })
-          .then((ended) => (ended === null ? undefined : announce(tabId, ended)));
-        return ok({ taskId: id });
+        // 탭이 있는지 보기 전부터 탭 사건을 듣는다. 기록이 없는 동안은 듣지 않으므로, 첫 기록을 쓴 뒤에야 들으면 그 사이에
+        // 닫힌 탭을 놓쳐 닫힌 탭에서 멈춤 신호 없이 일을 하고 그 기록이 남는다(COM-10.6). 그 사이에 들은 닫힘은 이 줄 뒤에
+        // 서서 이 작업을 멈추고 기록을 지운다(tabRemoved). 시작하지 않았으면 읽은 기록에 맞춰 되돌린다.
+        deps.listenTabs(true);
+        const begun = await begin(action, tabId, loaded.value);
+        if (!begun.ok) deps.listenTabs(hasTasks(loaded.value));
+        return begun;
       }),
 
     seen: (tabId, taskId) =>
@@ -293,7 +311,7 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
         );
         // 고칠 것이 없으면 쓰지 않는다(서비스 워커는 자주 다시 시작한다). 배지는 서비스 워커가 멈춰도 남는다.
         if (interrupted.length === 0 && open.size === tabIds.length) {
-          deps.listenTabs(tabIds.length > 0);
+          deps.listenTabs(hasTasks(loaded.value));
           return;
         }
         // 끝낸 작업의 탭에 실패 배지를 단다. 닫힌 탭은 Chrome이 배지를 지웠다.
