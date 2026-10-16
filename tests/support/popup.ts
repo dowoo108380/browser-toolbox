@@ -32,8 +32,8 @@ export interface TestPopupOptions {
   readonly features: readonly FeatureDefinition[];
   // 복구 알림 읽기만 다른 저장소 창을 쓰게 할 수 있다. 없으면 store다.
   readonly noticeStore?: Pick<KeyValueStore, 'get' | 'onChanged'>;
-  // 작업 기록을 읽는 세션 저장소와 팝업이 보는 탭(결정 0024). 없으면 빈 저장소와 탭 1이다.
-  readonly session?: KeyValueStore;
+  // 작업 기록을 읽는 세션 저장소와 팝업이 보는 탭(결정 0024). 없으면 빈 저장소와 탭 1이다. 팝업은 기록을 읽기만 한다.
+  readonly session?: Pick<KeyValueStore, 'get' | 'onChanged'>;
   readonly tabId?: number;
   // 팝업의 연결(결정 0024). 없으면 아무것도 하지 않는다.
   readonly announceTab?: (tabId: number) => PopupAnnouncement;

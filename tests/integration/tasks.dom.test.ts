@@ -1,9 +1,11 @@
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as z from 'zod/mini';
 import { type TaskPart, defineTaskPart } from '../../src/background/index.ts';
 import { type ActionFeature, defineFeature, taskStart } from '../../src/contracts/index.ts';
 import { type FakeStore, createFakeStore } from '../../src/platform/fake.ts';
+import type { KeyValueStore } from '../../src/platform/index.ts';
 import { type AppError, appError, err, ok } from '../../src/shared/index.ts';
 import { type TaskOutcome, tasksKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
@@ -39,6 +41,19 @@ function actionFeature(id: string, name: string): ActionFeature {
 
 const save = actionFeature('save', '자막 저장');
 const copy = actionFeature('copy', '자막 복사');
+// 팝업이 깨어났는지 스위치로 본다. 켜고 끄기는 서비스 워커가 깨어난 뒤에만 쓸 수 있다(N-12).
+const subtitleSize = defineFeature({
+  id: 'size',
+  requirements: [],
+  name: '자막 크기',
+  description: '자막 크기 시험',
+  category: 'subtitles',
+  kind: 'toggle',
+  content: null,
+  permissions: [],
+  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+});
+const features = [subtitleSize, save, copy];
 
 // 시험이 끝을 정하는 일. 불린 차례대로 끝낸다.
 function controlled(feature: ActionFeature) {
@@ -77,7 +92,7 @@ function startExtension(
   const request = startTestBackground({
     store,
     session,
-    features: [save, copy],
+    features,
     taskParts: [saving.part, copying.part],
     startTime: 1_790_000_000_000,
     popupViewing: (tabId) => (viewed.get(tabId) ?? 0) > 0,
@@ -101,15 +116,24 @@ function startExtension(
   return { store, session, request, saving, copying, notices, announceTab };
 }
 
-async function openPopup(extension: ReturnType<typeof startExtension>, tabId: number) {
+async function openPopup(
+  extension: ReturnType<typeof startExtension>,
+  tabId: number,
+  options: {
+    // 팝업이 작업 기록을 읽는 저장소. 없으면 서비스 워커와 같은 세션 저장소다.
+    readonly session?: Pick<KeyValueStore, 'get' | 'onChanged'>;
+    // 단추를 쓸 수 있을 때까지 기다릴지. 기본은 기다린다.
+    readonly ready?: boolean;
+  } = {},
+) {
   const container = document.createElement('div');
   document.body.append(container);
   containers.push(container);
   await renderTestPopup(container, {
     store: extension.store,
-    session: extension.session,
+    session: options.session ?? extension.session,
     request: extension.request,
-    features: [save, copy],
+    features,
     tabId,
     announceTab: extension.announceTab,
   });
@@ -118,11 +142,18 @@ async function openPopup(extension: ReturnType<typeof startExtension>, tabId: nu
     if (found === null) throw new Error(`${featureId}의 단추가 없다.`);
     return found;
   };
-  // 서비스 워커가 깨어나고 지금 탭을 알아 단추를 쓸 수 있을 때까지 기다린다.
-  await vi.waitFor(() => {
-    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
-  });
+  // 서비스 워커가 깨어나고, 지금 탭을 알고, 그 탭의 작업 기록을 읽어 단추를 쓸 수 있을 때까지 기다린다.
+  if (options.ready ?? true) {
+    await vi.waitFor(() => {
+      expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+    });
+  }
   return {
+    // 서비스 워커가 깨우기에 답할 때까지 기다린다(스위치를 쓸 수 있게 된다).
+    awake: () =>
+      vi.waitFor(() => {
+        expect(container.querySelector<HTMLInputElement>('[role=switch]')?.disabled).toBe(false);
+      }),
     button,
     text: () => container.querySelector('.task')?.textContent ?? '',
     reason: (featureId: string) =>
@@ -190,6 +221,54 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
       expect(extension.notices).toEqual([[2, '자막 복사: 끝났다. 복사함']]);
     });
     elsewhere.close();
+  });
+
+  it('COM-10 기대 동작 3·6 다시 연 팝업은 그 탭의 작업 기록을 처음 읽기 전에는 단추를 막아, 아직 보지 않은 결과를 새 작업이 덮지 않는다', async () => {
+    const extension = startExtension();
+    const first = await openPopup(extension, 1);
+    await first.run('save');
+    first.close();
+    await extension.saving.finish(ok({ summary: '영상.txt' }));
+    const unseen = { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '영상.txt' };
+    await vi.waitFor(() => {
+      expect(records(extension.session)).toEqual({ '1': unseen });
+    });
+
+    // 다시 연 팝업의 첫 기록 읽기: 저장소는 바로 읽지만 그 결과는 시험이 풀 때 팝업에 닿는다(늦게 온 읽기).
+    let deliverRead: () => void = () => undefined;
+    const delivered = new Promise<void>((resolve) => {
+      deliverRead = resolve;
+    });
+    const slowRead: Pick<KeyValueStore, 'get' | 'onChanged'> = {
+      get: async (key) => {
+        const value = await extension.session.get(key);
+        await delivered;
+        return value;
+      },
+      onChanged: (key, listener) => extension.session.onChanged(key, listener),
+    };
+    const second = await openPopup(extension, 1, { session: slowRead, ready: false });
+    await second.awake();
+    // 서비스 워커는 깨어 있고 지금 탭도 안다. 그래도 그 탭의 기록을 읽기 전이라 단추가 막혀 있고, 눌러도 시작하지 않는다.
+    expect(second.button('save').getAttribute('aria-disabled')).toBe('true');
+    await second.run('save');
+    // 가짜 경계는 마이크로태스크로만 돈다. 다음 타이머 차례면 시작 요청이 갔다면 서비스 워커가 기록을 바꿨을 것이다.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(records(extension.session)).toEqual({ '1': unseen });
+
+    deliverRead();
+    await vi.waitFor(() => {
+      expect(second.text()).toBe('자막 저장: 끝났다. 영상.txt');
+    });
+    // 보인 결과는 확인으로 지워지고, 그 뒤에는 새 작업을 시작한다.
+    await vi.waitFor(() => {
+      expect(records(extension.session)).toEqual({});
+    });
+    expect(second.button('save').hasAttribute('aria-disabled')).toBe(false);
+    await second.run('save');
+    await vi.waitFor(() => {
+      expect(second.text()).toBe('자막 저장: 진행 중이다.');
+    });
   });
 
   it('COM-10.2 실패한 작업은 다시 연 팝업에 그 이유가 보인다', async () => {

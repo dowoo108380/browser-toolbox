@@ -142,7 +142,10 @@ export function PopupApp({
 
   // 이 탭의 작업(COM-10, 결정 0024). latest는 기록에 있는 것이고, shown은 작업 칸이 보이는 것이다. 끝난 결과는 보인 뒤
   // 서비스 워커가 기록에서 지우지만 팝업을 닫을 때까지 보인다.
-  const [latest, setLatest] = useState<TaskRecord | null>(null);
+  // latest는 그 탭의 기록을 처음 받기 전에는 undefined이고, 받은 뒤 작업이 없으면 null이다. 처음 받기 전에는 실행 단추를
+  // 막는다. 서비스 워커는 새 작업을 시작할 때 끝난 이전 결과를 팝업이 이미 보였다고 보고 바꾸므로, 그 전에 시작하면 보지
+  // 않은 결과가 한 번도 보이지 않고 사라진다(COM-10 기대 동작 3·6).
+  const [latest, setLatest] = useState<TaskRecord | null | undefined>(undefined);
   const [shown, setShown] = useState<TaskRecord | null>(null);
   useEffect(() => {
     if (tabId === null) return undefined;
@@ -156,6 +159,7 @@ export function PopupApp({
   // 확인을 보낸 결과의 id. 같은 결과에 두 번 보내지 않는다.
   const confirmedTask = useRef<string | null>(null);
   useEffect(() => {
+    if (latest === undefined) return;
     if (latest === null) {
       // 진행 중이던 작업이 기록에서 사라지면(탭이 닫힘) 감춘다. 끝난 결과는 확인으로 지워진 것이라 그대로 보인다.
       setShown((previous) => (previous?.status === 'running' ? null : previous));
@@ -319,7 +323,7 @@ export function PopupApp({
           <ActionItem
             key={feature.id}
             feature={feature}
-            waiting={!awake || tabId === null}
+            waiting={!awake || tabId === null || latest === undefined}
             onRun={() => {
               void run(feature);
             }}

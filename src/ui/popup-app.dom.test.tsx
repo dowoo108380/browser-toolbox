@@ -101,6 +101,8 @@ interface Options {
   readonly tabStatus?: (tabId: number) => Promise<Result<{ readonly page: PageAccess }, AppError>>;
   readonly startTask?: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
   readonly taskSeen?: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
+  // 그 탭의 작업 기록을 처음 받는 것을 시험이 붙잡는다(task로 보낸다). 붙잡지 않으면 듣자마자 작업이 없다고 받는다.
+  readonly holdTaskRead?: boolean;
 }
 
 async function show({
@@ -113,6 +115,7 @@ async function show({
   tabStatus = () => Promise.resolve(ok({ page: 'ready' as const })),
   startTask = () => Promise.resolve(ok(null)),
   taskSeen = () => Promise.resolve(ok(null)),
+  holdTaskRead = false,
 }: Options = {}) {
   const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
   const starts = vi.fn(startTask);
@@ -140,6 +143,7 @@ async function show({
   const watchTask = (tabId: number, next: TaskWatchHandlers) => {
     watchedTabs.push(tabId);
     taskHandlers = next;
+    if (!holdTaskRead) next.task(null);
     return () => {
       if (taskHandlers === next) taskHandlers = undefined;
     };
@@ -196,10 +200,15 @@ async function show({
     seens,
     watchedTabs,
     announced,
-    // 그 탭의 작업 기록이 바뀐 것처럼 보낸다.
+    // 그 탭의 작업 기록을 읽었거나 기록이 바뀐 것처럼 보낸다.
     task: (record: TaskRecord | null) =>
       act(() => {
         taskHandlers?.task(record);
+      }),
+    // 작업 기록을 읽지 못한 것처럼 알린다.
+    taskProblem: (error: AppError) =>
+      act(() => {
+        taskHandlers?.problem(error);
       }),
     taskText: () => container.querySelector('.task')?.textContent ?? '',
     state: () => container.querySelector('.state')?.textContent,
@@ -591,6 +600,29 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(null) });
     await popup.awake();
     expect(button('save').getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('COM-10 기대 동작 3·6 그 탭의 작업 기록을 처음 받기 전에는 막혀 있어 눌러도 시작하지 않고, 받으면 보지 않은 결과를 보인 뒤 쓸 수 있다', async () => {
+    const popup = await show({ features: withToggle, holdTaskRead: true });
+    await popup.awake();
+    expect(popup.watchedTabs).toEqual([7]);
+    expect(button('save').getAttribute('aria-disabled')).toBe('true');
+    await click(button('save'));
+    expect(popup.starts).not.toHaveBeenCalled();
+    await popup.task({ id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' });
+    expect(popup.taskText()).toBe('자막 저장: 끝났다. 영상.txt');
+    expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('작업 기록을 읽지 못하면 그 이유를 알리고 막아 둔다. 그 뒤 기록의 바뀜을 받으면 쓸 수 있다', async () => {
+    const popup = await show({ features: withToggle, holdTaskRead: true });
+    await popup.awake();
+    await popup.taskProblem(appError('platform', '작업 기록을 읽지 못했다.'));
+    expect(popup.status()).toBe('작업 기록을 읽지 못했다.');
+    expect(button('save').getAttribute('aria-disabled')).toBe('true');
+    await popup.task(null);
+    expect(button('save').hasAttribute('aria-disabled')).toBe(false);
   });
 
   it('작업을 시작하지 못하면 그 이유를 알린다', async () => {
