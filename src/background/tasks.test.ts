@@ -118,6 +118,27 @@ function setup(
   };
 }
 
+// 시험이 정한 때부터 읽기나 쓰기가 실패하는 작업 기록 저장소. 실패하는 동안에도 담긴 기록은 그대로다.
+function breakableStore(initial: Readonly<Record<string, unknown>> = {}) {
+  const store = createFakeStore(initial);
+  const broken = { get: false, set: false };
+  const session: FakeStore = {
+    ...store,
+    get: (key) => (broken.get ? Promise.reject(new Error('session')) : store.get(key)),
+    set: (items) => (broken.set ? Promise.reject(new Error('quota')) : store.set(items)),
+  };
+  return { session, broken };
+}
+
+// 저장소의 어느 쪽이 실패하는지. 시험 이름에 앞의 말을 쓴다.
+const storeFailures = [
+  ['읽지', 'get'],
+  ['쓰지', 'set'],
+] as const;
+
+// 끝났고 아직 보지 않은 작업 기록.
+const unseen = { id: 'a', featureId: 'save', status: 'succeeded', summary: null } as const;
+
 const unavailable = (message: string): AppError => appError('unavailable', message);
 
 describe('작업 시작', () => {
@@ -290,6 +311,33 @@ describe('작업 끝남', () => {
     expect(records()).toEqual(timedOut);
   });
 
+  it.each(storeFailures)(
+    '끝을 쓸 때 기록을 %s 못하면 그 기능으로 platform을 기록하고 진행 중으로 남긴다(다음 서비스 워커 시작이 고친다)',
+    async (_, operation) => {
+      const { session, broken } = breakableStore();
+      const { runner, saving, records, problems } = setup({ session });
+      await runner.start('save', 4);
+      broken[operation] = true;
+      await finishLast(saving, ok({ summary: null }));
+      await vi.waitFor(() => {
+        expect(problems).toEqual([{ featureId: 'save', kind: 'platform' }]);
+      });
+      expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+    },
+  );
+
+  it('끝을 쓰고 알리는 동안 예상하지 못한 예외가 나도 그 기능으로 unexpected를 기록한다', async () => {
+    // 알림 경계는 거절하지 않고 결과로 답하기로 되어 있다. 그 약속이 깨진 경우를 흉내 낸다.
+    const { runner, saving, problems } = setup({
+      notify: () => Promise.reject(new Error('boom')),
+    });
+    await runner.start('save', 4);
+    await finishLast(saving, ok({ summary: null }));
+    await vi.waitFor(() => {
+      expect(problems).toEqual([{ featureId: 'save', kind: 'unexpected' }]);
+    });
+  });
+
   it('그 탭의 기록이 바뀐 뒤(예: 지워짐)에 온 결과는 버리고 문제로 기록하지 않는다', async () => {
     const { runner, saving, session, records, problems } = setup();
     await runner.start('save', 4);
@@ -355,6 +403,20 @@ describe('결과 확인(task.seen, 결정 0012)', () => {
     expect(await runner.seen(4, 't1')).toEqual(ok(null));
     expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
   });
+
+  it.each(storeFailures)(
+    '기록을 %s 못하면 platform으로 답하고 기록한다. 팝업은 이 실패를 보이지 않는다',
+    async (_, operation) => {
+      const { session, broken } = breakableStore({ [tasksKey]: { '4': unseen } });
+      const { runner, records, problems } = setup({ session });
+      broken[operation] = true;
+      const result = await runner.seen(4, 'a');
+      expect(result.ok ? null : result.error.kind).toBe('platform');
+      expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
+      // 지우지 못한 결과는 팝업을 다음에 열 때 다시 보인다.
+      expect(records()).toEqual({ '4': unseen });
+    },
+  );
 });
 
 describe('실행 기능과 일의 짝(quality 066)', () => {
@@ -445,6 +507,15 @@ describe('배지와 제목은 기록에서 계산한다(결정 0012, 0024)', () 
       [4, succeededBadge],
       [4, succeededBadge],
     ]);
+  });
+
+  it('탭이 이동할 때 기록을 읽지 못하면 배지를 다시 달지 못한 까닭을 platform으로 기록한다', async () => {
+    const { session, broken } = breakableStore({ [tasksKey]: { '4': unseen } });
+    const { runner, badges, problems } = setup({ session });
+    broken.get = true;
+    await runner.tabNavigated(4);
+    expect(badges).toEqual([]);
+    expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
   });
 
   it('배지를 달지 못하면 기록은 그대로 쓰고 platform으로 기록한다', async () => {
@@ -552,6 +623,17 @@ describe('COM-10.6 탭이 닫힘', () => {
     await runner.tabRemoved(4);
     expect(writes).not.toHaveBeenCalled();
   });
+
+  it.each(storeFailures)(
+    '기록을 %s 못하면 platform으로 기록한다(남은 기록은 다음 서비스 워커 시작이 지운다)',
+    async (_, operation) => {
+      const { session, broken } = breakableStore({ [tasksKey]: { '4': unseen } });
+      const { runner, problems } = setup({ session });
+      broken[operation] = true;
+      await runner.tabRemoved(4);
+      expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
+    },
+  );
 });
 
 describe('서비스 워커가 다시 시작함(결정 0024)', () => {
@@ -612,6 +694,16 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     await runner.recover();
     expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
     expect(listening).toEqual([]);
+  });
+
+  it('고친 기록을 쓰지 못하면 platform으로 기록하고, 끝내지 못한 작업은 다음 시작에 고칠 때 기록한다', async () => {
+    const running = { id: 'a', featureId: 'save', status: 'running' } as const;
+    const { session, broken } = breakableStore({ [tasksKey]: { '4': running } });
+    const { runner, records, problems } = setup({ session });
+    broken.set = true;
+    await runner.recover();
+    expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
+    expect(records()).toEqual({ '4': running });
   });
 });
 

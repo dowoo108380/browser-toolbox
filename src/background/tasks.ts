@@ -238,12 +238,16 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     // 일은 줄 밖에서 돈다. 그동안 다른 탭의 시작과 확인이 기다리지 않는다.
     const stop = new AbortController();
     running.set(id, { tabId, stop });
+    // 이 사슬의 끝을 기다리는 쪽이 없으므로, 끝을 쓰고 알리다 난 예상하지 못한 예외는 여기서 기록한다(quality 067).
     void runPart(feature, part, tabId, stop.signal)
       .then((outcome) => {
         running.delete(id);
         return finish(feature.id, tabId, id, outcome);
       })
-      .then((ended) => (ended === null ? undefined : announce(tabId, ended)));
+      .then((ended) => (ended === null ? undefined : announce(tabId, ended)))
+      .catch(() => {
+        deps.record({ featureId: feature.id, kind: 'unexpected' });
+      });
     return ok({ taskId: id });
   };
 
@@ -263,12 +267,19 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
         return begun;
       }),
 
+    // 팝업은 확인의 실패를 보이지 않으므로(지우지 못한 결과는 다음에 열 때 다시 보인다) 여기서 기록한다(quality 067).
     seen: (tabId, taskId) =>
       enqueue(async () => {
         const loaded = await load();
-        if (!loaded.ok) return loaded;
+        if (!loaded.ok) {
+          deps.record({ featureId: null, kind: 'platform' });
+          return loaded;
+        }
         const next = seenTask(loaded.value, tabId, taskId);
-        return next === null ? ok(null) : commit(next, [tabId]);
+        if (next === null) return ok(null);
+        const committed = await commit(next, [tabId]);
+        if (!committed.ok) deps.record({ featureId: null, kind: 'platform' });
+        return committed;
       }),
 
     tabRemoved: (tabId) =>
@@ -288,7 +299,11 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     tabNavigated: (tabId) =>
       enqueue(async () => {
         const loaded = await load();
-        if (!loaded.ok) return;
+        if (!loaded.ok) {
+          // 배지를 다시 달지 못한다. 이 사건을 기다리는 쪽이 없으므로 까닭을 남긴다(quality 067).
+          deps.record({ featureId: null, kind: 'platform' });
+          return;
+        }
         const task = taskOf(loaded.value, tabId);
         if (task !== null && task.status !== 'running') await showBadge(tabId, task);
       }),
