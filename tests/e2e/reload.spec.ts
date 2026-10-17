@@ -109,6 +109,49 @@ async function countRetireEvents(frame: Frame) {
 const retireEvents = (frame: Frame) =>
   frame.evaluate(() => document.documentElement.dataset['retireEvents']);
 
+// 시험 페이지의 영상에는 원본이 없어 재생되지 않는다. 소리 없는 WAV(60초, 8kHz 8비트 단음)를 원본으로 주고 소리를 끈 채
+// 재생한다. 영상 요소도 소리만 있는 원본을 재생한다. 그래서 옛 스크립트가 물러나며 재생을 멈추거나 배속을 되돌리면 드러난다.
+async function playSilence(frame: Frame) {
+  await frame.evaluate(async () => {
+    const rate = 8000;
+    const samples = rate * 60;
+    const wav = new DataView(new ArrayBuffer(44 + samples));
+    const ascii = (offset: number, text: string) => {
+      for (let index = 0; index < text.length; index += 1) {
+        wav.setUint8(offset + index, text.charCodeAt(index));
+      }
+    };
+    ascii(0, 'RIFF');
+    wav.setUint32(4, 36 + samples, true);
+    ascii(8, 'WAVE');
+    ascii(12, 'fmt ');
+    wav.setUint32(16, 16, true);
+    wav.setUint16(20, 1, true);
+    wav.setUint16(22, 1, true);
+    wav.setUint32(24, rate, true);
+    wav.setUint32(28, rate, true);
+    wav.setUint16(32, 1, true);
+    wav.setUint16(34, 8, true);
+    ascii(36, 'data');
+    wav.setUint32(40, samples, true);
+    // 8비트 PCM의 무음은 128이다.
+    new Uint8Array(wav.buffer, 44).fill(128);
+    const video = document.querySelector('video');
+    if (video === null) throw new Error('영상이 없다.');
+    video.muted = true;
+    video.src = URL.createObjectURL(new Blob([wav.buffer], { type: 'audio/wav' }));
+    await video.play();
+  });
+}
+
+// 영상이 재생 중인지: 멈추지 않았고 재생 위치가 나아간다.
+async function isPlaying(frame: Frame) {
+  const position = () => frame.evaluate(() => document.querySelector('video')?.currentTime ?? 0);
+  const before = await position();
+  await expect.poll(position).toBeGreaterThan(before);
+  return frame.evaluate(() => document.querySelector('video')?.paused === false);
+}
+
 // 다시 로드 뒤 코드가 더 돌지 않는 옛 세계가 남긴 요소를 흉내 낸다(결정 0008 고친 기록, 드러난 것 1).
 // 그런 세계는 iframe에서 자주 생기지만 늘 생기지는 않는다. 이 요소는 새 판의 정리 함수만 지울 수 있다.
 async function addStaleElement(frame: Frame) {
@@ -125,7 +168,7 @@ const origins = [
 ];
 
 for (const { label, origin, secure } of origins) {
-  test(`COM-7.1 COM-7.2 ${label}: 확장을 다시 불러오면 영상은 2배 그대로이고, 옛 스크립트가 더한 표시창이 남지 않는다`, async ({
+  test(`COM-7.1 COM-7.2 ${label}: 2배로 재생하는 중에 확장을 다시 불러오면 영상은 계속 2배로 재생되고, 옛 스크립트가 더한 표시창이 남지 않는다`, async ({
     context,
     extensionId,
     profileDirectory,
@@ -149,11 +192,13 @@ for (const { label, origin, secure } of origins) {
     const popup = await openPopup(context, extensionId);
     await popup.getByRole('switch', { name: '미디어 배속' }).check();
     await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×']);
+    await playSilence(page.mainFrame());
     await page.evaluate(() => {
       const video = document.querySelector('video');
       if (video) video.playbackRate = 2;
     });
     await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '2×']);
+    expect(await isPlaying(page.mainFrame())).toBe(true);
     for (const frame of frames) {
       await addStaleElement(frame);
       expect(await hostCount(frame)).toBe(2);
@@ -166,6 +211,7 @@ for (const { label, origin, secure } of origins) {
       await expect.poll(() => hostCount(frame)).toBe(0);
     }
     expect(await page.evaluate(() => document.querySelector('video')?.playbackRate)).toBe(2);
+    expect(await isPlaying(page.mainFrame())).toBe(true);
     expect(pageErrors).toEqual([]);
     // 정리 함수가 모든 프레임에서 끝까지 돌았으면 새 판은 문제를 기록하지 않는다. 함수가 페이지에서 예외를 내면
     // 여기에 unexpected가 남는다(quality 067, 2026-10-14 전에는 흔적 없이 지나갔다).
