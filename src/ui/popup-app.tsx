@@ -69,6 +69,23 @@ interface Notice {
   readonly message: string;
 }
 
+// 지금 탭의 작업(결정 0024). 둘은 기록을 받을 때 함께 바뀐다. 작업 칸이 기록보다 늦게 그려지는 때가 없게 하기 위해서다.
+interface TaskView {
+  // 그 탭의 기록에 있는 것. 처음 받기 전에는 undefined이고, 받은 뒤 작업이 없으면 null이다.
+  readonly latest: TaskRecord | null | undefined;
+  // 작업 칸이 보이는 것. 끝난 결과는 보인 뒤 서비스 워커가 기록에서 지우지만 팝업을 닫을 때까지 보인다.
+  readonly shown: TaskRecord | null;
+}
+
+const unreadTask: TaskView = { latest: undefined, shown: null };
+
+// 기록을 받은 뒤의 작업. 기록이 비었을 때 끝난 결과는 확인으로 지워진 것이라 그대로 보이고, 진행 중이던 작업은 기록에서
+// 사라진 것이라(탭이 닫힘) 감춘다.
+function received(view: TaskView, record: TaskRecord | null): TaskView {
+  if (record !== null) return { latest: record, shown: record };
+  return { latest: null, shown: view.shown?.status === 'running' ? null : view.shown };
+}
+
 export function PopupApp({
   features,
   subscribe,
@@ -141,39 +158,37 @@ export function PopupApp({
     };
   }, [currentTab, tabStatus]);
 
-  // 이 탭의 작업(COM-10, 결정 0024). latest는 기록에 있는 것이고, shown은 작업 칸이 보이는 것이다. 끝난 결과는 보인 뒤
-  // 서비스 워커가 기록에서 지우지만 팝업을 닫을 때까지 보인다.
-  // latest는 그 탭의 기록을 처음 받기 전에는 undefined이고, 받은 뒤 작업이 없으면 null이다. 처음 받기 전에는 실행 단추를
-  // 막는다(actionReady). 서비스 워커는 새 작업을 시작할 때 끝난 이전 결과를 팝업이 이미 보였다고 보고 바꾸므로, 그 전에
-  // 시작하면 보지 않은 결과가 한 번도 보이지 않고 사라진다(COM-10 기대 동작 3·6).
-  const [latest, setLatest] = useState<TaskRecord | null | undefined>(undefined);
-  const [shown, setShown] = useState<TaskRecord | null>(null);
+  // 이 탭의 작업(COM-10, 결정 0024). 서비스 워커는 새 작업을 시작할 때 끝난 이전 결과를 팝업이 이미 보였다고 보고 바꾼다.
+  // 그래서 결과를 보인 화면이 나오기 전에는 확인을 보내지 않고 실행 단추도 열지 않는다. 그러지 않으면 보지 않은 결과가 한
+  // 번도 보이지 않고 사라진다(COM-10 기대 동작 3·6, 결정 0012).
+  const [task, setTask] = useState<TaskView>(unreadTask);
   useEffect(() => {
     if (tabId === null) return undefined;
     return watchTask(tabId, {
-      task: setLatest,
+      task: (record) => {
+        setTask((previous) => received(previous, record));
+      },
       problem: (error) => {
         setNotice({ message: error.message });
       },
     });
   }, [tabId, watchTask]);
+  // 작업 칸에 보인 화면이 나온 task. Preact는 useEffect를 그 그리기를 DOM에 반영한 뒤에 부른다(보통 브라우저가 다음 화면을
+  // 그린 뒤, 그 전에 다시 그리게 되면 다시 그리기 직전). 그래서 아래 효과가 불릴 때 작업 칸은 task.shown을 보이고 있고,
+  // 확인과 실행 단추(actionReady)는 이것을 본다.
+  const [drawnTask, setDrawnTask] = useState<TaskView | null>(null);
   // 확인을 보낸 결과의 id. 같은 결과에 두 번 보내지 않는다.
   const confirmedTask = useRef<string | null>(null);
   useEffect(() => {
-    if (latest === undefined) return;
-    if (latest === null) {
-      // 진행 중이던 작업이 기록에서 사라지면(탭이 닫힘) 감춘다. 끝난 결과는 확인으로 지워진 것이라 그대로 보인다.
-      setShown((previous) => (previous?.status === 'running' ? null : previous));
-      return;
-    }
-    setShown(latest);
-    if (latest.status === 'running' || tabId === null || confirmedTask.current === latest.id)
-      return;
-    confirmedTask.current = latest.id;
-    // 그린 뒤에 보낸다(결과를 보인 뒤 지운다). 확인을 알리지 못하면 기록이 남아 다음에 열 때 다시 보이므로 따로 알리지 않는다.
-    void taskSeen(tabId, latest.id);
-  }, [latest, tabId, taskSeen]);
-  const running = latest?.status === 'running' ? latest : null;
+    setDrawnTask(task);
+    const { shown } = task;
+    if (shown === null || shown.status === 'running' || tabId === null) return;
+    if (confirmedTask.current === shown.id) return;
+    confirmedTask.current = shown.id;
+    // 결과를 보인 뒤 지우게 한다. 확인을 알리지 못하면 기록이 남아 다음에 열 때 다시 보이므로 따로 알리지 않는다.
+    void taskSeen(tabId, shown.id);
+  }, [task, tabId, taskSeen]);
+  const running = task.latest?.status === 'running' ? task.latest : null;
 
   // 지금 탭을 알면 그 탭을 본다고 알리고, 팝업이 닫히면 연결을 닫는다. 깨울 때마다 끊긴 연결을 다시 잇는다(아래).
   const announcement = useRef<{ readonly renew: () => void } | null>(null);
@@ -304,12 +319,14 @@ export function PopupApp({
   };
 
   // 실행 단추를 쓸 수 있는 때(결정 0024): 서비스 워커가 깨어났고(N-12), 지금 탭을 알고, 그 탭의 작업 기록을 처음 받았고,
-  // 페이지에 작용하는 기능이면 그 탭에서 쓸 수 있는지 답도 받았다. 답을 받기 전에 누르면 쓸 수 없는 페이지에서 작업을
-  // 시작해, 막힌 단추와 이유 대신 실패를 보인다. 답을 받지 못했으면 이유 없이 연다(결정 0023).
+  // 받은 기록을 작업 칸에 보인 화면이 나왔고(위), 페이지에 작용하는 기능이면 그 탭에서 쓸 수 있는지 답도 받았다. 답을 받기
+  // 전에 누르면 쓸 수 없는 페이지에서 작업을 시작해, 막힌 단추와 이유 대신 실패를 보인다. 답을 받지 못했으면 이유 없이
+  // 연다(결정 0023).
   const actionReady = (feature: ActionFeature) =>
     awake &&
     tabId !== null &&
-    latest !== undefined &&
+    task.latest !== undefined &&
+    drawnTask === task &&
     (feature.content === null || tabState !== undefined);
 
   // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치, 실행은 단추다.
@@ -366,7 +383,7 @@ export function PopupApp({
 
   return (
     <main ref={root}>
-      <TaskStatus task={shown} nameOf={nameOf} />
+      <TaskStatus task={task.shown} nameOf={nameOf} />
       {snapshot === null || !categoryRead ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (

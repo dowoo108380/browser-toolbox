@@ -170,6 +170,37 @@ async function openPopup(
 
 const records = (session: FakeStore) => session.peek(tasksKey);
 
+// 다시 연 팝업의 첫 기록 읽기를 붙잡는 저장소 창. 저장소는 바로 읽지만 그 결과는 시험이 deliver를 부를 때 팝업에 닿는다
+// (늦게 온 읽기). 바뀜 알림은 그대로 지나간다.
+function heldRead(session: FakeStore) {
+  let deliver: () => void = () => undefined;
+  const delivered = new Promise<void>((resolve) => {
+    deliver = resolve;
+  });
+  const view: Pick<KeyValueStore, 'get' | 'onChanged'> = {
+    get: async (key) => {
+      const value = await session.get(key);
+      await delivered;
+      return value;
+    },
+    onChanged: (key, listener) => session.onChanged(key, listener),
+  };
+  return { view, deliver };
+}
+
+// 팝업이 닫힌 동안 끝나 아직 보지 않은 결과 하나를 탭 1의 기록에 남긴다.
+async function leaveUnseenResult(extension: ReturnType<typeof startExtension>) {
+  const first = await openPopup(extension, 1);
+  await first.run('save');
+  first.close();
+  await extension.saving.finish(ok({ summary: '영상.txt' }));
+  const unseen = { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '영상.txt' };
+  await vi.waitFor(() => {
+    expect(records(extension.session)).toEqual({ '1': unseen });
+  });
+  return unseen;
+}
+
 describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () => {
   it('COM-10.1 COM-10.3 COM-10.4 팝업을 닫아도 작업은 끝나고, 다시 열면 결과가 한 번 보인 뒤 지워진다', async () => {
     const extension = startExtension();
@@ -225,29 +256,9 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
 
   it('COM-10 기대 동작 3·6 다시 연 팝업은 그 탭의 작업 기록을 처음 읽기 전에는 단추를 막아, 아직 보지 않은 결과를 새 작업이 덮지 않는다', async () => {
     const extension = startExtension();
-    const first = await openPopup(extension, 1);
-    await first.run('save');
-    first.close();
-    await extension.saving.finish(ok({ summary: '영상.txt' }));
-    const unseen = { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '영상.txt' };
-    await vi.waitFor(() => {
-      expect(records(extension.session)).toEqual({ '1': unseen });
-    });
-
-    // 다시 연 팝업의 첫 기록 읽기: 저장소는 바로 읽지만 그 결과는 시험이 풀 때 팝업에 닿는다(늦게 온 읽기).
-    let deliverRead: () => void = () => undefined;
-    const delivered = new Promise<void>((resolve) => {
-      deliverRead = resolve;
-    });
-    const slowRead: Pick<KeyValueStore, 'get' | 'onChanged'> = {
-      get: async (key) => {
-        const value = await extension.session.get(key);
-        await delivered;
-        return value;
-      },
-      onChanged: (key, listener) => extension.session.onChanged(key, listener),
-    };
-    const second = await openPopup(extension, 1, { session: slowRead, ready: false });
+    const unseen = await leaveUnseenResult(extension);
+    const read = heldRead(extension.session);
+    const second = await openPopup(extension, 1, { session: read.view, ready: false });
     await second.awake();
     // 서비스 워커는 깨어 있고 지금 탭도 안다. 그래도 그 탭의 기록을 읽기 전이라 단추가 막혀 있고, 눌러도 시작하지 않는다.
     expect(second.button('save').getAttribute('aria-disabled')).toBe('true');
@@ -256,7 +267,7 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(records(extension.session)).toEqual({ '1': unseen });
 
-    deliverRead();
+    read.deliver();
     await vi.waitFor(() => {
       expect(second.text()).toBe('자막 저장: 끝났다. 영상.txt');
     });
@@ -268,6 +279,34 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
     await second.run('save');
     await vi.waitFor(() => {
       expect(second.text()).toBe('자막 저장: 진행 중이다.');
+    });
+  });
+
+  it('COM-10 기대 동작 3·6 다시 연 팝업은 첫 기록을 받은 직후 그 결과를 보인 화면이 나오기 전에도 단추를 막아, 결과는 보인 뒤 확인으로 지워진다', async () => {
+    const extension = startExtension();
+    await leaveUnseenResult(extension);
+    const read = heldRead(extension.session);
+    const second = await openPopup(extension, 1, { session: read.view, ready: false });
+    await second.awake();
+
+    read.deliver();
+    // 마이크로태스크만 흘려 보내 팝업이 받은 기록으로 다시 그리기를 기다린다. 타이머와 화면 그리기 차례를 주지 않으므로
+    // Preact의 효과(useEffect, 브라우저가 다음 화면을 그린 뒤)는 아직 불리지 않았다.
+    const blocked = () => second.button('save').getAttribute('aria-disabled') === 'true';
+    for (let step = 0; second.text() === '' && blocked(); step += 1) {
+      if (step === 200) throw new Error('팝업이 받은 기록으로 다시 그리지 않았다.');
+      await Promise.resolve();
+    }
+    expect(blocked()).toBe(true);
+    await second.run('save');
+
+    // 결과를 보인 화면이 나온 뒤 확인이 가서 서비스 워커가 지운다. 눌렀을 때 새 작업이 시작됐다면 기록은 그 작업의 진행이다.
+    await vi.waitFor(() => {
+      expect(records(extension.session)).toEqual({});
+    });
+    expect(second.text()).toBe('자막 저장: 끝났다. 영상.txt');
+    await vi.waitFor(() => {
+      expect(blocked()).toBe(false);
     });
   });
 

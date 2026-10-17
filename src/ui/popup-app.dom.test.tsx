@@ -90,6 +90,12 @@ const settle = () =>
     await Promise.resolve();
   });
 
+// act 밖에서 마이크로태스크만 흘려 보낸다. 미뤄 둔 다시 그리기는 끝나지만, 타이머와 화면 그리기 차례를 주지 않으므로
+// 효과(useEffect)는 아직 불리지 않는다.
+async function renderedOnly() {
+  for (let step = 0; step < 10; step += 1) await Promise.resolve();
+}
+
 interface Options {
   readonly features?: readonly FeatureDefinition[];
   readonly wake?: () => Promise<Result<unknown, AppError>>;
@@ -205,6 +211,12 @@ async function show({
       act(() => {
         taskHandlers?.task(record);
       }),
+    // 위와 같되 act 밖에서 보낸다. act는 다시 그리기와 효과를 한 번에 흘려 보내지만, 실제로는 Preact가 다시 그리기를
+    // 마이크로태스크에서 하고 효과는 브라우저가 다음 화면을 그린 뒤에 부른다(preact/hooks의 afterNextFrame).
+    // 그 사이를 보려면 이것으로 보낸 뒤 renderedOnly를 기다린다.
+    taskOutsideAct: (record: TaskRecord | null) => {
+      taskHandlers?.task(record);
+    },
     // 작업 기록을 읽지 못한 것처럼 알린다.
     taskProblem: (error: AppError) =>
       act(() => {
@@ -634,6 +646,47 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
     expect(button('save').hasAttribute('aria-disabled')).toBe(false);
   });
+
+  it('COM-10 기대 동작 3·6 기록을 받은 직후 작업 칸을 그린 화면이 나오기 전에는 막혀 있어 눌러도 시작하지 않고, 그 뒤에 쓸 수 있다', async () => {
+    const popup = await show({ features: withToggle, holdTaskRead: true });
+    await popup.awake();
+    popup.taskOutsideAct({ id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' });
+    await renderedOnly();
+    // 다시 그렸지만 효과는 아직이다. 받은 결과를 보인 화면이 나오기 전이라 단추는 막혀 있다.
+    expect(button('save').getAttribute('aria-disabled')).toBe('true');
+    expect(popup.taskText()).toBe('자막 저장: 끝났다. 영상.txt');
+    expect(popup.seens).not.toHaveBeenCalled();
+    await click(button('save'));
+    expect(popup.starts).not.toHaveBeenCalled();
+    // 그 화면이 나온 뒤(효과)에는 쓸 수 있고, 보인 결과의 확인을 보냈다.
+    await vi.waitFor(() => {
+      expect(button('save').hasAttribute('aria-disabled')).toBe(false);
+    });
+    expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
+  });
+
+  it.each([
+    ['다시 연 팝업이 처음 받은 결과', [] as const],
+    ['열린 동안 끝난 결과', [{ id: 't1', featureId: 'save', status: 'running' }] as const],
+  ])(
+    'COM-10 기대 동작 3·6 %s의 확인은 작업 칸이 그 결과를 그린 뒤에 보낸다',
+    async (_name, before) => {
+      // 확인을 보내는 순간 작업 칸에 있던 글.
+      const shownWhenSeen: string[] = [];
+      const popup = await show({
+        features: withToggle,
+        holdTaskRead: true,
+        taskSeen: () => {
+          shownWhenSeen.push(container.querySelector('.task')?.textContent ?? '');
+          return Promise.resolve(ok(null));
+        },
+      });
+      await popup.awake();
+      for (const record of before) await popup.task(record);
+      await popup.task({ id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' });
+      expect(shownWhenSeen).toEqual(['자막 저장: 끝났다. 영상.txt']);
+    },
+  );
 
   it('페이지에 작용하는 실행 기능은 지금 탭에서 쓸 수 있는지 답을 받기 전에는 막혀 있어 눌러도 시작하지 않는다. 작용하지 않는 기능은 기다리지 않는다', async () => {
     let answer: (result: Result<TabStatus, AppError>) => void = () => undefined;
