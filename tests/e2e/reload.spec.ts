@@ -1,9 +1,7 @@
 import type { BrowserContext, Frame } from '@playwright/test';
 import { problemReport } from '../../src/contracts/index.ts';
 import { retireTimeoutMs } from '../../src/platform/index.ts';
-import { connectBrowserCdp } from './support/browser-cdp.ts';
 import {
-  distPath,
   expect,
   fixtureOrigin,
   hostCount,
@@ -11,27 +9,17 @@ import {
   insecureFixtureOrigin,
   openPopup,
   openPopupOn,
+  reloadExtension,
   tabStatusOf,
   test,
 } from './support/extension.ts';
 
 // 확장을 다시 불러온 뒤 열린 탭의 옛 스크립트(결정 0008, N-13).
-// 사용자가 "다시 로드"를 누르는 것과 같은 일을 CDP Extensions.loadUnpacked로 한다(R-04).
+// 사용자가 "다시 로드"를 누르는 것과 같은 일을 CDP Extensions.loadUnpacked로 한다(R-04, reloadExtension).
 // 새 판이 프레임에 넣는 정리 함수는 그 페이지의 문맥에서 돈다. 일반 http 페이지는 보안 문맥이 아니라
 // 보안 문맥에서만 있는 API가 없으므로, 루프백 출처(보안 문맥)와 일반 http 출처에서 같은 일을 확인한다.
 
 test.use({ browserDebugging: true });
-
-async function reloadExtension(profileDirectory: string, extensionId: string) {
-  const cdp = await connectBrowserCdp(profileDirectory);
-  try {
-    expect(await cdp.send('Extensions.loadUnpacked', { path: distPath })).toEqual({
-      id: extensionId,
-    });
-  } finally {
-    cdp.close();
-  }
-}
 
 // 지금 저장되어 있는 문제 기록(COM-5). 줄에 선 기록의 저장이 끝났는지는 보지 않으므로, 있을 기록을 기다릴 때만 쓴다.
 async function readProblems(context: BrowserContext, extensionId: string): Promise<unknown> {

@@ -8,6 +8,7 @@ import {
   chromium,
 } from '@playwright/test';
 import { tabStatus } from '../../../src/contracts/index.ts';
+import { connectBrowserCdp } from './browser-cdp.ts';
 
 // 빌드한 확장을 올린 Chromium(R-01). 테스트마다 새 프로필에서 시작한다(quality 104).
 
@@ -83,6 +84,23 @@ export const test = base.extend<{
 });
 
 export const expect = test.expect;
+
+// 확장을 다시 불러온다. 사용자가 "다시 로드"를 누르는 것과 같은 일을 브라우저 수준 CDP Extensions.loadUnpacked로 한다(R-04).
+// 같은 id로 다시 올라온다. browserDebugging으로 띄운 브라우저에서만 된다.
+export async function reloadExtension(
+  profileDirectory: string,
+  extensionId: string,
+  build: ExtensionBuild = 'product',
+): Promise<void> {
+  const cdp = await connectBrowserCdp(profileDirectory);
+  try {
+    expect(await cdp.send('Extensions.loadUnpacked', { path: distOf(build) })).toEqual({
+      id: extensionId,
+    });
+  } finally {
+    cdp.close();
+  }
+}
 
 // 확장의 서비스 워커가 도는지를 page의 CDP 세션(ServiceWorker 도메인)으로 지켜본다. 기다림이 실패하면 받은 상태의
 // 차례 전체를 보인다. 멈추기가 늦은 것과 멈춘 뒤 무엇이 다시 깨운 것을 가리기 위해서다(이슈 #5).

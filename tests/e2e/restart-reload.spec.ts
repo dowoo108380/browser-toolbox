@@ -5,6 +5,7 @@ import {
   fixtureOrigin,
   indicatorTexts,
   openPopup,
+  reloadExtension,
   serviceWorkerOf,
   test,
   watchServiceWorker,
@@ -20,9 +21,10 @@ import {
 } from './support/tasks.ts';
 
 // COM-7의 표: 서비스 워커가 다시 시작하거나 확장을 다시 불러올 때 무엇이 남고 무엇이 사라지는지(R-20). 서비스 워커의
-// 다시 시작은 CDP ServiceWorker.stopAllWorkers로 강제로 멈춰 만든다(Chrome이 쉬는 서비스 워커를 멈춘 것과 같다). 탭 상태는
-// 지금 작업 기록(COM-10)뿐이라 시험 빌드의 시험 작업으로 만든다(결정 0025). 탭 배속(MED-4)과 활성 상태 유지(TAB-2)는 그
-// 기능을 만들 때 여기에 더한다. 옛 스크립트의 정리(COM-7.1·7.2)는 reload.spec.ts가 본다.
+// 다시 시작은 CDP ServiceWorker.stopAllWorkers로 강제로 멈춰 만든다(Chrome이 쉬는 서비스 워커를 멈춘 것과 같다). 다시
+// 불러오기는 사용자의 "다시 로드"와 같은 CDP Extensions.loadUnpacked로 한다(R-04). 탭 상태는 지금 작업 기록(COM-10)뿐이라
+// 시험 빌드의 시험 작업으로 만든다(결정 0025). 탭 배속(MED-4)과 활성 상태 유지(TAB-2)는 그 기능을 만들 때 여기에 더한다.
+// 옛 스크립트의 정리(COM-7.1·7.2)는 reload.spec.ts가 본다.
 
 test.use({ extensionBuild: 'fixture' });
 
@@ -154,5 +156,35 @@ test.describe('서비스 워커가 다시 시작함', () => {
     await expect(after.run(fixtureTask.name)).not.toHaveAttribute('aria-disabled', 'true');
     await after.run(fixtureTask.name).click();
     await expect(after.status).toHaveText('시험 작업: 진행 중이다.');
+  });
+});
+
+test.describe('확장을 다시 불러옴', () => {
+  test.use({ browserDebugging: true });
+
+  test('COM-7.6 COM-10 기대 동작 5 확장을 다시 불러오면 설정은 바꾼 값 그대로이고 작업 기록과 배지는 사라지며, 새로 고친 탭은 그 설정대로 동작한다', async ({
+    context,
+    extensionId,
+    profileDirectory,
+  }) => {
+    const { page, tabId, settings } = await prepare(context, extensionId);
+
+    await reloadExtension(profileDirectory, extensionId, 'fixture');
+    // 새 판의 확장 화면에서 읽는다(앞 서비스 워커는 끝났다).
+    const fresh = await openPopup(context, extensionId);
+    await expect
+      .poll(() =>
+        fresh.evaluate(async (id) => {
+          const { tasks }: Record<string, unknown> = await chrome.storage.session.get('tasks');
+          return { tasks: tasks ?? null, badge: await chrome.action.getBadgeText({ tabId: id }) };
+        }, tabId),
+      )
+      .toEqual({ tasks: null, badge: '' });
+    expect(await fresh.evaluate(() => chrome.storage.local.get('settings'))).toEqual(settings);
+    await fresh.close();
+
+    // 그 탭을 새로 고치면 새 판의 스크립트가 바꾼 설정대로(미디어 배속 켬) 동작한다.
+    await page.reload();
+    await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×']);
   });
 });

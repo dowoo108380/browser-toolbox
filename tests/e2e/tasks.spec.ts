@@ -6,10 +6,8 @@ import {
   fixtureSummary,
   fixtureTask,
 } from '../extension/fixture-tasks.ts';
-import { connectBrowserCdp } from './support/browser-cdp.ts';
 import {
   expect,
-  fixtureDistPath,
   fixtureOrigin,
   indicatorTexts,
   openPopup,
@@ -291,45 +289,5 @@ test('COM-2.5 키보드만으로 실행 기능을 찾아 실행한다', async ({
   await expect(popup.locator('.task')).toHaveText('시험 작업: 진행 중이다.');
   expect(await taskRecords(worker)).toEqual({
     [String(tabId)]: expect.objectContaining({ featureId: fixtureTask.id, status: 'running' }),
-  });
-});
-
-test.describe('다시 불러오기', () => {
-  test.use({ browserDebugging: true });
-
-  test('COM-10 기대 동작 5 확장을 다시 불러오면 작업 기록과 배지가 사라진다', async ({
-    context,
-    extensionId,
-    profileDirectory,
-  }) => {
-    const worker = await serviceWorkerOf(context);
-    const page = await openPage(context);
-    const tabId = await tabIdOf(worker, page);
-    const opened = await popupFor(context, extensionId, page);
-    await opened.run(fixtureTask.name).click();
-    await expect(opened.status).toHaveText('시험 작업: 진행 중이다.');
-    await opened.popup.close();
-    await release(worker, fixtureTask.id, 'succeed');
-    await expect.poll(() => badgeOf(worker, tabId)).toMatchObject({ text: '✓' });
-
-    // 사용자가 "다시 로드"를 누르는 것과 같은 일(R-04).
-    const cdp = await connectBrowserCdp(profileDirectory);
-    try {
-      expect(await cdp.send('Extensions.loadUnpacked', { path: fixtureDistPath })).toEqual({
-        id: extensionId,
-      });
-    } finally {
-      cdp.close();
-    }
-    // 새 판의 확장 화면에서 읽는다(앞 서비스 워커는 끝났다).
-    const fresh = await openPopup(context, extensionId);
-    await expect
-      .poll(() =>
-        fresh.evaluate(async (id) => {
-          const { tasks }: Record<string, unknown> = await chrome.storage.session.get('tasks');
-          return { tasks: tasks ?? null, badge: await chrome.action.getBadgeText({ tabId: id }) };
-        }, tabId),
-      )
-      .toEqual({ tasks: null, badge: '' });
   });
 });
