@@ -1,12 +1,10 @@
-import type { BrowserContext, Page, Worker } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { responseSchema, taskSeen, taskStart, v } from '../../src/contracts/index.ts';
 import {
-  type Release,
   fixtureFailure,
   fixtureOther,
   fixtureSummary,
   fixtureTask,
-  releaseKey,
 } from '../extension/fixture-tasks.ts';
 import { connectBrowserCdp } from './support/browser-cdp.ts';
 import {
@@ -19,76 +17,21 @@ import {
   serviceWorkerOf,
   test,
 } from './support/extension.ts';
+import {
+  badgeOf,
+  defaultTitle,
+  openPage,
+  popupFor,
+  release,
+  tabIdOf,
+  taskRecords,
+} from './support/tasks.ts';
 
 // COM-10 작업 결과 알림(결정 0012, 0024)을 실제 Chromium에서 본다. 제품에는 아직 실행 기능이 없어 시험 빌드(결정 0025)의
-// 시험 기능("시험 작업", "다른 시험 작업")을 쓴다. 일의 끝은 시험이 서비스 워커에서 storage.session에 쓴다. 팝업 문서는
-// 탭으로 열고(openPopupOn), 닫으면 팝업이 닫힌 것과 같이 연결이 끊긴다(결정 0024의 실험 4).
+// 시험 기능("시험 작업", "다른 시험 작업")을 쓴다. 일의 끝과 팝업 여닫기는 support/tasks.ts의 도우미가 한다.
 // 파일 저장(COM-10.1의 "파일이 저장되고")은 자막 저장(SUB-1)을 만들 때 본다.
 
 test.use({ extensionBuild: 'fixture' });
-
-const defaultTitle = 'Browser Toolbox';
-
-let serial = 0;
-
-// 그 기능의 일을 outcome으로 끝낸다.
-async function release(worker: Worker, featureId: string, outcome: Release['outcome']) {
-  serial += 1;
-  const value: Release = { featureId, outcome, serial };
-  await worker.evaluate(
-    async ({ key, written }) => {
-      await chrome.storage.session.set({ [key]: written });
-    },
-    { key: releaseKey, written: value },
-  );
-}
-
-// 그 페이지의 탭 id. Playwright가 연 페이지는 모두 한 창에 있다(결정 0023의 실험). 앞으로 가져온 뒤 그 창의 지금 탭으로 찾는다.
-async function tabIdOf(worker: Worker, page: Page): Promise<number> {
-  await page.bringToFront();
-  return worker.evaluate(async () => {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (tab?.id === undefined) throw new Error('지금 탭이 없다.');
-    return tab.id;
-  });
-}
-
-function badgeOf(worker: Worker, tabId: number) {
-  return worker.evaluate(
-    async (id) => ({
-      text: await chrome.action.getBadgeText({ tabId: id }),
-      title: await chrome.action.getTitle({ tabId: id }),
-    }),
-    tabId,
-  );
-}
-
-function records(worker: Worker): Promise<unknown> {
-  return worker.evaluate(async () => {
-    const { tasks }: Record<string, unknown> = await chrome.storage.session.get('tasks');
-    return tasks ?? null;
-  });
-}
-
-// 그 페이지를 지금 탭으로 둔 팝업. 시험 기능은 "탭" 범주에 있다.
-async function popupFor(context: BrowserContext, extensionId: string, page: Page) {
-  const popup = await openPopupOn(context, extensionId, page);
-  await popup.getByRole('tab', { name: '탭' }).click();
-  const run = (name: string) => popup.getByRole('button', { name, exact: true });
-  await expect(run(fixtureTask.name)).toBeVisible();
-  return {
-    popup,
-    run,
-    status: popup.locator('.task'),
-    reason: (featureId: string) => popup.locator(`#feature-unavailable-${featureId}`),
-  };
-}
-
-async function openPage(context: BrowserContext, path = 'blank.html'): Promise<Page> {
-  const page = await context.newPage();
-  await page.goto(`${fixtureOrigin}/${path}`);
-  return page;
-}
 
 // 페이지 위 알림의 글(닫힌 shadow root 안, CDP로 읽는다). 다른 확장 요소(배속 표시창)는 시험 기능만 쓰는 이 시험에 없다.
 const noticeTexts = (page: Page) => indicatorTexts(page);
@@ -126,7 +69,7 @@ test('COM-10.1 COM-10.3 COM-10.4 팝업을 바로 닫아도 작업이 끝나고,
   const after = await popupFor(context, extensionId, page);
   await expect(after.status).toHaveText(`시험 작업: 끝났다. ${fixtureSummary}`);
   // COM-10.4 보인 결과는 지워지고 배지도 지워진다.
-  await expect.poll(() => records(worker)).toEqual({});
+  await expect.poll(() => taskRecords(worker)).toEqual({});
   await expect.poll(() => badgeOf(worker, tabId)).toEqual({ text: '', title: defaultTitle });
   await after.popup.close();
   const again = await popupFor(context, extensionId, page);
@@ -175,7 +118,7 @@ test('COM-10.5 탭 A에서 시작한 작업의 결과는 탭 B의 팝업과 배�
   const inB = await popupFor(context, extensionId, pageB);
   await expect(inB.run(fixtureOther.name)).not.toHaveAttribute('aria-disabled', 'true');
   await expect(inB.status).toHaveText('');
-  expect(await records(worker)).toEqual({
+  expect(await taskRecords(worker)).toEqual({
     [String(tabA)]: expect.objectContaining({ status: 'succeeded' }),
   });
 });
@@ -196,14 +139,14 @@ test('COM-10.6 탭을 닫으면 그 탭의 작업 기록(진행 중이든 끝났
   }
   await release(worker, fixtureOther.id, 'succeed');
   await expect
-    .poll(async () => Object.values((await records(worker)) ?? {}).map((task: unknown) => task))
+    .poll(async () => Object.values((await taskRecords(worker)) ?? {}).map((task: unknown) => task))
     .toEqual([
       expect.objectContaining({ status: 'running' }),
       expect.objectContaining({ status: 'succeeded' }),
     ]);
   await running.close();
   await finished.close();
-  await expect.poll(() => records(worker)).toEqual({});
+  await expect.poll(() => taskRecords(worker)).toEqual({});
 });
 
 test('COM-10.7 작업이 진행 중인 탭의 팝업은 다른 작업 기능에 이유를 보이고, 서비스 워커에 직접 보내도 거절된다', async ({
@@ -230,7 +173,7 @@ test('COM-10.7 작업이 진행 중인 탭의 팝업은 다른 작업 기능에 
     ok: false,
     error: { kind: 'unavailable', message: '이 탭에서 시험 작업 진행 중이다. 끝난 뒤 다시 한다.' },
   });
-  expect(await records(worker)).toEqual({
+  expect(await taskRecords(worker)).toEqual({
     [String(tabId)]: expect.objectContaining({ featureId: fixtureTask.id, status: 'running' }),
   });
 });
@@ -262,7 +205,7 @@ test('COM-10.8 결과를 본 확인이 다음 작업을 시작한 뒤에 닿아�
   await expect.poll(() => badgeOf(worker, tabId)).toEqual({ text: '', title: defaultTitle });
   const late = await send(taskSeen.type, { tabId, taskId });
   expect(late).toEqual({ ok: true, value: null });
-  expect(await records(worker)).toEqual({
+  expect(await taskRecords(worker)).toEqual({
     [String(tabId)]: expect.objectContaining({ featureId: fixtureOther.id, status: 'running' }),
   });
   await release(worker, fixtureOther.id, 'succeed');
@@ -284,7 +227,7 @@ test('결정 0024 그 탭을 보는 팝업이 열려 있는 동안 끝나면 페
   await page.bringToFront();
   await release(worker, fixtureTask.id, 'succeed');
   await expect(opened.status).toHaveText(`시험 작업: 끝났다. ${fixtureSummary}`);
-  await expect.poll(() => records(worker)).toEqual({});
+  await expect.poll(() => taskRecords(worker)).toEqual({});
   await expect.poll(() => badgeOf(worker, tabId)).toEqual({ text: '', title: defaultTitle });
   // 알림은 끝을 쓴 뒤 바로 보내므로, 기록이 지워질 때까지 없었으면 보내지 않은 것이다. 조금 더 본다.
   await page.waitForTimeout(500);
@@ -346,7 +289,7 @@ test('COM-2.5 키보드만으로 실행 기능을 찾아 실행한다', async ({
   await expect(button).not.toHaveAttribute('aria-disabled', 'true');
   await popup.keyboard.press('Enter');
   await expect(popup.locator('.task')).toHaveText('시험 작업: 진행 중이다.');
-  expect(await records(worker)).toEqual({
+  expect(await taskRecords(worker)).toEqual({
     [String(tabId)]: expect.objectContaining({ featureId: fixtureTask.id, status: 'running' }),
   });
 });
