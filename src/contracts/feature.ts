@@ -8,9 +8,12 @@ export type Category = (typeof categories)[number];
 // 기능이 요청하는 Chrome 권한. 기능을 만들며 필요한 것을 더한다(결정 0009).
 type FeaturePermission = never;
 
-// 콘텐츠 스크립트를 실을 곳. YouTube·chatgpt.com 전용 묶음은 그 사이트의 기능을 만들 때 더한다.
-interface ContentTarget {
+// 기능이 페이지에 작용하는 곳(아키텍처 2장). 사이트는 빌드가 그 기능의 페이지 쪽 일을 넣을 콘텐츠 스크립트 묶음을 고르고
+// (scripts/registry.ts), 프레임은 실행 틀이 그 프레임에서 시작할 기능을 고른다(src/page/runtime.ts). 묶음은 모든 프레임에
+// 실린다. YouTube·chatgpt.com 전용 묶음은 그 사이트의 기능을 만들 때 더한다.
+export interface ContentTarget {
   readonly sites: 'all';
+  // 'top'이면 탭의 최상위 프레임에서만 작용한다.
   readonly frames: 'all' | 'top';
 }
 
@@ -53,6 +56,16 @@ export interface ActionFeature extends FeatureBase {
 
 export type FeatureDefinition = ToggleFeature | ActionFeature;
 
+// 페이지에 작용하는 켜고 끄기 기능. 페이지 쪽 일(definePagePart)은 이것만 받는다.
+export type PageToggleFeature<S extends ToggleSettings = ToggleSettings> = ToggleFeature<S> & {
+  readonly content: ContentTarget;
+};
+
+// 페이지에 작용한다고 적은 정의는 그 타입을 그대로 돌려준다. 그래서 페이지에 작용하지 않는 기능(content: null)에 페이지 쪽
+// 일을 만들면 타입 검사가 막는다.
+export function defineFeature<S extends ToggleSettings>(
+  definition: PageToggleFeature<S>,
+): PageToggleFeature<S>;
 export function defineFeature<S extends ToggleSettings>(
   definition: ToggleFeature<S>,
 ): ToggleFeature<S>;

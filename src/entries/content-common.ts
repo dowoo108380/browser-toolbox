@@ -18,6 +18,8 @@ const request = chromeRequester();
 startPageRuntime({
   parts: pageParts,
   context: { window, document },
+  // iframe의 최상위 창은 이 창이 아니다(출처가 달라도 견줄 수 있다).
+  topFrame: window.top === window,
   subscribe: (handlers) =>
     startSettingsReader(
       {

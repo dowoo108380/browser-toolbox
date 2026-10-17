@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청(404)이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>외부 화면 요소가 최상위에만 있는 페이지</title>
+    <!--
+      기능 정의의 프레임 범위(content.frames)를 보는 시험 페이지. 최상위 문서에는 시험 빌드의 "시험 요소 기능"이 기대는
+      "시험 대상 영역"과 영상이 있고, iframe(포트가 다른 출처)에는 영상만 있고 그 영역이 없다. 특정 사이트를 본뜨지 않았다.
+    -->
+    <style>
+      video {
+        display: block;
+        width: 320px;
+        height: 180px;
+        background: #222;
+      }
+      iframe {
+        width: 400px;
+        height: 240px;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section role="region" aria-label="시험 대상 영역">
+        <p>시험 대상</p>
+      </section>
+      <video id="top-video"></video>
+      <!-- 포트가 다른 출처의 iframe(tests/server.ts가 두 포트를 연다). -->
+      <iframe id="frame" title="영상 iframe" src="http://127.0.0.1:4174/video-only.html"></iframe>
+    </main>
+  </body>
+</html>

@@ -37,6 +37,9 @@ export interface PageProblem {
 interface PageRuntimeDeps {
   readonly parts: readonly PagePart[];
   readonly context: PageContext;
+  // 이 문서가 탭의 최상위 프레임인지. 진입점이 자기 창으로 정해 넘긴다. 실행 틀이 context.window로 정하지 않는 것은
+  // DOM 시험이 Vitest의 iframe 안에서 돌기 때문이다.
+  readonly topFrame: boolean;
   readonly subscribe: (handlers: SettingsReaderHandlers) => () => void;
   readonly report: (problem: PageProblem) => Promise<Result<null, AppError>>;
   readonly isConnected: () => boolean;
@@ -59,6 +62,10 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
 
   let retired = false;
   let unsubscribe: () => void = () => undefined;
+
+  // 이 프레임에서 작용하는 기능. 최상위에서만 작용한다고 정의한 기능(content.frames 'top')은 iframe에서 시작하지 않는다.
+  // 콘텐츠 스크립트는 모든 프레임에 실리므로(아키텍처 2장) 정의의 프레임 범위는 여기서 지킨다.
+  const parts = deps.topFrame ? deps.parts : deps.parts.filter((part) => part.frames === 'all');
 
   // 시작하는 방법: 이 실행의 자원 범위와 외부 화면 요소 찾기를 받아 기능을 시작한다.
   type Start = (run: Pick<PageStart, 'scope' | 'find'>) => void;
@@ -196,7 +203,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   const apply = (snapshot: Snapshot) => {
     dispatch({
       type: 'apply',
-      desired: deps.parts.map((part) => ({
+      desired: parts.map((part) => ({
         featureId: part.featureId,
         key: JSON.stringify(snapshot.features.get(part.featureId) ?? null),
         start: ({ scope, find }: Pick<PageStart, 'scope' | 'find'>) => {

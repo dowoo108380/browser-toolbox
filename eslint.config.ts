@@ -175,8 +175,8 @@ export default defineConfig(
     },
   },
   {
-    // manifest의 키 이름은 Chrome이 정했다(snake_case).
-    files: ['scripts/manifest.ts'],
+    // manifest의 키 이름은 Chrome이 정했다(snake_case). 그 시험도 같은 키로 manifest를 견준다.
+    files: ['scripts/manifest.ts', 'scripts/manifest.test.ts'],
     rules: {
       '@typescript-eslint/naming-convention': [
         'error',

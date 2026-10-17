@@ -528,6 +528,7 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
   let pings = 0;
   const other: PagePart = {
     featureId: 'other',
+    frames: 'all',
     start: (_snapshot, { scope }) => {
       scope.listen(document, 'test-ping', () => {
         pings += 1;
@@ -541,6 +542,7 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
     startPageRuntime({
       parts: [page, other],
       context: { window, document },
+      topFrame: true,
       subscribe: (next) => {
         handlers = next;
         return () => undefined;

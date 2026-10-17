@@ -1,4 +1,4 @@
-import type { BrowserContext, Page, Worker } from '@playwright/test';
+import type { BrowserContext, Frame, Page, Worker } from '@playwright/test';
 import { elementTimeoutMs, pageElementAttribute } from '../../src/dom/index.ts';
 import {
   appliedAttribute,
@@ -18,7 +18,8 @@ import {
 // COM-6 외부 화면 변경 드러내기(결정 0026)를 실제 Chromium에서 본다. 제품에는 아직 외부 사이트 기능이 없어 시험 빌드
 // (결정 0025)의 "시험 요소 기능"(시험 페이지의 "시험 대상 영역"에 기댐)을 쓴다. 찾기 시작한 때부터의 15초는 실제로
 // 기다린다. 5분(COM-6.6)과 숨겨진 1분(COM-6.7), 켠 때부터 셈(COM-6.5)은 가짜 시계로 실행 틀의 DOM 시험
-// (src/page/runtime.dom.test.ts)에서 본다.
+// (src/page/runtime.dom.test.ts)에서 본다. 시험 요소 기능은 최상위에서만 작용한다고 정의되어 있어, 기능 정의의 프레임
+// 범위도 여기서 본다.
 
 test.use({ extensionBuild: 'fixture' });
 
@@ -145,4 +146,38 @@ test('COM-6.1 COM-6.2 COM-6.3 COM-6.4 대상 요소가 없으면 15초 뒤 그 �
 
   // COM-6.4 페이지 콘솔에 확장이 낸 처리되지 않은 오류가 없다.
   expect(pageErrors).toEqual([]);
+});
+
+test('결정 0004 최상위에서만 작용하는 기능(시험 요소 기능)은 iframe에서 시작하지 않고, 모든 프레임에서 작용하는 기능(미디어 배속)은 두 프레임에서 작용한다', async ({
+  context,
+  extensionId,
+}) => {
+  const page = await context.newPage();
+  // 최상위에는 시험 대상 영역과 영상이, iframe에는 영상만 있다.
+  await page.goto(`${fixtureOrigin}/elements-frames.html`);
+  const child = page.frames().find((frame) => frame !== page.mainFrame());
+  if (child === undefined) throw new Error('iframe이 없다.');
+  const hasWaiting = (frame: Frame) =>
+    frame.evaluate((name) => document.documentElement.hasAttribute(name), waitingAttribute);
+
+  const { popup, feature } = await popupOn(context, extensionId, page);
+  await feature.check();
+  // 최상위에서 대상 영역을 찾아 작용한다.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ([selector, name]) => document.querySelector(selector)?.hasAttribute(name) ?? false,
+        [targetSelector, appliedAttribute] as const,
+      ),
+    )
+    .toBe(true);
+  expect(await hasWaiting(page.mainFrame())).toBe(true);
+  // 그 설정이 저장된 뒤에 미디어 배속을 켠다. 그래서 iframe에 배속 표시창이 뜬 때는 그 프레임의 실행 틀이 시험 요소
+  // 기능도 켜진 설정을 적용한 뒤다(서비스 워커는 저장된 설정에 바뀐 것만 덧씌워 쓴다).
+  const speed = await switchOn(popup, '미디어', '미디어 배속');
+  await speed.check();
+  await popup.close();
+  await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×']);
+  // iframe 문서에는 시험 요소 기능이 시작하며 다는 표시가 없다(시작했다면 대상이 없어 15초 뒤 찾지 못함도 기록한다).
+  expect(await hasWaiting(child)).toBe(false);
 });

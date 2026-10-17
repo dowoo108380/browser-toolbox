@@ -14,4 +14,16 @@ describe('manifest', () => {
   it('결정 0005·0009 지금 기능에 필요한 권한만 둔다(unlimitedStorage 없음)', () => {
     expect(manifest['permissions']).toEqual(['scripting', 'storage']);
   });
+
+  it('결정 0004 공통 콘텐츠 스크립트를 모든 http·https 페이지(content.sites "all")의 모든 프레임에 싣는다. 최상위에서만 작용하는 기능은 실행 틀이 거른다', () => {
+    expect(manifest['content_scripts']).toEqual([
+      {
+        matches: ['http://*/*', 'https://*/*'],
+        js: ['content-common.js'],
+        all_frames: true,
+        match_origin_as_fallback: true,
+        run_at: 'document_start',
+      },
+    ]);
+  });
 });

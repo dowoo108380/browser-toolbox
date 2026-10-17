@@ -1,4 +1,4 @@
-import type { ToggleFeature, ToggleSettings } from '../contracts/index.ts';
+import type { ContentTarget, PageToggleFeature, ToggleSettings } from '../contracts/index.ts';
 import type { NamedElement, Scope } from '../dom/index.ts';
 import { type Snapshot, settingsOf } from '../storage/index.ts';
 
@@ -23,6 +23,8 @@ export interface PageStart extends PageContext {
 
 export interface PagePart {
   readonly featureId: string;
+  // 이 기능이 작용하는 프레임(기능 정의의 content.frames). 'top'이면 실행 틀은 탭의 최상위 프레임에서만 시작한다.
+  readonly frames: ContentTarget['frames'];
   // 이 기능의 설정이 켜짐이면 시작한다. 꺼짐이면 아무것도 하지 않는다.
   // 기능이 페이지에 더한 화면 요소, 이벤트 처리, 타이머, 관찰은 모두 만든 즉시 scope에 맡긴다.
   // 실행 틀이 scope를 닫으면 모두 사라진다(COM-1.3). 시작 도중에 예외를 던져도 그때까지 맡긴 것은 치운다.
@@ -30,11 +32,12 @@ export interface PagePart {
 }
 
 export function definePagePart<S extends ToggleSettings>(
-  definition: ToggleFeature<S>,
+  definition: PageToggleFeature<S>,
   start: (settings: S, context: PageStart) => void,
 ): PagePart {
   return {
     featureId: definition.id,
+    frames: definition.content.frames,
     start: (snapshot, context) => {
       const settings = settingsOf(snapshot, definition);
       if (settings.enabled) start(settings, context);

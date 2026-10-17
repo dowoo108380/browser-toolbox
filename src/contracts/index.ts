@@ -1,7 +1,9 @@
 export {
   type ActionFeature,
   type Category,
+  type ContentTarget,
   type FeatureDefinition,
+  type PageToggleFeature,
   type ToggleFeature,
   type ToggleSettings,
   categories,

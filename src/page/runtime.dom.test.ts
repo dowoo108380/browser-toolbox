@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type PageStatus, pageRuntimeKey, retireEventName } from '../contracts/index.ts';
+import * as z from 'zod/mini';
+import {
+  type PageStatus,
+  defineFeature,
+  pageRuntimeKey,
+  retireEventName,
+} from '../contracts/index.ts';
 import {
   type NamedElement,
   claimAttribute,
@@ -11,7 +17,7 @@ import {
 import { retireInFrame } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
-import type { PagePart } from './part.ts';
+import { type PagePart, definePagePart } from './part.ts';
 import { type PageProblem, startPageRuntime } from './runtime.ts';
 
 // 테스트가 만든 실행 틀. 테스트가 끝나면 모두 물러나게 해 다음 테스트에 남지 않게 한다(quality 104).
@@ -28,7 +34,8 @@ function snapshot(features: Record<string, unknown>): Snapshot {
   return { features: new Map(Object.entries(features)), sites: new Map() };
 }
 
-function setup(parts: readonly PagePart[], connected = true) {
+// topFrame은 이 문서가 탭의 최상위 프레임인지다. 시험이 도는 문서는 Vitest의 iframe이라 실제 값과 상관없이 시험이 정한다.
+function setup(parts: readonly PagePart[], connected = true, topFrame = true) {
   let handlers: SettingsReaderHandlers | undefined;
   let subscriptions = 0;
   let unsubscribed = 0;
@@ -42,6 +49,7 @@ function setup(parts: readonly PagePart[], connected = true) {
   const deps = {
     parts,
     context: { window, document },
+    topFrame,
     subscribe: (next: SettingsReaderHandlers) => {
       subscriptions += 1;
       handlers = next;
@@ -101,6 +109,7 @@ function countingPart(featureId: string) {
   const counts = { started: 0, disposed: 0, pings: 0 };
   const part: PagePart = {
     featureId,
+    frames: 'all',
     start: (value, { scope }) => {
       if (!isEnabled(value, featureId)) return;
       counts.started += 1;
@@ -148,6 +157,7 @@ describe('콘텐츠 스크립트 실행 틀', () => {
   it('quality 010 한 기능의 시작이 실패해도 다른 기능은 시작하고 실패를 기록한다', () => {
     const broken: PagePart = {
       featureId: 'broken',
+      frames: 'all',
       start: () => {
         throw new Error('고장');
       },
@@ -254,6 +264,7 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
   // 켜지면 화면 요소 하나를 만드는 기능.
   const hostPart: PagePart = {
     featureId: 'host',
+    frames: 'all',
     start: (_value, { scope }) => {
       const host = createIsolatedHost(document, { name: 'test', css: '', parent: document.body });
       scope.defer(host.remove);
@@ -304,6 +315,7 @@ describe('결정 0014 기능의 자원 범위와 실패 격리', () => {
     document.body.append(target);
     const part: PagePart = {
       featureId: 'failing',
+      frames: 'all',
       start: (value, { scope }) => {
         if (!isEnabled(value, 'failing')) return;
         counts.started += 1;
@@ -415,6 +427,7 @@ describe('결정 0014 기능의 자원 범위와 실패 격리', () => {
     const cleanup = vi.fn();
     const part: PagePart = {
       featureId: 'cleanup',
+      frames: 'all',
       start: (value, { scope }) => {
         if (!isEnabled(value, 'cleanup')) return;
         scope.defer(cleanup);
@@ -498,6 +511,7 @@ describe('결정 0008 보조 방법: 물러남 이벤트 없이 연결만 끊긴
     // 시작하면서 자기가 듣는 페이지 사건을 곧바로 일으키는 기능. 그 콜백 앞에서 실행 틀이 연결을 확인한다.
     const early: PagePart = {
       featureId: 'early',
+      frames: 'all',
       start: (value, { scope }) => {
         if (!isEnabled(value, 'early')) return;
         scope.listen(document, 'test-early', () => undefined);
@@ -583,6 +597,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     const counts = { started: 0, applied: 0 };
     const part: PagePart = {
       featureId: 'region',
+      frames: 'all',
       start: (value, { scope, find }) => {
         if (!isEnabled(value, 'region')) return;
         counts.started += 1;
@@ -608,6 +623,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     const counts = { started: 0, applied: 0 };
     const part: PagePart = {
       featureId: 'edit',
+      frames: 'all',
       start: (value, { scope, find }) => {
         if (!isEnabled(value, 'edit')) return;
         counts.started += 1;
@@ -804,6 +820,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     const counts = { started: 0 };
     const part: PagePart = {
       featureId: 'fragile',
+      frames: 'all',
       start: (value, { find }) => {
         if (!isEnabled(value, 'fragile')) return;
         counts.started += 1;
@@ -824,5 +841,94 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     add('시험 영역');
     await settle();
     expect(counts.started).toBe(1);
+  });
+});
+
+describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames, 아키텍처 2장)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // 이 문서에 없는 외부 화면 요소.
+  const missing: NamedElement = { id: 'test.missing', name: '없는 영역', find: () => null };
+
+  // 그 프레임 범위로 정의한 켜고 끄기 기능과 그 페이지 쪽 일. 켜지면 시작을 세고 문서 루트에 표시를 단 뒤 없는 영역을
+  // 찾는다. 표시는 범위에 맡긴다.
+  function framedFeature(id: string, frames: 'all' | 'top') {
+    const definition = defineFeature({
+      id,
+      requirements: [],
+      name: id,
+      description: `${id} 시험`,
+      category: 'page',
+      kind: 'toggle',
+      content: { sites: 'all', frames },
+      permissions: [],
+      settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+    });
+    const counts = { started: 0 };
+    const attribute = `data-test-${id}`;
+    const part = definePagePart(definition, (_settings, { scope, find }) => {
+      counts.started += 1;
+      const root = document.documentElement;
+      root.setAttribute(attribute, '');
+      scope.defer(() => {
+        root.removeAttribute(attribute);
+      });
+      find(missing, () => undefined);
+    });
+    return { part, counts, marked: () => document.documentElement.hasAttribute(attribute) };
+  }
+
+  const notFound = (featureId: string): PageProblem => ({
+    featureId,
+    kind: 'not-found',
+    element: { id: missing.id, name: missing.name },
+  });
+
+  it('iframe의 실행 틀은 최상위에서만 작용하는 기능을 시작하지 않아 문서를 바꾸지 않고 15초가 지나도 찾지 못함을 기록하지 않는다. 모든 프레임에서 작용하는 기능은 시작한다', () => {
+    const topOnly = framedFeature('top-only', 'top');
+    const everywhere = framedFeature('everywhere', 'all');
+    const runtime = setup([topOnly.part, everywhere.part], true, false);
+    runtime.apply(snapshot({ 'top-only': { enabled: true }, everywhere: { enabled: true } }));
+    expect(topOnly.counts.started).toBe(0);
+    expect(topOnly.marked()).toBe(false);
+    expect(everywhere.counts.started).toBe(1);
+    expect(everywhere.marked()).toBe(true);
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toEqual([notFound('everywhere')]);
+    expect(runtime.status()?.notFound.map(({ featureId }) => featureId)).toEqual(['everywhere']);
+  });
+
+  it('페이지에 작용하지 않는 기능(content: null)에는 페이지 쪽 일을 만들 수 없다(타입 검사가 막는다)', () => {
+    const nowhere = defineFeature({
+      id: 'nowhere',
+      requirements: [],
+      name: 'nowhere',
+      description: 'nowhere 시험',
+      category: 'tabs',
+      kind: 'toggle',
+      content: null,
+      permissions: [],
+      settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+    });
+    // @ts-expect-error 페이지에 작용한다고 적지 않은 정의다. 실행하면 정의에 프레임 범위가 없어 실패한다.
+    const make = () => definePagePart(nowhere, () => undefined);
+    expect(make).toThrow(TypeError);
+  });
+
+  it('최상위 프레임의 실행 틀은 두 기능을 모두 시작한다', () => {
+    const topOnly = framedFeature('top-only', 'top');
+    const everywhere = framedFeature('everywhere', 'all');
+    const runtime = setup([topOnly.part, everywhere.part], true, true);
+    runtime.apply(snapshot({ 'top-only': { enabled: true }, everywhere: { enabled: true } }));
+    expect(topOnly.counts.started).toBe(1);
+    expect(everywhere.counts.started).toBe(1);
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toEqual([notFound('top-only'), notFound('everywhere')]);
   });
 });
