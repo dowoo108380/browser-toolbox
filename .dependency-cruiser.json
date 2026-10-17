@@ -156,6 +156,13 @@
       "to": { "path": "node_modules/preact/" }
     },
     {
+      "name": "page-scripts-own-features",
+      "comment": "웹 페이지에 실리는 콘텐츠 스크립트는 기능 목록을 싣지 않는다. 그 묶음에 페이지 쪽 일이 있는 기능의 정의만 등록 목록으로 안다(결정 0027).",
+      "severity": "error",
+      "from": { "path": "^src/entries/content-[^/]+\\.ts$" },
+      "to": { "path": "^src/features/list\\.ts$", "reachable": true }
+    },
+    {
       "name": "no-node-in-src",
       "comment": "확장 코드는 Node 모듈을 쓰지 않는다.",
       "severity": "error",

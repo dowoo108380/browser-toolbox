@@ -71,7 +71,7 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
     expect(source).toContain(
       "import { page as mediaSpeed } from '../../features/media-speed/page.ts';",
     );
-    expect(source).toContain('export const pageParts: readonly PagePart[] = [mediaSpeed];');
+    expect(source).toContain('export const pageParts: readonly FeaturePagePart[] = [mediaSpeed];');
     expect(source).not.toContain('noPage');
     expect(source).not.toContain('notOnPages');
   });

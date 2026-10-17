@@ -17,7 +17,8 @@ const header = [
   '// 기능을 더하거나 뺀 뒤 `pnpm generate`를 실행한다.',
 ];
 
-// 모든 사이트에 실리는 콘텐츠 스크립트(content-common)가 시작할 기능의 페이지 쪽 일.
+// 모든 사이트에 실리는 콘텐츠 스크립트(content-common)가 시작할 기능의 페이지 쪽 일. 그 묶음이 아는 기능 정의도 이것뿐이다
+// (FeaturePagePart.feature, 결정 0027).
 export function contentCommonSource(features: readonly FeatureDefinition[], root: string): string {
   const parts = features.filter(
     (feature) =>
@@ -26,13 +27,13 @@ export function contentCommonSource(features: readonly FeatureDefinition[], root
   );
   const lines = [
     ...header,
-    "import type { PagePart } from '../../page/index.ts';",
+    "import type { FeaturePagePart } from '../../page/index.ts';",
     ...parts.map(
       (feature) =>
         `import { page as ${camelCase(feature.id)} } from '../../features/${feature.id}/page.ts';`,
     ),
     '',
-    `export const pageParts: readonly PagePart[] = [${parts.map((feature) => camelCase(feature.id)).join(', ')}];`,
+    `export const pageParts: readonly FeaturePagePart[] = [${parts.map((feature) => camelCase(feature.id)).join(', ')}];`,
     '',
   ];
   return lines.join('\n');

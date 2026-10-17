@@ -1,4 +1,9 @@
-import type { ContentTarget, PageToggleFeature, ToggleSettings } from '../contracts/index.ts';
+import type {
+  ContentTarget,
+  PageToggleFeature,
+  ToggleFeature,
+  ToggleSettings,
+} from '../contracts/index.ts';
 import type { NamedElement, Scope } from '../dom/index.ts';
 import { type Snapshot, settingsOf } from '../storage/index.ts';
 
@@ -31,13 +36,21 @@ export interface PagePart {
   readonly start: (snapshot: Snapshot, context: PageStart) => void;
 }
 
+// 기능 정의로 만든 페이지 쪽 일. 콘텐츠 스크립트 묶음은 기능 목록을 싣지 않고, 그 묶음에 든 이 정의들의 설정만 읽기
+// 도우미에 넘긴다. 그래서 페이지에 작용하지 않는 기능이 늘어도 모든 페이지에 실리는 비용(정의를 싣고 스키마를 만들고
+// 항목을 검증하는 일)은 늘지 않는다. 다른 기능의 항목은 모르는 기능의 것처럼 보지 않는다(결정 0027, 0011 읽는 쪽 계약 4).
+export interface FeaturePagePart extends PagePart {
+  readonly feature: ToggleFeature;
+}
+
 export function definePagePart<S extends ToggleSettings>(
   definition: PageToggleFeature<S>,
   start: (settings: S, context: PageStart) => void,
-): PagePart {
+): FeaturePagePart {
   return {
     featureId: definition.id,
     frames: definition.content.frames,
+    feature: definition,
     start: (snapshot, context) => {
       const settings = settingsOf(snapshot, definition);
       if (settings.enabled) start(settings, context);
