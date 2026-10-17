@@ -61,4 +61,4 @@ chrome.storage.session.set({
 
 ## 기록
 
-확인한 날짜, Chrome 버전, 빌드(커밋), 각 단계의 결과와 다른 점을 `docs/status.md`에 적는다.
+확인한 날짜, Chrome 버전, 빌드(커밋), 각 단계의 결과와 다른 점을 `docs/history.md`의 맨 아래에 더한다.
