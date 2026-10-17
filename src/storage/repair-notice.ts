@@ -1,4 +1,4 @@
-import * as z from 'zod/mini';
+import { v } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
 import { type AppError, appError } from '../shared/index.ts';
 import type { SiteItem } from './items.ts';
@@ -27,13 +27,13 @@ export const noRepair: RepairScope = { whole: false, features: [], sites: [] };
 
 export const wholeRepair: RepairScope = { whole: true, features: [], sites: [] };
 
-const noticeSchema = z.object({
-  stamp: z.int().check(z.minimum(1)),
-  whole: z.boolean(),
-  features: z.array(z.string()),
+const noticeSchema = v.object({
+  stamp: v.pipe(v.int(), v.minValue(1)),
+  whole: v.boolean(),
+  features: v.array(v.string()),
   // 사이트 항목은 결정 0017에서 더했다. 그 전에 남은 기록에는 없으므로 없으면 빈 목록으로 읽는다.
-  sites: z._default(
-    z.array(z.object({ host: z.string(), featureId: z.nullable(z.string()) })),
+  sites: v.optional(
+    v.array(v.object({ host: v.string(), featureId: v.nullable(v.string()) })),
     () => [],
   ),
 });
@@ -41,8 +41,8 @@ const noticeSchema = z.object({
 // 기록이 없거나 형식이 틀리면 null이다. 이 기록은 알림을 돕는 것이라, 틀렸으면 없는 것으로 보고
 // 서비스 워커가 다음에 새로 쓴다(문제 기록과 같다). 고친 사실 자체는 문제 기록에도 남는다.
 export function parseRepairNotice(raw: unknown): RepairNotice | null {
-  const parsed = noticeSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  const parsed = v.safeParse(noticeSchema, raw);
+  return parsed.success ? parsed.output : null;
 }
 
 export function isEmptyRepair(scope: RepairScope): boolean {

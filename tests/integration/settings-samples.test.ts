@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { featuresWithSettings, storageEnsureReady } from '../../src/contracts/index.ts';
+import { featuresWithSettings, storageEnsureReady, v } from '../../src/contracts/index.ts';
 import { features } from '../../src/features/list.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import {
@@ -48,8 +48,8 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 function currentSample(file: string, value: unknown): StoredSettings {
-  const parsed = settingsFormat.structure.safeParse(value);
-  if (parsed.success) return parsed.data;
+  const parsed = v.safeParse(settingsFormat.structure, value);
+  if (parsed.success) return parsed.output;
   throw new Error(
     `${file}이 지금 형식(버전 ${String(settingsFormat.version)})의 구조가 아니다. 옛 형식 표본의 기준은 첫 형식 변경 때 정한다(결정 0021).`,
   );

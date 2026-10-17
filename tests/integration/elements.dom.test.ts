@@ -1,13 +1,13 @@
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as z from 'zod/mini';
 import {
   type PageStatus,
   defineFeature,
   featuresWithSettings,
   problemReport,
   retireEventName,
+  v,
 } from '../../src/contracts/index.ts';
 import { type NamedElement, pageElementAttribute } from '../../src/dom/index.ts';
 import { definePagePart, startPageRuntime } from '../../src/page/index.ts';
@@ -53,7 +53,7 @@ const regionFeature = defineFeature({
   kind: 'toggle',
   content: { sites: 'all', frames: 'top' },
   permissions: [],
-  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
 });
 
 // 켜지면 문서 루트에 표시를 달고(반쯤 적용한 변경), 시험 영역을 찾으면 그 영역에도 표시를 단다.

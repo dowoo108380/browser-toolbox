@@ -1,5 +1,5 @@
+import { v } from '../contracts/index.ts';
 import { describe, expect, it } from 'vitest';
-import * as z from 'zod/mini';
 import { specs, stored } from '../../tests/support/settings.ts';
 import { createFakeStore } from '../platform/fake.ts';
 import { appError, err, ok } from '../shared/index.ts';
@@ -343,13 +343,13 @@ describe('COM-3.9 설정 바꾸기의 크기 한도는 지금 저장된 값과 �
   const sample = (label: string) => ({ sample: { enabled: false, step: 0.1, label } });
   const longLabel = 'b'.repeat(200);
 
-  // 한도 가까이 찬 사이트 규칙(a.test)과 손상된 사이트 항목(z.test)이 함께 저장된 값에서 기능 설정(sample의 label)을 늘린다.
+  // 한도 가까이 찬 사이트 규칙(a.test)과 손상된 사이트 항목(v.test)이 함께 저장된 값에서 기능 설정(sample의 label)을 늘린다.
   // 바꾼 값(next)은 손상 항목을 지운 값(repaired)보다 크고 한도를 넘는다. 저장된 값보다 몇 바이트 큰지(more)는 손상 항목의 길이로 맞춘다.
   // 항목이 모두 빠진 사이트는 빈 객체로 남는다(결정 0017).
   function nearLimit(more: number) {
     const sites = (rule: string, zTest: unknown) => ({
       'a.test': { sample: { rules: [rule] } },
-      'z.test': zTest,
+      'v.test': zTest,
     });
     const rule = 'a'.repeat(limit - 100 - bytes(stored(t + 1, sample(''), sites('', {}))));
     const withCorrupt = (length: number) =>
@@ -376,7 +376,7 @@ describe('COM-3.9 설정 바꾸기의 크기 한도는 지금 저장된 값과 �
       });
       expect(store.peek(settingsKey)).toEqual(next);
       expect(notices).toEqual([
-        { whole: false, features: [], sites: [{ host: 'z.test', featureId: 'sample' }] },
+        { whole: false, features: [], sites: [{ host: 'v.test', featureId: 'sample' }] },
       ]);
       expect(problems).toEqual([{ featureId: 'sample', kind: 'unexpected' }]);
     },
@@ -398,11 +398,11 @@ describe('COM-3.9 설정 바꾸기의 크기 한도는 지금 저장된 값과 �
   });
 
   // 세대 번호의 이름만 rev에서 revision으로 바꾼 가짜 옛 형식 1. 이전하면 5바이트 커진다.
-  const renamedOld = z.object({
-    version: z.literal(1),
-    rev: z.int(),
-    features: z.record(z.string(), z.unknown()),
-    sites: z.record(z.string(), z.unknown()),
+  const renamedOld = v.object({
+    version: v.literal(1),
+    rev: v.int(),
+    features: v.record(v.string(), v.unknown()),
+    sites: v.record(v.string(), v.unknown()),
   });
   const renamedFormat: SettingsFormat = {
     version: 2,
@@ -413,7 +413,7 @@ describe('COM-3.9 설정 바꾸기의 크기 한도는 지금 저장된 값과 �
         {
           structure: renamedOld,
           migrate: (value: unknown) => {
-            const { rev, ...rest } = renamedOld.parse(value);
+            const { rev, ...rest } = v.parse(renamedOld, value);
             return { ...rest, version: 2, revision: rev };
           },
         },
@@ -470,9 +470,9 @@ describe('세대 번호: 쓰는 쪽이 만든 값을 읽는 쪽에 넣는다(결
         },
         // 준비 요청은 서비스 워커가 이미 고쳐 쓴 것처럼 바로 응답한다. 다시 읽으면 setView로 정한 값이다.
         request: (definition) => {
-          const parsed = definition.value.safeParse(null);
+          const parsed = v.safeParse(definition.value, null);
           return Promise.resolve(
-            parsed.success ? ok(parsed.data) : err(appError('unexpected', '응답 형식')),
+            parsed.success ? ok(parsed.output) : err(appError('unexpected', '응답 형식')),
           );
         },
         format: settingsFormat,

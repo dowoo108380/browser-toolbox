@@ -1,9 +1,8 @@
-import * as z from 'zod/mini';
-import { defineFeature } from '../../contracts/index.ts';
+import { defineFeature, v } from '../../contracts/index.ts';
 
 // 05단계 뼈대에서는 배속 표시창만 있다. 배속 조절, 단축키, 탭 배속 복원은 06단계에서 더한다.
-const settingsSchema = z.object({
-  enabled: z.boolean(),
+const settingsSchema = v.object({
+  enabled: v.boolean(),
 });
 
 export const mediaSpeed = defineFeature({

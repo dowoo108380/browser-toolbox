@@ -1,12 +1,12 @@
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as z from 'zod/mini';
 import {
   type Category,
   type FeatureDefinition,
   type TabStatus,
   defineFeature,
+  v,
 } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type {
@@ -39,7 +39,7 @@ const feature = defineFeature({
   kind: 'toggle',
   content: null,
   permissions: [],
-  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
 });
 
 const off: Snapshot = { features: new Map([['sample', { enabled: false }]]), sites: new Map() };
@@ -56,7 +56,7 @@ function toggleFeature(id: string, category: Category, name: string): FeatureDef
     kind: 'toggle',
     content: null,
     permissions: [],
-    settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+    settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
   });
 }
 

@@ -1,4 +1,12 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { type BuildOptions, type Plugin, build } from 'esbuild';
 import { features as productFeatures } from '../src/features/list.ts';
@@ -107,11 +115,17 @@ for (const file of ['popup.html', 'popup.css']) {
 }
 copyFileSync(path.join(root, 'LICENSE'), path.join(outdir, 'LICENSE'));
 
-// 확장 실행 중에 쓰는 의존성의 라이선스를 배포물에 함께 넣는다(quality 128).
+// 확장 실행 중에 쓰는 의존성의 라이선스를 배포물에 함께 넣는다(quality 128). 파일 이름은 패키지마다 다르다
+// (preact는 LICENSE, valibot은 LICENSE.md). 없으면 빌드를 멈춘다.
+const licenseFiles = ['LICENSE', 'LICENSE.md', 'LICENSE.txt'];
 const notices = Object.keys(packageJson.dependencies)
   .sort()
   .map((name) => {
-    const license = readFileSync(path.join(root, 'node_modules', name, 'LICENSE'), 'utf8');
+    const file = licenseFiles
+      .map((candidate) => path.join(root, 'node_modules', name, candidate))
+      .find((candidate) => existsSync(candidate));
+    if (file === undefined) throw new Error(`${name}의 라이선스 파일을 찾지 못했다.`);
+    const license = readFileSync(file, 'utf8');
     return `${name}\n${'='.repeat(name.length)}\n\n${license.trim()}\n`;
   });
 writeFileSync(path.join(outdir, 'THIRD_PARTY_NOTICES.txt'), notices.join('\n'));

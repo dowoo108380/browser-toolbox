@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as z from 'zod/mini';
 import {
   type PageStatus,
   defineFeature,
   pageRuntimeKey,
   retireEventName,
+  v,
 } from '../contracts/index.ts';
 import {
   type NamedElement,
@@ -868,7 +868,7 @@ describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames
       kind: 'toggle',
       content: { sites: 'all', frames },
       permissions: [],
-      settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+      settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
     });
     const counts = { started: 0 };
     const attribute = `data-test-${id}`;
@@ -914,7 +914,7 @@ describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames
       kind: 'toggle',
       content: null,
       permissions: [],
-      settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+      settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
     });
     // @ts-expect-error 페이지에 작용한다고 적지 않은 정의다. 실행하면 정의에 프레임 범위가 없어 실패한다.
     const make = () => definePagePart(nowhere, () => undefined);

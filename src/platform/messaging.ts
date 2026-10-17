@@ -1,4 +1,4 @@
-import { type RequestDefinition, responseSchema } from '../contracts/index.ts';
+import { type RequestDefinition, responseSchema, v } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, withTimeout } from '../shared/index.ts';
 
 // chrome.runtime 메시지를 감싼다. 요청과 응답은 contracts의 정의로 검증한다(결정 0006).
@@ -52,8 +52,8 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
       if (!response.done) {
         return failure(appError('timeout', '확장의 응답이 없다. 잠시 뒤 다시 한다.'));
       }
-      const parsed = responseSchema(definition.value).safeParse(response.value);
-      if (parsed.success) return parsed.data;
+      const parsed = v.safeParse(responseSchema(definition.value), response.value);
+      if (parsed.success) return parsed.output;
       return await failureAfterSettle(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
     } catch (error) {
       if (isDisconnected(error)) return disconnected();

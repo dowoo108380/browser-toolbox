@@ -1,6 +1,5 @@
-import * as z from 'zod/mini';
 import { type TaskPart, defineTaskPart } from '../../src/background/index.ts';
-import { type ActionFeature, defineFeature } from '../../src/contracts/index.ts';
+import { type ActionFeature, defineFeature, v } from '../../src/contracts/index.ts';
 import { chromeSessionStore } from '../../src/platform/index.ts';
 import { appError, err, ok } from '../../src/shared/index.ts';
 import type { TaskOutcome } from '../../src/storage/index.ts';
@@ -11,14 +10,14 @@ import type { TaskOutcome } from '../../src/storage/index.ts';
 
 export const releaseKey = 'fixture-task:release';
 
-const releaseSchema = z.object({
-  featureId: z.string(),
-  outcome: z.enum(['succeed', 'fail', 'cancel']),
+const releaseSchema = v.object({
+  featureId: v.string(),
+  outcome: v.picklist(['succeed', 'fail', 'cancel']),
   // 같은 끝을 거듭 쓸 수 있게 차례 번호를 함께 쓴다. 같은 값이면 Chrome이 바뀜 알림을 보내지 않는다.
-  serial: z.number(),
+  serial: v.number(),
 });
 
-export type Release = z.infer<typeof releaseSchema>;
+export type Release = v.InferOutput<typeof releaseSchema>;
 
 export const fixtureSummary = '시험 결과';
 export const fixtureFailure = '시험 작업이 실패했다.';
@@ -64,10 +63,10 @@ function waitForRelease(featureId: string, signal: AbortSignal): Promise<TaskOut
       resolve(outcome);
     };
     const take = (value: unknown) => {
-      const release = releaseSchema.safeParse(value);
-      if (settled || !release.success || release.data.featureId !== featureId) return;
+      const release = v.safeParse(releaseSchema, value);
+      if (settled || !release.success || release.output.featureId !== featureId) return;
       void store.set({ [releaseKey]: null });
-      finish(outcomeOf(release.data.outcome));
+      finish(outcomeOf(release.output.outcome));
     };
     const stop = store.onChanged(releaseKey, take);
     void store.get(releaseKey).then(take);

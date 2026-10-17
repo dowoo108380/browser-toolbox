@@ -1,4 +1,4 @@
-import { popupPort } from '../contracts/index.ts';
+import { popupPort, v } from '../contracts/index.ts';
 import { isExtensionConnected } from './messaging.ts';
 
 // 팝업이 열려 있는 동안 서비스 워커에 여는 연결(결정 0024). 서비스 워커는 연결이 열린 동안 그 탭을 "팝업이 보는 탭"으로
@@ -53,8 +53,8 @@ export function watchPopups(): PopupWatch {
       return;
     }
     port.onMessage.addListener((message: unknown) => {
-      const hello = popupPort.hello.safeParse(message);
-      if (hello.success) viewers.set(port, hello.data.tabId);
+      const hello = v.safeParse(popupPort.hello, message);
+      if (hello.success) viewers.set(port, hello.output.tabId);
     });
     port.onDisconnect.addListener(() => {
       viewers.delete(port);

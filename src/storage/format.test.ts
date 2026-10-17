@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { oldStored, stored, twoVersionFormat } from '../../tests/support/settings.ts';
-import { classify, migrateToCurrent, settingsFormat } from './format.ts';
+import { classify, currentStructure, migrateToCurrent, settingsFormat } from './format.ts';
 
 describe('형식 버전으로 먼저 나눈다(결정 0011 읽는 쪽 계약 2)', () => {
   it('키가 없으면 없음이다', () => {
@@ -63,5 +63,32 @@ describe('옛 형식 이전', () => {
 
   it('이전 함수가 없으면 결함으로 드러낸다', () => {
     expect(() => migrateToCurrent(1, {}, { ...twoVersionFormat, migrations: new Map() })).toThrow();
+  });
+
+  it('이전 함수가 지금 구조에 맞지 않는 값을 만들면 손상이 아니라 결함으로 드러낸다', () => {
+    const broken = new Map(
+      [...twoVersionFormat.migrations].map(([from, step]) => [
+        from,
+        { ...step, migrate: () => ({ version: 2 }) },
+      ]),
+    );
+    expect(() =>
+      migrateToCurrent(1, oldStored(5), { ...twoVersionFormat, migrations: broken }),
+    ).toThrow();
+  });
+
+  it('두 단계 이전에서 앞 단계가 다음 단계의 구조에 맞지 않는 값을 만들면 결함으로 드러낸다', () => {
+    const [first] = [...twoVersionFormat.migrations.values()];
+    if (first === undefined) throw new Error('시험 형식에 이전 함수가 없다.');
+    // 버전 1 → 2는 버전 2의 구조(지금 구조와 같음)가 거절하는 값을 만들고, 2 → 3은 받은 값을 그대로 넘긴다.
+    const threeVersions = {
+      version: 3,
+      structure: currentStructure(3),
+      migrations: new Map([
+        [1, { ...first, migrate: () => ({ version: 2 }) }],
+        [2, { structure: currentStructure(2), migrate: (value: unknown) => value }],
+      ]),
+    };
+    expect(() => migrateToCurrent(1, oldStored(5), threeVersions)).toThrow();
   });
 });

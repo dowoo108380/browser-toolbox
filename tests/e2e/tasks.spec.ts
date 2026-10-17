@@ -1,5 +1,5 @@
 import type { BrowserContext, Page, Worker } from '@playwright/test';
-import { responseSchema, taskSeen, taskStart } from '../../src/contracts/index.ts';
+import { responseSchema, taskSeen, taskStart, v } from '../../src/contracts/index.ts';
 import {
   type Release,
   fixtureFailure,
@@ -247,11 +247,12 @@ test('COM-10.8 결과를 본 확인이 다음 작업을 시작한 뒤에 닿아�
   const send = (type: string, payload: unknown): Promise<unknown> =>
     helper.evaluate((message) => chrome.runtime.sendMessage(message), { type, payload });
 
-  const first = responseSchema(taskStart.value).safeParse(
+  const first = v.safeParse(
+    responseSchema(taskStart.value),
     await send(taskStart.type, { featureId: fixtureTask.id, tabId }),
   );
-  if (!first.success || !first.data.ok) throw new Error('첫 작업을 시작하지 못했다.');
-  const { taskId } = first.data.value;
+  if (!first.success || !first.output.ok) throw new Error('첫 작업을 시작하지 못했다.');
+  const { taskId } = first.output.value;
   await release(worker, fixtureTask.id, 'succeed');
   await expect.poll(() => badgeOf(worker, tabId)).toMatchObject({ text: '✓' });
   // 결과를 본 팝업이 확인을 보내기 전에 같은 탭에서 다음 작업이 시작되었다.

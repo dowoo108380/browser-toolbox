@@ -1,5 +1,4 @@
-import * as z from 'zod/mini';
-import { defineFeature } from '../../src/contracts/index.ts';
+import { defineFeature, v } from '../../src/contracts/index.ts';
 import type { NamedElement } from '../../src/dom/index.ts';
 import { definePagePart } from '../../src/page/index.ts';
 
@@ -27,7 +26,7 @@ export const fixtureElementFeature = defineFeature({
   kind: 'toggle',
   content: { sites: 'all', frames: 'top' },
   permissions: [],
-  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
 });
 
 // 켜지면 먼저 문서 루트에 표시를 달고(찾기 전에 적용한 변경, COM-6.1), 대상 영역을 찾으면 그 영역에도 표시를 단다.

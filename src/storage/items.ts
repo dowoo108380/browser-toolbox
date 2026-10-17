@@ -1,12 +1,12 @@
-import type * as z from 'zod/mini';
+import { v } from '../contracts/index.ts';
 import type { StoredSettings } from './format.ts';
 
 // 설정 항목(기능 하나의 설정, 사이트 하나에서 기능 하나의 설정)을 검증하는 데 필요한 것. 기능 정의(feature.ts)가 준다.
 export interface FeatureSettingsSpec {
   readonly id: string;
-  readonly settings: { readonly schema: z.ZodMiniType };
+  readonly settings: { readonly schema: v.Schema };
   // 사이트마다 따로 정하는 설정(사이트 규칙, 사이트 예외)이 있는 기능만 둔다. 사이트 항목은 없으면 기본값이다(결정 0017).
-  readonly siteSettings?: { readonly schema: z.ZodMiniType };
+  readonly siteSettings?: { readonly schema: v.Schema };
 }
 
 // 사이트 항목 하나. featureId가 null이면 그 사이트의 값이 객체가 아니어서 사이트 전체를 읽을 수 없다는 뜻이다(결정 0017).
@@ -40,8 +40,8 @@ export function checkItems(
   const corruptFeatures: string[] = [];
   for (const spec of specs) {
     if (!Object.hasOwn(value.features, spec.id)) continue;
-    const parsed = spec.settings.schema.safeParse(value.features[spec.id]);
-    if (parsed.success) features.set(spec.id, parsed.data);
+    const parsed = v.safeParse(spec.settings.schema, value.features[spec.id]);
+    if (parsed.success) features.set(spec.id, parsed.output);
     else corruptFeatures.push(spec.id);
   }
 
@@ -56,8 +56,8 @@ export function checkItems(
     const valid = new Map<string, unknown>();
     for (const spec of specs) {
       if (spec.siteSettings === undefined || !Object.hasOwn(entry, spec.id)) continue;
-      const parsed = spec.siteSettings.schema.safeParse(entry[spec.id]);
-      if (parsed.success) valid.set(spec.id, parsed.data);
+      const parsed = v.safeParse(spec.siteSettings.schema, entry[spec.id]);
+      if (parsed.success) valid.set(spec.id, parsed.output);
       else corruptSites.push({ host, featureId: spec.id });
     }
     if (valid.size > 0) sites.set(host, valid);

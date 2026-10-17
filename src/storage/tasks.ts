@@ -1,4 +1,4 @@
-import * as z from 'zod/mini';
+import { v } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, errorKinds, ok } from '../shared/index.ts';
 
@@ -31,31 +31,31 @@ export type TaskRecords = Readonly<Record<string, TaskRecord>>;
 // 작업의 일이 돌려준 끝.
 export type TaskOutcome = Result<{ readonly summary: string | null }, AppError>;
 
-const errorSchema = z.object({ kind: z.enum(errorKinds), message: z.string() });
+const errorSchema = v.object({ kind: v.picklist(errorKinds), message: v.string() });
 
-const recordSchema: z.ZodMiniType<TaskRecord> = z.union([
-  z.object({ id: z.string(), featureId: z.string(), status: z.literal('running') }),
-  z.object({
-    id: z.string(),
-    featureId: z.string(),
-    status: z.literal('succeeded'),
-    summary: z.nullable(z.string()),
+const recordSchema: v.Schema<TaskRecord> = v.union([
+  v.object({ id: v.string(), featureId: v.string(), status: v.literal('running') }),
+  v.object({
+    id: v.string(),
+    featureId: v.string(),
+    status: v.literal('succeeded'),
+    summary: v.nullable(v.string()),
   }),
-  z.object({
-    id: z.string(),
-    featureId: z.string(),
-    status: z.literal('failed'),
+  v.object({
+    id: v.string(),
+    featureId: v.string(),
+    status: v.literal('failed'),
     error: errorSchema,
   }),
 ]);
 
-const recordsSchema: z.ZodMiniType<TaskRecords> = z.record(z.string(), recordSchema);
+const recordsSchema: v.Schema<TaskRecords> = v.record(v.string(), recordSchema);
 
 // 읽은 값. 없으면 빈 기록이고, 모양이 틀리면 null이다(쓰는 곳이 하나라 틀린 값은 결함이다).
 export function parseTasks(raw: unknown): TaskRecords | null {
   if (raw === undefined) return {};
-  const parsed = recordsSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  const parsed = v.safeParse(recordsSchema, raw);
+  return parsed.success ? parsed.output : null;
 }
 
 const keyOf = (tabId: number) => String(tabId);

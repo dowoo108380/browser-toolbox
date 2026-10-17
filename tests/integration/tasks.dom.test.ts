@@ -1,9 +1,8 @@
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as z from 'zod/mini';
 import { type TaskPart, defineTaskPart } from '../../src/background/index.ts';
-import { type ActionFeature, defineFeature, taskStart } from '../../src/contracts/index.ts';
+import { type ActionFeature, defineFeature, taskStart, v } from '../../src/contracts/index.ts';
 import { type FakeStore, createFakeStore } from '../../src/platform/fake.ts';
 import type { KeyValueStore } from '../../src/platform/index.ts';
 import { type AppError, appError, err, ok } from '../../src/shared/index.ts';
@@ -51,7 +50,7 @@ const subtitleSize = defineFeature({
   kind: 'toggle',
   content: null,
   permissions: [],
-  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
 });
 const features = [subtitleSize, save, copy];
 

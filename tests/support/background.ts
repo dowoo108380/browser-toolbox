@@ -2,6 +2,7 @@ import {
   type FeatureDefinition,
   type PageStatus,
   responseSchema,
+  v,
 } from '../../src/contracts/index.ts';
 import { type TaskPart, startBackground } from '../../src/background/index.ts';
 import type {
@@ -93,9 +94,9 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
       return structuredClone(await handle(message, { kind: 'extension' }));
     };
     const response = await deliver(definition.type, send);
-    const parsed = responseSchema(definition.value).safeParse(response);
+    const parsed = v.safeParse(responseSchema(definition.value), response);
     return parsed.success
-      ? parsed.data
+      ? parsed.output
       : err(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
   };
 }

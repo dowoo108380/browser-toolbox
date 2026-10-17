@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { oldStored, specs, stored, twoVersionFormat } from '../../tests/support/settings.ts';
+import { v } from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
 import type { KeyValueStore, Requester } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
@@ -25,8 +26,8 @@ function setup<Store extends Pick<KeyValueStore, 'get' | 'onChanged'>>(
     ensureCount += 1;
     const result = await onEnsureReady();
     if (!result.ok) return result;
-    const parsed = definition.value.safeParse(result.value);
-    return parsed.success ? ok(parsed.data) : err(appError('unexpected', '응답 형식'));
+    const parsed = v.safeParse(definition.value, result.value);
+    return parsed.success ? ok(parsed.output) : err(appError('unexpected', '응답 형식'));
   };
   const stop = startSettingsReader(
     { store, request, format, specs },
@@ -265,8 +266,8 @@ describe('COM-7 그만둔 뒤에는 읽지도 알리지도 않는다', () => {
             resolve(result);
             return;
           }
-          const parsed = definition.value.safeParse(result.value);
-          resolve(parsed.success ? ok(parsed.data) : err(appError('unexpected', '응답 형식')));
+          const parsed = v.safeParse(definition.value, result.value);
+          resolve(parsed.success ? ok(parsed.output) : err(appError('unexpected', '응답 형식')));
         };
       });
     const stop = startSettingsReader(

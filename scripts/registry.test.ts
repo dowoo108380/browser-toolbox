@@ -2,8 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import * as z from 'zod/mini';
-import { type FeatureDefinition, defineFeature } from '../src/contracts/index.ts';
+import { type FeatureDefinition, defineFeature, v } from '../src/contracts/index.ts';
 import { contentCommonSource, swSource } from './registry.ts';
 
 // 결정 0004: 빌드가 기능 목록에서 진입점별 등록 목록을 만든다. 그 생성 규칙(어느 기능의 어느 자리 파일을 넣는가)을 본다.
@@ -37,7 +36,7 @@ const toggle = (id: string, content: FeatureDefinition['content']): FeatureDefin
     kind: 'toggle',
     content,
     permissions: [],
-    settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+    settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
   });
 
 const action = (id: string): FeatureDefinition =>

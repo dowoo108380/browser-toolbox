@@ -1,5 +1,4 @@
-import * as z from 'zod/mini';
-import { type RequestDefinition, responseSchema } from '../contracts/index.ts';
+import { type RequestDefinition, responseSchema, v } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, withTimeout } from '../shared/index.ts';
 
 // 서비스 워커가 탭의 콘텐츠 스크립트에 보내는 요청(chrome.tabs.sendMessage)과 콘텐츠 스크립트가 그것을 받는 쪽(결정 0006,
@@ -34,16 +33,16 @@ export async function sendToTab<Payload, Value>(
       chrome.tabs.sendMessage(tabId, { type: definition.type, payload }, { frameId: 0 }),
     );
     if (!response.done) return { delivery: 'timeout' };
-    const parsed = responseSchema(definition.value).safeParse(response.value);
-    return parsed.success && parsed.data.ok
-      ? { delivery: 'delivered', value: parsed.data.value }
+    const parsed = v.safeParse(responseSchema(definition.value), response.value);
+    return parsed.success && parsed.output.ok
+      ? { delivery: 'delivered', value: parsed.output.value }
       : { delivery: 'failed' };
   } catch (error) {
     return { delivery: isUnreachable(error) ? 'unreachable' : 'failed' };
   }
 }
 
-const envelopeSchema = z.object({ type: z.string(), payload: z.unknown() });
+const envelopeSchema = v.object({ type: v.string(), payload: v.unknown() });
 
 // 콘텐츠 스크립트가 이 확장의 서비스 워커(와 확장 화면)가 보낸 그 요청을 받는다. 탭에서 온 것(다른 콘텐츠 스크립트)과
 // 다른 확장의 것은 받지 않는다. 다른 요청은 다른 듣기에 맡긴다. 답은 바로 돌려준다. 돌려준 함수로 듣기를 그만둔다.
@@ -57,12 +56,12 @@ export function listenExtensionRequest<Payload, Value>(
     sendResponse: (response: unknown) => void,
   ): boolean => {
     if (sender.id !== chrome.runtime.id || sender.tab !== undefined) return false;
-    const envelope = envelopeSchema.safeParse(message);
-    if (!envelope.success || envelope.data.type !== definition.type) return false;
-    const parsed = definition.payload.safeParse(envelope.data.payload);
+    const envelope = v.safeParse(envelopeSchema, message);
+    if (!envelope.success || envelope.output.type !== definition.type) return false;
+    const parsed = v.safeParse(definition.payload, envelope.output.payload);
     sendResponse(
       parsed.success
-        ? handle(parsed.data)
+        ? handle(parsed.output)
         : err(appError('invalid-input', '요청 내용이 맞지 않는다.')),
     );
     return false;

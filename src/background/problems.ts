@@ -1,5 +1,4 @@
-import * as z from 'zod/mini';
-import { type ElementRef, elementRefSchema } from '../contracts/index.ts';
+import { type ElementRef, elementRefSchema, v } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
 import { type ErrorKind, createSerialQueue, errorKinds } from '../shared/index.ts';
 
@@ -17,11 +16,11 @@ export interface Problem {
   readonly element?: ElementRef | undefined;
 }
 
-const recordSchema = z.object({
-  at: z.int(),
-  featureId: z.nullable(z.string()),
-  kind: z.enum(errorKinds),
-  element: z.optional(elementRefSchema),
+const recordSchema = v.object({
+  at: v.int(),
+  featureId: v.nullable(v.string()),
+  kind: v.picklist(errorKinds),
+  element: v.optional(elementRefSchema),
 });
 
 export interface ProblemLog {
@@ -36,9 +35,9 @@ export function createProblemLog(deps: {
   return {
     record: (problem) =>
       enqueue(async () => {
-        const parsed = z.array(recordSchema).safeParse(await deps.store.get(problemsKey));
+        const parsed = v.safeParse(v.array(recordSchema), await deps.store.get(problemsKey));
         // 기록이 손상되었으면 새로 시작한다. 기록은 진단용이라 잃어도 기능에 영향이 없다.
-        const previous = parsed.success ? parsed.data : [];
+        const previous = parsed.success ? parsed.output : [];
         const { featureId, kind, element } = problem;
         const record = {
           at: deps.now(),

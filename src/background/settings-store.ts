@@ -1,4 +1,4 @@
-import type { ToggleFeature } from '../contracts/index.ts';
+import { type ToggleFeature, v } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
 import {
   type AppError,
@@ -151,7 +151,7 @@ export function createSettingsStore(deps: {
         // 손상 항목은 normalize가 지웠으므로 남은 항목은 검증을 통과한 것이다. 없으면 기본값에서 시작한다.
         const stored = base.features[featureId];
         const current = typeof stored === 'object' && stored !== null ? stored : {};
-        const merged = feature.settings.schema.safeParse({
+        const merged = v.safeParse(feature.settings.schema, {
           ...feature.settings.defaults,
           ...current,
           ...patch,
@@ -168,7 +168,7 @@ export function createSettingsStore(deps: {
         const next: StoredSettings = {
           ...base,
           revision: nextRevision(base.revision, now),
-          features: { ...base.features, [featureId]: { ...current, ...merged.data } },
+          features: { ...base.features, [featureId]: { ...current, ...merged.output } },
         };
         const written = await write(next, { stored: loaded.value.raw, normalized: base });
         if (!written.ok) return written;

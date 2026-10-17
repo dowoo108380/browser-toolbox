@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as z from 'zod/mini';
-import { defineFeature } from '../contracts/index.ts';
+import { defineFeature, v } from '../contracts/index.ts';
 import { type FakeStore, createFakeStore } from '../platform/fake.ts';
 import type { Delivery, TabBadge } from '../platform/index.ts';
 import { type AppError, appError, err, ok } from '../shared/index.ts';
@@ -38,7 +37,7 @@ const toggle = defineFeature({
   kind: 'toggle',
   content: null,
   permissions: [],
-  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
 });
 
 // 시험이 끝을 정하는 일. 부를 때마다 받은 것을 남기고, finish로 끝낸다.

@@ -1,4 +1,4 @@
-import type * as z from 'zod/mini';
+import type * as v from './schema.ts';
 
 // 팝업 범주. 요구사항 묶음과 같고, 팝업은 이 순서로 보인다(quality 017, 결정 0023). 설정 범주는 설정 페이지를 만들 때 더한다.
 export const categories = ['media', 'youtube', 'subtitles', 'tabs', 'page', 'chatgpt'] as const;
@@ -39,7 +39,7 @@ interface FeatureBase {
 export interface ToggleFeature<S extends ToggleSettings = ToggleSettings> extends FeatureBase {
   readonly kind: 'toggle';
   readonly settings: {
-    readonly schema: z.ZodMiniType<S>;
+    readonly schema: v.Schema<S>;
     readonly defaults: S;
   };
 }

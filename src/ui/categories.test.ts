@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as z from 'zod/mini';
-import { type Category, defineFeature } from '../contracts/index.ts';
+import { type Category, defineFeature, v } from '../contracts/index.ts';
 import { categoryIndexAfterKey, visibleCategories } from './categories.ts';
 
 function featureIn(id: string, category: Category) {
@@ -13,7 +12,7 @@ function featureIn(id: string, category: Category) {
     kind: 'toggle',
     content: null,
     permissions: [],
-    settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+    settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
   });
 }
 

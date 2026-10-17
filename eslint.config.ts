@@ -58,12 +58,48 @@ const executableStrings = [
   },
 ];
 
+// 런타임 검증은 contracts의 v 하나로 한다(결정 0028). valibot은 그 어휘를 정한 src/contracts/schema.ts만 가져오고, 다른
+// 검증 라이브러리는 가져오지 않는다. 알려진 검증 라이브러리를 이름으로 막고, 실행 중에 쓰는 의존성은 결정 기록이 있을
+// 때만 더하므로(quality 085) 목록에 없는 것은 검토에서 본다. 잡아야 하는 사례는 tests/lint/restricted-syntax.test.ts에 있다.
+const validationMessage = '런타임 검증은 contracts의 v로 한다(결정 0028).';
+const otherValidationLibraries = [
+  'zod',
+  'yup',
+  'joi',
+  'superstruct',
+  'ajv',
+  'arktype',
+  'io-ts',
+  'runtypes',
+  'myzod',
+  'typia',
+  'class-validator',
+  'effect',
+  '@effect/schema',
+  '@sinclair/typebox',
+];
+const validationImports = (libraries: readonly string[]) => ({
+  paths: libraries.map((name) => ({ name, message: validationMessage })),
+  patterns: [{ group: libraries.map((name) => `${name}/*`), message: validationMessage }],
+});
+// 동적 가져오기(import('…'))는 no-restricted-imports가 보지 않아 문법으로 막는다.
+const validationLibraryPattern = ['valibot', ...otherValidationLibraries]
+  .map((name) => name.replaceAll('/', '\\/'))
+  .join('|');
+const dynamicValidationImports = [
+  {
+    selector: `ImportExpression > Literal[value=/^(${validationLibraryPattern})(\\/|$)/]`,
+    message: validationMessage,
+  },
+];
+
 // 모든 파일에 거는 문법 제한.
 const baseRestrictions = [
   ...htmlInjection,
   ...classInheritance,
   ...externalMessaging,
   ...executableStrings,
+  ...dynamicValidationImports,
 ];
 
 // 웹 페이지에서 도는 기능 코드는 이벤트 듣기, 관찰, 타이머를 자원 범위(scope)로만 만든다(결정 0014).
@@ -146,13 +182,9 @@ export default defineConfig(
     rules: {
       'no-restricted-syntax': ['error', ...baseRestrictions],
       eqeqeq: 'error',
-      // 런타임 검증은 zod/mini 방식 하나만 쓴다(결정 0006).
       'no-restricted-imports': [
         'error',
-        {
-          paths: [{ name: 'zod', message: 'zod/mini를 쓴다(결정 0006).' }],
-          patterns: [{ group: ['zod/*', '!zod/mini'], message: 'zod/mini를 쓴다(결정 0006).' }],
-        },
+        validationImports(['valibot', ...otherValidationLibraries]),
       ],
       // 타입 단언은 신뢰 경계에서만 쓰고, 그 줄에서 이유를 적어 이 규칙을 끈다(quality 054).
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
@@ -172,6 +204,13 @@ export default defineConfig(
     ignores: ['src/dom/scope.ts', '**/*.test.ts'],
     rules: {
       'no-restricted-syntax': ['error', ...baseRestrictions, ...pageResources],
+    },
+  },
+  {
+    // 런타임 검증의 어휘를 정하는 곳. valibot을 가져오는 곳은 여기 하나다(결정 0028).
+    files: ['src/contracts/schema.ts'],
+    rules: {
+      'no-restricted-imports': ['error', validationImports(otherValidationLibraries)],
     },
   },
   {

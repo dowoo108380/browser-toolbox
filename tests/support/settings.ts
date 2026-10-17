@@ -1,5 +1,4 @@
-import * as z from 'zod/mini';
-import { type ToggleFeature, defineFeature } from '../../src/contracts/index.ts';
+import { type ToggleFeature, defineFeature, v } from '../../src/contracts/index.ts';
 import { type SettingsFormat, currentStructure } from '../../src/storage/index.ts';
 
 // storage와 background 테스트가 함께 쓰는 설정 시험 자료. 테스트에서만 가져온다.
@@ -10,7 +9,7 @@ const sampleFeature: ToggleFeature<{
   readonly enabled: boolean;
   readonly step: number;
   readonly label: string;
-}> & { readonly siteSettings: { readonly schema: z.ZodMiniType } } = {
+}> & { readonly siteSettings: { readonly schema: v.Schema } } = {
   ...defineFeature({
     id: 'sample',
     requirements: [],
@@ -21,11 +20,11 @@ const sampleFeature: ToggleFeature<{
     content: null,
     permissions: [],
     settings: {
-      schema: z.object({ enabled: z.boolean(), step: z.number(), label: z.string() }),
+      schema: v.object({ enabled: v.boolean(), step: v.number(), label: v.string() }),
       defaults: { enabled: false, step: 0.1, label: '' },
     },
   }),
-  siteSettings: { schema: z.object({ rules: z.array(z.string()) }) },
+  siteSettings: { schema: v.object({ rules: v.array(v.string()) }) },
 };
 
 const otherFeature: ToggleFeature = defineFeature({
@@ -37,7 +36,7 @@ const otherFeature: ToggleFeature = defineFeature({
   kind: 'toggle',
   content: null,
   permissions: [],
-  settings: { schema: z.object({ enabled: z.boolean() }), defaults: { enabled: false } },
+  settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
 });
 
 export const specs = [sampleFeature, otherFeature];
@@ -52,10 +51,10 @@ export function stored(
 
 // 구조가 지금과 다른 가짜 옛 버전 1과, 그것을 이전하는 지금 버전 2(결정 0011 "형식 이전과 고쳐 쓰기").
 // 옛 버전 1은 설정을 data.featureSettings에 두고 세대 번호를 rev라 불렀다.
-const oldStructure = z.object({
-  version: z.literal(1),
-  rev: z.int(),
-  data: z.object({ featureSettings: z.record(z.string(), z.unknown()) }),
+const oldStructure = v.object({
+  version: v.literal(1),
+  rev: v.int(),
+  data: v.object({ featureSettings: v.record(v.string(), v.unknown()) }),
 });
 
 export const twoVersionFormat: SettingsFormat = {
@@ -67,7 +66,7 @@ export const twoVersionFormat: SettingsFormat = {
       {
         structure: oldStructure,
         migrate: (value: unknown) => {
-          const old = oldStructure.parse(value);
+          const old = v.parse(oldStructure, value);
           return {
             version: 2,
             revision: old.rev,
