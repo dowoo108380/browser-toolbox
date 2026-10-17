@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { oldStored, stored, twoVersionFormat } from '../../tests/support/settings.ts';
-import { classify, currentStructure, migrateToCurrent, settingsFormat } from './format.ts';
+import {
+  classify,
+  currentStructure,
+  migrateToCurrent,
+  settingsFormat,
+  settingsKey,
+} from './format.ts';
 
 describe('형식 버전으로 먼저 나눈다(결정 0011 읽는 쪽 계약 2)', () => {
+  it('저장 키 이름은 settings다(결정 0011의 표. 바꾸면 앞의 판이 저장한 설정을 읽지 못한다)', () => {
+    expect(settingsKey).toBe('settings');
+  });
+
   it('키가 없으면 없음이다', () => {
     expect(classify(undefined, settingsFormat)).toEqual({ kind: 'missing' });
   });
