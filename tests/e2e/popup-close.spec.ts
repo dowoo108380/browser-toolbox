@@ -1,4 +1,4 @@
-import { expect, openPopup, test } from './support/extension.ts';
+import { expect, openPopup, test, watchServiceWorker } from './support/extension.ts';
 
 // N-12: 팝업은 초점을 잃으면 닫힌다. 서비스 워커가 깨어나는 중에 팝업이 요청을 보내고 곧바로 닫히면
 // 요청이 닿지 않았다(05단계 확인: 잠든 서비스 워커에서 20번 중 19번). 팝업은 열릴 때 서비스 워커를 깨우고,
@@ -16,15 +16,7 @@ test('N-12 서비스 워커가 잠든 뒤 팝업을 열어 스위치를 누르�
     .toMatchObject({ settings: { version: 1 } });
 
   // 서비스 워커를 멈춰 Chrome이 쉬는 서비스 워커를 멈춘 상태를 만든다.
-  const helper = await context.newPage();
-  const session = await context.newCDPSession(helper);
-  const statuses: string[] = [];
-  session.on('ServiceWorker.workerVersionUpdated', (event) => {
-    for (const version of event.versions) statuses.push(version.runningStatus);
-  });
-  await session.send('ServiceWorker.enable');
-  await session.send('ServiceWorker.stopAllWorkers');
-  await expect.poll(() => statuses.at(-1)).toBe('stopped');
+  await (await watchServiceWorker(await context.newPage())).stop();
 
   const popup = await openPopup(context, extensionId);
   const toggle = popup.getByRole('switch', { name: '미디어 배속' });

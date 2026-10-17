@@ -1,4 +1,4 @@
-import { expect, fixtureOrigin, openPopup, test } from './support/extension.ts';
+import { expect, fixtureOrigin, openPopup, test, watchServiceWorker } from './support/extension.ts';
 
 // COM-3.4: 저장소에 해석할 수 없는 항목을 넣고 서비스 워커를 다시 시작하면, 서비스 워커가 그 항목을 기본값으로
 // 고쳐 쓰기 전에 복구 알림을 남긴다. 그 뒤에 연 팝업은 고친 값만 읽지만 알림으로 기능 이름과 사이트 이름을 안다
@@ -28,14 +28,7 @@ test('COM-3.4 서비스 워커가 손상 항목(기능, 사이트)을 먼저 고
   // 서비스 워커를 멈춘 뒤, 페이지를 열어 다시 시작하게 한다. 콘텐츠 스크립트가 손상을 보고 고쳐 쓰기를 부탁하고,
   // 서비스 워커도 시작하면서 고친다. 팝업은 그 뒤에 연다.
   const page = await context.newPage();
-  const session = await context.newCDPSession(page);
-  const statuses: string[] = [];
-  session.on('ServiceWorker.workerVersionUpdated', (event) => {
-    for (const version of event.versions) statuses.push(version.runningStatus);
-  });
-  await session.send('ServiceWorker.enable');
-  await session.send('ServiceWorker.stopAllWorkers');
-  await expect.poll(() => statuses.at(-1)).toBe('stopped');
+  await (await watchServiceWorker(page)).stop();
   await page.goto(`${fixtureOrigin}/blank.html`);
   await expect
     .poll(async () => {

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { type BrowserContext, chromium } from '@playwright/test';
 import { connectBrowserCdp } from './support/browser-cdp.ts';
-import { distPath, expect, test } from './support/extension.ts';
+import { distPath, expect, test, watchServiceWorker } from './support/extension.ts';
 
 // N-15: 설정 전체가 키 하나라(결정 0011) 그 키를 쓰는 도중 브라우저가 죽어도 값은 쓰기 전이나 뒤 하나여야 한다.
 // 한도 크기의 두 값을 번갈아 쓰는 도중 브라우저 프로세스를 강제로 끝내고, 다시 띄워 저장된 값을 본다.
@@ -127,19 +127,14 @@ test('N-15 설정을 쓰는 도중 서비스 워커가 강제로 멈춰도 저�
   const context = await launch(profileDirectory);
   try {
     const page = await context.newPage();
-    const session = await context.newCDPSession(page);
-    const statuses: string[] = [];
-    session.on('ServiceWorker.workerVersionUpdated', (event) => {
-      for (const version of event.versions) statuses.push(version.runningStatus);
-    });
-    await session.send('ServiceWorker.enable');
+    const workerStatus = await watchServiceWorker(page);
     let extensionId = new URL((await serviceWorker(context)).url()).host;
     for (let iteration = 0; iteration < iterations; iteration += 1) {
-      if (statuses.at(-1) !== 'running') {
+      if (workerStatus.last() !== 'running') {
         // 멈춘 서비스 워커를 확장 화면으로 다시 깨운다(팝업은 열릴 때 서비스 워커를 깨운다).
         const waker = await context.newPage();
         await waker.goto(`chrome-extension://${extensionId}/popup.html`);
-        await expect.poll(() => statuses.at(-1)).toBe('running');
+        await workerStatus.reach('running');
         await waker.close();
       }
       const worker = context.serviceWorkers().at(-1);
@@ -159,8 +154,7 @@ test('N-15 설정을 쓰는 도중 서비스 워커가 강제로 멈춰도 저�
         { a: valueA, b: valueB },
       );
       await new Promise((resolve) => setTimeout(resolve, 20 + Math.floor(Math.random() * 300)));
-      await session.send('ServiceWorker.stopAllWorkers');
-      await expect.poll(() => statuses.at(-1)).toBe('stopped');
+      await workerStatus.stop();
       // 서비스 워커가 아닌 곳(확장 화면)에서 읽는다.
       const reader = await context.newPage();
       await reader.goto(`chrome-extension://${extensionId}/popup.html`);

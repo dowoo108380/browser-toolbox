@@ -84,6 +84,29 @@ export const test = base.extend<{
 
 export const expect = test.expect;
 
+// 확장의 서비스 워커가 도는지를 page의 CDP 세션(ServiceWorker 도메인)으로 지켜본다. 기다림이 실패하면 받은 상태의
+// 차례 전체를 보인다. 멈추기가 늦은 것과 멈춘 뒤 무엇이 다시 깨운 것을 가리기 위해서다(이슈 #5).
+export async function watchServiceWorker(page: Page) {
+  const session = await page.context().newCDPSession(page);
+  const statuses: string[] = [];
+  session.on('ServiceWorker.workerVersionUpdated', (event) => {
+    for (const version of event.versions) statuses.push(version.runningStatus);
+  });
+  await session.send('ServiceWorker.enable');
+  // 마지막으로 받은 상태가 그것이 될 때까지 기다린다.
+  const reach = (status: 'running' | 'stopped') =>
+    expect.poll(() => statuses.join(' → ')).toMatch(new RegExp(`${status}$`));
+  return {
+    reach,
+    // 강제로 멈추고 멈춘 것을 본다. Chrome이 쉬는 서비스 워커를 멈춘 상태와 같다.
+    stop: async () => {
+      await session.send('ServiceWorker.stopAllWorkers');
+      await reach('stopped');
+    },
+    last: () => statuses.at(-1),
+  };
+}
+
 export async function openPopup(context: BrowserContext, extensionId: string): Promise<Page> {
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
