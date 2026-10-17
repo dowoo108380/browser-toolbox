@@ -1,7 +1,17 @@
+import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
+
 // 팝업이 붙은 창의 지금 탭(결정 0023). 팝업은 탭이 아니므로 그 창에서 사용자가 보던 탭이다. 없으면 null이다.
-export async function currentTabId(): Promise<number | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id ?? null;
+// Chrome이 거절하면 던지지 않고 platform 실패로 준다. 팝업은 이 답을 기다려 탭의 상태를 묻고 실행 단추를 열므로,
+// 던지면 알림 없이 막힌다(quality 067).
+export async function currentTabId(): Promise<Result<number | null, AppError>> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return ok(tab?.id ?? null);
+  } catch {
+    return err(
+      appError('platform', '지금 탭을 Chrome에서 받지 못했다. 팝업을 닫았다가 다시 연다.'),
+    );
+  }
 }
 
 // 닫힌 탭이면 Chrome이 "No tab with id: …"로 거절한다(결정 0024의 실험 3). 실제 문구는 e2e/tab-contract가 본다.

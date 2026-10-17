@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isTabActive, listenTabEvents, tabExists } from './tabs.ts';
+import { ok } from '../shared/index.ts';
+import { currentTabId, isTabActive, listenTabEvents, tabExists } from './tabs.ts';
 
 // 탭 경계(결정 0024). 진짜 chrome 대신 시험이 만든 객체를 전역에 둔다. 서비스 워커를 깨우는지는 Chrome의 일이라
 // 여기서는 듣기를 걸고 그만두는 것만 본다(그만두면 깨우지 않는 것은 결정 0024의 실험 6).
@@ -98,5 +99,29 @@ describe('창의 지금 탭인지', () => {
   it('닫힌 탭이 아닌 거절은 닫힌 탭으로 여기지 않고 던진다', async () => {
     fakeTabs(tabs);
     await expect(isTabActive(9)).rejects.toThrow('알려지지 않은 거절');
+  });
+});
+
+describe('팝업이 붙은 창의 지금 탭(결정 0023)', () => {
+  // Chrome의 chrome.tabs.query를 바꿔 끼운다. 물은 것을 남긴다.
+  const answer = (query: () => Promise<unknown>) => {
+    const asked = vi.fn(query);
+    vi.stubGlobal('chrome', { tabs: { query: asked } });
+    return asked;
+  };
+
+  it('그 창의 지금 탭을 묻고 그 id를 준다. 탭이 없거나 id가 없으면 null이다', async () => {
+    const asked = answer(() => Promise.resolve([{ id: 5, active: true }]));
+    expect(await currentTabId()).toEqual(ok(5));
+    expect(asked).toHaveBeenCalledWith({ active: true, currentWindow: true });
+    answer(() => Promise.resolve([]));
+    expect(await currentTabId()).toEqual(ok(null));
+    answer(() => Promise.resolve([{ active: true }]));
+    expect(await currentTabId()).toEqual(ok(null));
+  });
+
+  it('Chrome이 거절하면 던지지 않고 platform 실패로 준다(quality 067)', async () => {
+    answer(() => Promise.reject(new Error('알려지지 않은 거절')));
+    expect(await currentTabId()).toMatchObject({ ok: false, error: { kind: 'platform' } });
   });
 });

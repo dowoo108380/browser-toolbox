@@ -103,7 +103,7 @@ interface Options {
   // 지난번 범주를 읽는 함수. 없으면 남긴 범주가 없다.
   readonly readRemembered?: () => Promise<Category | null>;
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
-  readonly currentTab?: () => Promise<number | null>;
+  readonly currentTab?: () => Promise<Result<number | null, AppError>>;
   readonly tabStatus?: (tabId: number) => Promise<Result<TabStatus, AppError>>;
   readonly startTask?: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
   readonly taskSeen?: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
@@ -117,7 +117,7 @@ async function show({
   update,
   readRemembered = () => Promise.resolve(null),
   remember = () => Promise.resolve(ok(null)),
-  currentTab = () => Promise.resolve(7),
+  currentTab = () => Promise.resolve(ok(7)),
   tabStatus = () => Promise.resolve(ok({ page: 'ready' as const, notFound: [] })),
   startTask = () => Promise.resolve(ok(null)),
   taskSeen = () => Promise.resolve(ok(null)),
@@ -539,9 +539,16 @@ describe('COM-2 기대 동작 4 지금 탭에서 쓸 수 없는 기능의 이유
   });
 
   it('지금 탭을 알 수 없으면 묻지 않고 그렇다고 알린다', async () => {
-    const popup = await show({ features: both, currentTab: () => Promise.resolve(null) });
+    const popup = await show({ features: both, currentTab: () => Promise.resolve(ok(null)) });
     expect(popup.statuses).not.toHaveBeenCalled();
     expect(popup.status()).toBe('지금 탭을 알 수 없어 기능을 쓸 수 있는지 확인하지 못했다.');
+  });
+
+  it('지금 탭을 묻다 실패하면 묻지 않고 그 까닭을 알린다', async () => {
+    const failed = appError('platform', '지금 탭을 Chrome에서 받지 못했다.');
+    const popup = await show({ features: both, currentTab: () => Promise.resolve(err(failed)) });
+    expect(popup.statuses).not.toHaveBeenCalled();
+    expect(popup.status()).toBe(failed.message);
   });
 });
 
@@ -629,7 +636,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
   });
 
   it('지금 탭을 알 수 없으면 막혀 있다', async () => {
-    const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(null) });
+    const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(ok(null)) });
     await popup.awake();
     expect(button('save').getAttribute('aria-disabled')).toBe('true');
   });
@@ -862,7 +869,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
   });
 
   it('지금 탭을 알 수 없으면 작업 기록을 듣지 않는다', async () => {
-    const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(null) });
+    const popup = await show({ features: withToggle, currentTab: () => Promise.resolve(ok(null)) });
     expect(popup.watchedTabs).toEqual([]);
   });
 
@@ -988,7 +995,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           dismissRepair={dismissals}
           rememberedCategory={() => Promise.resolve(null)}
           rememberCategory={() => Promise.resolve(ok(null))}
-          currentTab={() => Promise.resolve(1)}
+          currentTab={() => Promise.resolve(ok(1))}
           tabStatus={() => Promise.resolve(ok({ page: 'ready' as const, notFound: [] }))}
           startTask={() => Promise.resolve(ok(null))}
           watchTask={() => () => undefined}

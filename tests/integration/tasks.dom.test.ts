@@ -133,7 +133,7 @@ async function openPopup(
     session: options.session ?? extension.session,
     request: extension.request,
     features,
-    tabId,
+    currentTab: () => Promise.resolve(ok(tabId)),
     announceTab: extension.announceTab,
   });
   const button = (featureId: string) => {

@@ -12,7 +12,13 @@ import {
   taskStart,
 } from '../../src/contracts/index.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
-import type { KeyValueStore, PopupAnnouncement, Requester } from '../../src/platform/index.ts';
+import type {
+  KeyValueStore,
+  PopupAnnouncement,
+  Requester,
+  currentTabId,
+} from '../../src/platform/index.ts';
+import { ok } from '../../src/shared/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
@@ -32,9 +38,11 @@ export interface TestPopupOptions {
   readonly features: readonly FeatureDefinition[];
   // 복구 알림 읽기만 다른 저장소 창을 쓰게 할 수 있다. 없으면 store다.
   readonly noticeStore?: Pick<KeyValueStore, 'get' | 'onChanged'>;
-  // 작업 기록을 읽는 세션 저장소와 팝업이 보는 탭(결정 0024). 없으면 빈 저장소와 탭 1이다. 팝업은 기록을 읽기만 한다.
+  // 작업 기록을 읽는 세션 저장소(결정 0024). 없으면 빈 저장소다. 팝업은 기록을 읽기만 한다.
   readonly session?: Pick<KeyValueStore, 'get' | 'onChanged'>;
-  readonly tabId?: number;
+  // 팝업이 지금 탭을 묻는 함수(결정 0023). 없으면 탭 1을 준다. 실제 함수(platform의 currentTabId)를 넣으면 시험이
+  // chrome.tabs.query를 바꿔 끼워 Chrome의 답과 거절을 정한다.
+  readonly currentTab?: typeof currentTabId;
   // 팝업의 연결(결정 0024). 없으면 아무것도 하지 않는다.
   readonly announceTab?: (tabId: number) => PopupAnnouncement;
 }
@@ -47,7 +55,7 @@ export async function renderTestPopup(
     features,
     noticeStore = store,
     session = createFakeStore(),
-    tabId = 1,
+    currentTab = () => Promise.resolve(ok(1)),
     announceTab = () => ({ renew: () => undefined, close: () => undefined }),
   }: TestPopupOptions,
 ): Promise<void> {
@@ -67,7 +75,7 @@ export async function renderTestPopup(
         rememberedCategory: () => readRememberedCategory(store),
         rememberCategory: (category) => request(popupRemember, { category }),
         // 탐침 결과는 서비스 워커의 probePage가 정한다.
-        currentTab: () => Promise.resolve(tabId),
+        currentTab,
         tabStatus: (tabId) => request(tabStatus, { tabId }),
         startTask: (featureId, tab) => request(taskStart, { featureId, tabId: tab }),
         watchTask: (tab, handlers) => watchTask(session, tab, handlers),

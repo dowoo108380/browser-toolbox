@@ -28,6 +28,9 @@ import { TaskStatus } from './task-status.tsx';
 // 팝업(COM-2, 결정 0023). 위에 기능 검색 칸, 그 아래 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목을 보인다.
 // 검색어가 있으면 범주 대신 검색 결과를 보인다.
 
+// 팝업이 쓰는 저장소, 서비스 워커, Chrome의 길. 진입점이 실제 것을, 시험이 가짜를 넣는다. 비동기 함수는 거절하지 않고
+// 실패를 결과 값으로(지난번 범주는 null로) 준다. 그래서 아래의 효과와 처리기는 결과만 보고 거절을 따로 받지 않는다.
+// 거절할 수 있는 Chrome API는 그것을 감싼 platform 함수가 결과로 바꾼다(아키텍처 7장 "오류", quality 067).
 interface PopupProps {
   readonly features: readonly FeatureDefinition[];
   readonly subscribe: (handlers: SettingsReaderHandlers) => () => void;
@@ -46,7 +49,7 @@ interface PopupProps {
   // 고른 범주를 서비스 워커에 남긴다.
   readonly rememberCategory: (category: Category) => Promise<Result<unknown, AppError>>;
   // 팝업이 붙은 창의 지금 탭. 없으면 null이다.
-  readonly currentTab: () => Promise<number | null>;
+  readonly currentTab: () => Promise<Result<number | null, AppError>>;
   // 그 탭에서 페이지에 작용하는 기능을 쓸 수 있는지, 찾지 못한 기능이 있는지 서비스 워커에 묻는다(결정 0023, 0026).
   readonly tabStatus: (tabId: number) => Promise<Result<TabStatus, AppError>>;
   // 그 탭에서 실행 기능의 작업을 시작한다(결정 0024). 진행과 결과는 작업 기록으로 받는다.
@@ -142,8 +145,10 @@ export function PopupApp({
   const [tabId, setTabId] = useState<number | null>(null);
   useEffect(() => {
     let open = true;
-    const ask = async () => {
-      const tab = await currentTab();
+    const ask = async (): Promise<Result<TabStatus, AppError>> => {
+      const found = await currentTab();
+      if (!found.ok) return found;
+      const tab = found.value;
       if (tab === null) return err(appError('unavailable', strings.noCurrentTab));
       if (open) setTabId(tab);
       return tabStatus(tab);
