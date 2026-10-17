@@ -188,6 +188,59 @@ describe('저장된 값의 받아들임과 거절', () => {
     expect(snapshot.features.get('media-speed')).toEqual({ enabled: true });
   });
 
+  // 기록(record)의 키는 사이트 호스트와 기능 id다. 객체의 원형과 같은 이름이어도(한 단어 호스트 'prototype' 등) 남아야 하고,
+  // 서비스 워커가 다른 설정을 바꾸며 다시 쓸 때 그 항목을 잃지 않아야 한다(결정 0022). 객체 키로 둘 수 없는 '__proto__'는
+  // 빠진다(0017은 site.update에서 그런 호스트를 거절하기로 했다). JSON에서 읽은 값처럼 키를 제 속성으로 만든다.
+  const namedKeys = ['prototype', 'constructor', 'hasOwnProperty', 'toString', '__proto__'];
+  const withKey = (key: string): unknown =>
+    JSON.parse(
+      JSON.stringify({ version: 1, revision: 1, features: {}, sites: {} })
+        .replace('"features":{}', `"features":{${JSON.stringify(key)}:{"later":1}}`)
+        .replace('"sites":{}', `"sites":{${JSON.stringify(key)}:{"later":1}}`),
+    );
+  const keptKeys = (key: string) =>
+    key === '__proto__' ? { features: [], sites: [] } : { features: [key], sites: [key] };
+
+  it('결정 0011 0022 기록의 키: 원형의 이름과 같은 키도 읽은 값에 남는다', () => {
+    check<unknown>(
+      namedKeys.map((key): Row<unknown> => [key, withKey(key), keptKeys(key)]),
+      (raw) => {
+        const normalized = normalize(raw, settingsFormat, specs);
+        if (!normalized.ok) return normalized.error;
+        const { features: read, sites } = normalized.value.value;
+        return { features: Object.keys(read), sites: Object.keys(sites) };
+      },
+    );
+  });
+
+  it('결정 0022 기록의 키: 다른 기능을 바꾸며 다시 써도 원형의 이름과 같은 키의 항목을 잃지 않는다', async () => {
+    await checkAsync<unknown>(
+      namedKeys.map((key): Row<unknown> => {
+        const kept = keptKeys(key);
+        return [
+          key,
+          withKey(key),
+          { features: [...kept.features, 'media-speed'].sort(), sites: kept.sites },
+        ];
+      }),
+      async (raw) => {
+        const store = createFakeStore({ [settingsKey]: raw });
+        const request = startTestBackground({ store, features, startTime: 1_800_000_000_000 });
+        const result = await request(settingsUpdate, {
+          featureId: 'media-speed',
+          patch: { enabled: true },
+        });
+        if (!result.ok) return result.error;
+        const written = store.peek(settingsKey);
+        if (typeof written !== 'object' || written === null) return written;
+        const read = (name: string): unknown => Reflect.get(written, name);
+        const keysOf = (value: unknown) =>
+          typeof value === 'object' && value !== null ? Object.keys(value).sort() : value;
+        return { features: keysOf(read('features')), sites: keysOf(read('sites')) };
+      },
+    );
+  });
+
   it('결정 0016 복구 알림', () => {
     const notice = { stamp: 1, whole: false, features: ['media-speed'], sites: [] };
     check<unknown>(
@@ -416,6 +469,8 @@ describe('메시지의 받아들임과 거절', () => {
     );
   };
   const accepted = (value: unknown) => ({ accepted: value });
+  // JSON에서 읽은 값처럼 원형과 같은 이름의 키를 제 속성으로 가진 객체.
+  const prototypeNames: unknown = JSON.parse('{"constructor":1,"prototype":2}');
 
   it('결정 0006 봉투: type은 글자, payload 키가 있어야 한다', () => {
     const outcome = payloadOutcome(storageEnsureReady);
@@ -453,6 +508,11 @@ describe('메시지의 받아들임과 거절', () => {
       ],
       ['빈 patch', { featureId: 'f', patch: {} }, accepted({ featureId: 'f', patch: {} })],
       ['모르는 키', { featureId: 'f', patch: {}, x: 1 }, accepted({ featureId: 'f', patch: {} })],
+      [
+        'patch의 원형 이름 키',
+        { featureId: 'f', patch: prototypeNames },
+        accepted({ featureId: 'f', patch: prototypeNames }),
+      ],
       ['patch 배열', { featureId: 'f', patch: [] }, 'rejected'],
       ['patch 키를 가진 배열', { featureId: 'f', patch: arrayWith({ enabled: true }) }, 'rejected'],
       ['patch null', { featureId: 'f', patch: null }, 'rejected'],

@@ -40,13 +40,35 @@ describe('결정 0028 기록(record)은 보통 객체만 받는다', () => {
   ])('받지 않는다: %s', (_name, value) => {
     expect(accepts(schema, value)).toBe(false);
   });
+
+  it('키가 원형과 같은 이름이어도 남기고, 객체 키로 둘 수 없는 __proto__만 뺀다', () => {
+    // JSON에서 읽은 값처럼 키를 모두 제 속성으로 만든다.
+    const input: unknown = JSON.parse(
+      '{"prototype":1,"constructor":2,"toString":3,"":4,"__proto__":{"polluted":true}}',
+    );
+    const parsed = v.safeParse(schema, input);
+    if (!parsed.success) throw new Error('받지 않았다.');
+    expect(Object.entries(parsed.output)).toEqual([
+      ['prototype', 1],
+      ['constructor', 2],
+      ['toString', 3],
+      ['', 4],
+    ]);
+    // 낸 값의 원형이 받은 값으로 바뀌지 않는다.
+    expect(Object.getPrototypeOf(parsed.output)).toBe(Object.prototype);
+    expect(Reflect.get(parsed.output, 'polluted')).toBeUndefined();
+  });
+
+  it('값이나 키가 스키마에 맞지 않으면 받지 않는다', () => {
+    expect(accepts(v.record(v.string(), v.int()), { a: 1, b: 'x' })).toBe(false);
+    expect(accepts(v.record(v.picklist(['a']), v.int()), { a: 1, b: 2 })).toBe(false);
+    expect(accepts(v.record(v.picklist(['a']), v.int()), { a: 1 })).toBe(true);
+  });
 });
 
-describe('결정 0028 객체(object, looseObject)는 배열을 받지 않는다', () => {
-  it.each([
-    ['object', v.object({})],
-    ['looseObject', v.looseObject({})],
-  ])('%s', (_name, schema) => {
+describe('결정 0028 객체(object)는 배열을 받지 않는다', () => {
+  it('object', () => {
+    const schema = v.object({});
     expect(accepts(schema, {})).toBe(true);
     expect(accepts(schema, new Point())).toBe(true);
     expect(accepts(schema, [])).toBe(false);

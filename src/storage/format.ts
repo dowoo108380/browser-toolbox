@@ -12,8 +12,9 @@ export interface StoredSettings {
 }
 
 // 어떤 형식에서도 바꾸지 않는 것은 이것 하나다: 객체이고 최상위에 1 이상의 정수 version이 있다.
-// 옛 릴리스가 더 새 형식을 알아보는 단서가 이것뿐이다(결정 0011).
-const envelopeSchema = v.looseObject({ version: v.pipe(v.int(), v.minValue(1)) });
+// 옛 릴리스가 더 새 형식을 알아보는 단서가 이것뿐이다(결정 0011). 다른 키는 무엇이 있어도 된다(v.object는 모르는 키를
+// 거절하지 않는다). 쓰는 것은 version뿐이다.
+const envelopeSchema = v.object({ version: v.pipe(v.int(), v.minValue(1)) });
 
 // 지금 형식의 구조. 시험에서 가짜 옛 버전을 끼울 수 있게 버전을 받는다.
 export function currentStructure(version: number): v.Schema<StoredSettings> {

@@ -3,13 +3,15 @@ import * as valibot from 'valibot';
 // 런타임 검증의 어휘(결정 0028). 저장소에서 valibot을 가져오는 곳은 이 파일 하나다(린터가 막는다). 다른 곳은 contracts의
 // `v`로 스키마를 만들고(`v.object(...)`) 검증한다(`v.safeParse(schema, value)`의 `success`와 `output`).
 //
-// 대부분은 valibot의 것을 그대로 내보낸다. zod/mini에서 옮길 때 받아들이는 값이 달라지는 넷은 여기서 앞의 판과 같게 맞춘다.
-// 같은 형식 버전이면 판이 바뀌어도 저장된 값을 같게 읽어야 하기 때문이다(결정 0021). `tests/integration/schema-acceptance.test.ts`가
-// 지킨다.
-// - object, looseObject: 배열을 객체로 받지 않는다(valibot은 배열도 객체로 받는다).
-// - record: 보통 객체만 받는다. 배열, 클래스로 만든 객체, Map, Date는 받지 않는다.
+// 대부분은 valibot의 것을 그대로 내보낸다. zod/mini에서 옮길 때 받아들이는 값이나 내는 값이 달라지는 것은 여기서 앞의 판과
+// 같게 맞춘다. 같은 형식 버전이면 판이 바뀌어도 저장된 값을 같게 읽어야 하기 때문이다(결정 0021).
+// `tests/integration/schema-acceptance.test.ts`의 표와 `schema.test.ts`가 지킨다.
+// - object: 배열을 객체로 받지 않는다(valibot은 배열도 객체로 받는다).
+// - record: 보통 객체만 받는다. 배열, 클래스로 만든 객체, Map, Date는 받지 않는다. 키가 원형과 같은 이름이어도
+//   ('prototype', 'constructor') 버리지 않는다(valibot은 버린다). 객체 키로 둘 수 없는 '__proto__'만 뺀다.
 // - maxLength: 글자를 UTF-16 단위가 아니라 코드 포인트로 센다(BMP 밖 글자 하나가 하나, 짝 없는 대리 문자도 하나).
 // - number: 유한한 수만 받는다(valibot은 Infinity도 받는다). int는 안전한 정수(절댓값 2^53 미만)다.
+// 모르는 키를 남기는 객체(looseObject)는 두지 않는다. valibot의 것은 위 record처럼 원형과 같은 이름의 키를 버린다.
 
 export type { InferOutput } from 'valibot';
 
@@ -48,21 +50,33 @@ function isPlainObject(input: unknown): input is Readonly<Record<string, unknown
 }
 
 const objectNotArray = valibot.custom<unknown>(isObjectNotArray);
-const plainObject = valibot.custom<unknown>(isPlainObject);
+const plainObject = valibot.custom<Readonly<Record<string, unknown>>>(isPlainObject);
 
 export function object<const Entries extends valibot.ObjectEntries>(entries: Entries) {
   return valibot.pipe(objectNotArray, valibot.object(entries));
 }
 
-export function looseObject<const Entries extends valibot.ObjectEntries>(entries: Entries) {
-  return valibot.pipe(objectNotArray, valibot.looseObject(entries));
-}
-
-export function record<
-  const Key extends valibot.GenericSchema<string, string>,
-  const Value extends valibot.GenericSchema,
->(key: Key, value: Value) {
-  return valibot.pipe(plainObject, valibot.record(key, value));
+export function record<const Value extends valibot.GenericSchema>(
+  key: valibot.GenericSchema<string, string>,
+  value: Value,
+) {
+  return valibot.pipe(
+    plainObject,
+    valibot.rawTransform((context) => {
+      const output: Record<string, valibot.InferOutput<Value>> = {};
+      for (const [entryKey, entryValue] of Object.entries(context.dataset.value)) {
+        if (entryKey === '__proto__') continue;
+        const parsedKey = valibot.safeParse(key, entryKey);
+        const parsedValue = valibot.safeParse(value, entryValue);
+        if (!parsedKey.success || !parsedValue.success) {
+          context.addIssue();
+          return context.NEVER;
+        }
+        output[parsedKey.output] = parsedValue.output;
+      }
+      return output;
+    }),
+  );
 }
 
 // 코드 포인트의 수. 짝이 맞는 대리 문자 둘이 하나다.
