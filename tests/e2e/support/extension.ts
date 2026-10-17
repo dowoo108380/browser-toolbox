@@ -30,17 +30,25 @@ function distOf(build: ExtensionBuild): string {
   return build === 'fixture' ? fixtureDistPath : distPath;
 }
 
+export interface LaunchOptions {
+  // 참이면 브라우저 수준 CDP에 붙을 수 있게 띄운다(확장 다시 불러오기, R-04).
+  readonly browserDebugging?: boolean;
+  readonly build?: ExtensionBuild;
+  // 참이면 뒤로·앞으로 캐시(bfcache)를 켠다. Playwright는 Chromium을 --disable-back-forward-cache로 띄운다
+  // (playwright-core 1.64.0의 기본 인자에서 확인). 그 인자를 빼면 Chrome의 기본대로 켜진다(2026-10-17 실험).
+  readonly backForwardCache?: boolean;
+}
+
 // 빌드한 확장을 올린 Chromium을 그 프로필로 띄운다. 닫은 뒤 같은 프로필로 다시 띄우면 브라우저를 다시 시작한 것이다.
-// browserDebugging이 참이면 브라우저 수준 CDP에 붙을 수 있게 띄운다(확장 다시 불러오기, R-04).
 export function launchWithExtension(
   profileDirectory: string,
-  browserDebugging = false,
-  build: ExtensionBuild = 'product',
+  { browserDebugging = false, build = 'product', backForwardCache = false }: LaunchOptions = {},
 ): Promise<BrowserContext> {
   const dist = distOf(build);
   return chromium.launchPersistentContext(profileDirectory, {
     // 이 채널이어야 headless에서도 확장이 돈다(Playwright 문서).
     channel: 'chromium',
+    ignoreDefaultArgs: backForwardCache ? ['--disable-back-forward-cache'] : [],
     args: [
       `--disable-extensions-except=${dist}`,
       `--load-extension=${dist}`,
@@ -62,18 +70,28 @@ export const test = base.extend<{
   browserDebugging: boolean;
   // 올릴 빌드. 시험 기능이 필요한 시험만 'fixture'를 고른다(결정 0025).
   extensionBuild: ExtensionBuild;
+  // 참이면 bfcache를 켠다(LaunchOptions). bfcache를 보는 시험만 켠다.
+  backForwardCache: boolean;
   profileDirectory: string;
   context: BrowserContext;
   extensionId: string;
 }>({
   browserDebugging: [false, { option: true }],
   extensionBuild: ['product', { option: true }],
+  backForwardCache: [false, { option: true }],
   // eslint-disable-next-line no-empty-pattern -- Playwright는 첫 인자가 구조 분해 패턴이어야 의존하는 fixture를 안다.
   profileDirectory: async ({}, use, testInfo) => {
     await use(testInfo.outputPath('profile'));
   },
-  context: async ({ browserDebugging, extensionBuild, profileDirectory }, use) => {
-    const context = await launchWithExtension(profileDirectory, browserDebugging, extensionBuild);
+  context: async (
+    { browserDebugging, extensionBuild, backForwardCache, profileDirectory },
+    use,
+  ) => {
+    const context = await launchWithExtension(profileDirectory, {
+      browserDebugging,
+      build: extensionBuild,
+      backForwardCache,
+    });
     await use(context);
     // 시험이 먼저 닫았어도 된다(다시 시작 시험). 닫힌 컨텍스트를 다시 닫으면 아무 일도 하지 않는다.
     await context.close();
