@@ -195,6 +195,19 @@ describe('작업 시작', () => {
     });
   });
 
+  it('탭이 열려 있는지 묻지 못하면 시작하지 않고 platform으로 답한다(이유는 팝업이 보인다)', async () => {
+    const { runner, saving, records, problems, listening } = setup({
+      tabExists: () => Promise.reject(new Error('tabs')),
+    });
+    const result = await runner.start('save', 4);
+    expect(result.ok ? null : result.error.kind).toBe('platform');
+    expect(records()).toBeUndefined();
+    expect(saving.calls).toHaveLength(0);
+    expect(problems).toEqual([]);
+    // 시작하지 않았으므로 읽은 기록(없음)에 맞춰 듣기를 되돌린다.
+    expect(listening).toEqual([true, false]);
+  });
+
   it('기록을 남기지 못하면 시작하지 않고 platform으로 답한다', async () => {
     const fake = createFakeStore();
     const session = { ...fake, set: () => Promise.reject(new Error('quota')) };
@@ -696,6 +709,21 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     expect(listening).toEqual([]);
   });
 
+  it('탭이 열려 있는지 묻지 못하면 platform으로 기록하고 고치지 않으며 듣기를 그대로 둔다', async () => {
+    const running = { id: 'a', featureId: 'save', status: 'running' } as const;
+    const session = createFakeStore({ [tasksKey]: { '4': running } });
+    const writes = vi.spyOn(session, 'set');
+    const { runner, problems, listening, badges } = setup({
+      session,
+      tabExists: () => Promise.reject(new Error('tabs')),
+    });
+    await runner.recover();
+    expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
+    expect(writes).not.toHaveBeenCalled();
+    expect(badges).toEqual([]);
+    expect(listening).toEqual([]);
+  });
+
   it('고친 기록을 쓰지 못하면 platform으로 기록하고, 끝내지 못한 작업은 다음 시작에 고칠 때 기록한다', async () => {
     const running = { id: 'a', featureId: 'save', status: 'running' } as const;
     const { session, broken } = breakableStore({ [tasksKey]: { '4': running } });
@@ -749,6 +777,19 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
       await runner.start('copy', 5);
       expect(notices).toEqual([]);
     }
+  });
+
+  it('그 탭이 창의 지금 탭인지 묻지 못하면 그 기능으로 platform을 기록하고 보내지 않는다(배지가 알린다)', async () => {
+    const { runner, saving, notices, problems, badges } = setup({
+      isTabActive: () => Promise.reject(new Error('tabs')),
+    });
+    await runner.start('save', 4);
+    await finishLast(saving, ok({ summary: null }));
+    await vi.waitFor(() => {
+      expect(problems).toEqual([{ featureId: 'save', kind: 'platform' }]);
+    });
+    expect(notices).toEqual([]);
+    expect(badges.at(-1)).toEqual([4, succeededBadge]);
   });
 
   it('끝을 쓰지 않은 결과(탭이 닫힘)는 보내지 않는다', async () => {

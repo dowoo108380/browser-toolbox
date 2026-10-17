@@ -37,6 +37,7 @@ export interface TaskRunnerDeps {
   readonly parts: readonly TaskPart[];
   // 작업 id. 서비스 워커는 crypto.randomUUID()를 쓴다(확장의 출처라 늘 보안 문맥이다).
   readonly randomId: () => string;
+  // 그 탭이 열려 있는지. 닫힌 탭이면 거짓이고, 묻지 못하면(그 밖의 거절) 던진다.
   readonly tabExists: (tabId: number) => Promise<boolean>;
   // 그 탭의 확장 아이콘에 배지와 제목을 단다. null이면 지운다. 닫힌 탭이면 할 일이 없다.
   readonly badge: (tabId: number, badge: TabBadge | null) => Promise<void>;
@@ -44,6 +45,7 @@ export interface TaskRunnerDeps {
   readonly listenTabs: (on: boolean) => void;
   // 그 탭을 보는 팝업이 열려 있는지(팝업의 연결, 결정 0024).
   readonly popupViewing: (tabId: number) => boolean;
+  // 그 탭이 창의 지금 탭인지. 닫힌 탭이면 거짓이고, 묻지 못하면 던진다.
   readonly isTabActive: (tabId: number) => Promise<boolean>;
   // 그 탭의 최상위 프레임에 결과를 짧게 보이라고 한다(task.notice).
   readonly notify: (tabId: number, text: string) => Promise<Delivery>;
@@ -205,7 +207,13 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
   // 붙잡혀 답이 늦어도 다른 일이 기다리지 않는다. 받는 쪽이 없는 탭은 배지만 쓰는 경우라 기록하지 않는다.
   const announce = async (tabId: number, task: TaskRecord) => {
     if (task.status === 'running' || deps.popupViewing(tabId)) return;
-    if (!(await deps.isTabActive(tabId))) return;
+    const active = await deps.isTabActive(tabId).catch(() => null);
+    if (active === null) {
+      // 알릴지 정하지 못했다. 배지는 이미 달았으므로 알리지 않고 까닭을 남긴다(quality 067).
+      deps.record({ featureId: task.featureId, kind: 'platform' });
+      return;
+    }
+    if (!active) return;
     const name = nameOf(task.featureId);
     const text =
       task.status === 'succeeded'
@@ -226,7 +234,10 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     tabId: number,
     records: TaskRecords,
   ): Promise<Result<{ readonly taskId: string }, AppError>> => {
-    if (!(await deps.tabExists(tabId))) return err(appError('unavailable', strings.noTab));
+    // 탭을 묻지 못하면 시작하지 않는다. 그 이유는 팝업이 보인다.
+    const open = await deps.tabExists(tabId).catch(() => null);
+    if (open === null) return err(appError('platform', strings.tabUnknown));
+    if (!open) return err(appError('unavailable', strings.noTab));
     const id = deps.randomId();
     const started = startTask(records, tabId, { id, featureId: feature.id });
     if (!started.ok) {
@@ -318,7 +329,15 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
         }
         const tabIds = Object.keys(loaded.value).map(Number);
         const open = new Set<number>();
-        for (const tabId of tabIds) if (await deps.tabExists(tabId)) open.add(tabId);
+        for (const tabId of tabIds) {
+          const exists = await deps.tabExists(tabId).catch(() => null);
+          if (exists === null) {
+            // 탭을 묻지 못하면 열린 탭의 기록을 지울 수 있으므로 고치지 않는다. 읽지 못한 것과 같이 다음 시작에 고친다.
+            deps.record({ featureId: null, kind: 'platform' });
+            return;
+          }
+          if (exists) open.add(tabId);
+        }
         const { records, interrupted } = recoveredTasks(
           loaded.value,
           (tabId) => open.has(tabId),

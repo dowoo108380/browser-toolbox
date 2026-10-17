@@ -6,6 +6,7 @@ import type { AppError } from '../shared/index.ts';
 export const strings = {
   notAction: '실행 기능이 아니라 작업을 시작할 수 없다.',
   noTab: '작업을 시작할 탭이 없다.',
+  tabUnknown: '작업을 시작할 탭을 확인하지 못했다. 다시 실행한다.',
   running: (name: string) => `이 탭에서 ${name} 진행 중이다. 끝난 뒤 다시 한다.`,
   readFailed: '작업 기록을 읽지 못했다.',
   writeFailed: '작업 기록을 남기지 못했다.',

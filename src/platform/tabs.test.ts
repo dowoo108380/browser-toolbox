@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { listenTabEvents, tabExists } from './tabs.ts';
+import { isTabActive, listenTabEvents, tabExists } from './tabs.ts';
 
 // 탭 경계(결정 0024). 진짜 chrome 대신 시험이 만든 객체를 전역에 둔다. 서비스 워커를 깨우는지는 Chrome의 일이라
 // 여기서는 듣기를 걸고 그만두는 것만 본다(그만두면 깨우지 않는 것은 결정 0024의 실험 6).
@@ -67,12 +67,36 @@ describe('탭 닫힘과 이동 듣기', () => {
   });
 });
 
+// 탭 1은 창의 지금 탭, 탭 2는 뒤쪽 탭, 탭 3은 닫힌 탭이다. 그 밖의 탭은 Chrome이 알려지지 않은 까닭으로 거절한다.
+const tabs = (tabId: number) => {
+  if (tabId === 1 || tabId === 2) return Promise.resolve({ id: tabId, active: tabId === 1 });
+  if (tabId === 3) return Promise.reject(new Error('No tab with id: 3.'));
+  return Promise.reject(new Error('알려지지 않은 거절'));
+};
+
 describe('탭이 열려 있는지', () => {
-  it('Chrome이 탭을 주면 참, 거절하면(없는 탭) 거짓이다', async () => {
-    fakeTabs((tabId) =>
-      tabId === 1 ? Promise.resolve({ id: 1 }) : Promise.reject(new Error('No tab with id: 2.')),
-    );
+  it('Chrome이 탭을 주면 참, 닫힌 탭이라 거절하면 거짓이다', async () => {
+    fakeTabs(tabs);
     expect(await tabExists(1)).toBe(true);
-    expect(await tabExists(2)).toBe(false);
+    expect(await tabExists(3)).toBe(false);
+  });
+
+  it('닫힌 탭이 아닌 거절은 닫힌 탭으로 여기지 않고 던진다', async () => {
+    fakeTabs(tabs);
+    await expect(tabExists(9)).rejects.toThrow('알려지지 않은 거절');
+  });
+});
+
+describe('창의 지금 탭인지', () => {
+  it('지금 탭이면 참, 뒤쪽 탭이거나 닫힌 탭이면 거짓이다', async () => {
+    fakeTabs(tabs);
+    expect(await isTabActive(1)).toBe(true);
+    expect(await isTabActive(2)).toBe(false);
+    expect(await isTabActive(3)).toBe(false);
+  });
+
+  it('닫힌 탭이 아닌 거절은 닫힌 탭으로 여기지 않고 던진다', async () => {
+    fakeTabs(tabs);
+    await expect(isTabActive(9)).rejects.toThrow('알려지지 않은 거절');
   });
 });

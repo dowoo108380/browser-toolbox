@@ -4,14 +4,21 @@ export async function currentTabId(): Promise<number | null> {
   return tab?.id ?? null;
 }
 
-// 그 탭이 열려 있는지. 없는 탭이면 Chrome이 거절한다("No tab with id", 결정 0024의 실험 3). 탭 정보는 tabs 권한 없이도
-// 받는다(주소와 제목만 빠진다).
+// 닫힌 탭이면 Chrome이 "No tab with id: …"로 거절한다(결정 0024의 실험 3). 실제 문구는 e2e/tab-contract가 본다.
+// 이 밖의 거절을 닫힌 탭으로 여기지 않는다. 열린 탭의 기록을 지우거나 열린 탭을 없다고 답하는 쪽으로 숨기 때문이다.
+export function isClosedTab(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('No tab with id');
+}
+
+// 그 탭이 열려 있는지. 닫힌 탭이면 거짓이고, 그 밖의 거절은 던진다. 탭 정보는 tabs 권한 없이도 받는다(주소와 제목만
+// 빠진다).
 export async function tabExists(tabId: number): Promise<boolean> {
   try {
     await chrome.tabs.get(tabId);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isClosedTab(error)) return false;
+    throw error;
   }
 }
 
@@ -49,12 +56,13 @@ export function listenTabEvents(handlers: TabEventHandlers): TabEvents {
   return { listen };
 }
 
-// 그 탭이 창의 지금 탭인지. 닫힌 탭이면 거짓이다.
+// 그 탭이 창의 지금 탭인지. 닫힌 탭이면 거짓이고, 그 밖의 거절은 던진다.
 export async function isTabActive(tabId: number): Promise<boolean> {
   try {
     const tab = await chrome.tabs.get(tabId);
     return tab.active;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isClosedTab(error)) return false;
+    throw error;
   }
 }
