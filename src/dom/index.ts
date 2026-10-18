@@ -1,9 +1,5 @@
 export { type NamedElement, awaitElement, elementTimeoutMs } from './find.ts';
-export {
-  claimAttribute,
-  claimOwnedHosts,
-  createIsolatedHost,
-  hostTagName,
-  pageElementAttribute,
-} from './isolated-host.ts';
+export { createIsolatedHost, hostTagName } from './isolated-host.ts';
+export { claimAttribute, claimOwnedElements, pageElementAttribute } from './owned.ts';
+export { createPageStyle } from './page-style.ts';
 export { type Scope, createScope } from './scope.ts';

@@ -8,7 +8,7 @@ import {
   type NamedElement,
   type Scope,
   awaitElement,
-  claimOwnedHosts,
+  claimOwnedElements,
   createScope,
   elementTimeoutMs,
 } from '../dom/index.ts';
@@ -224,7 +224,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       return;
     }
     if (event instanceof CustomEvent && typeof event.detail === 'string') {
-      claimOwnedHosts(event.detail);
+      claimOwnedElements(event.detail);
     }
     if (recheckTimers.size > 0) return;
     for (const delay of retireRecheckDelaysMs) {

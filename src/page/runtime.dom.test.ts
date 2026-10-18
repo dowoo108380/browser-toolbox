@@ -10,6 +10,7 @@ import {
   type NamedElement,
   claimAttribute,
   createIsolatedHost,
+  createPageStyle,
   elementTimeoutMs,
   hostTagName,
   pageElementAttribute,
@@ -297,6 +298,26 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
     retireInFrame(retireEventName, pageElementAttribute, claimAttribute, 'service-worker-token');
     expect(document.querySelectorAll(hostTagName)).toHaveLength(0);
     expect(runtime.unsubscribed()).toBe(1);
+  });
+
+  it('COM-7.2 결정 0031 살아 있는 실행 틀의 페이지 스타일은 남기고, 옛 세계가 남긴 스타일은 지운다', () => {
+    const stylePart: PagePart = {
+      featureId: 'style',
+      frames: 'all',
+      start: (_value, { scope }) => {
+        const style = createPageStyle(document, { name: 'test-style', css: '' });
+        scope.defer(style.remove);
+      },
+    };
+    const runtime = setup([stylePart], true);
+    runtime.apply(snapshot({ style: { enabled: true } }));
+    const stale = document.createElement('style');
+    stale.setAttribute(pageElementAttribute, 'test-style');
+    document.documentElement.append(stale);
+
+    retireInFrame(retireEventName, pageElementAttribute, claimAttribute, 'service-worker-token');
+    expect(stale.isConnected).toBe(false);
+    expect(document.querySelectorAll(`style[${pageElementAttribute}]`)).toHaveLength(1);
   });
 
   it('흉내 낸 이벤트(토큰을 아는 웹 페이지)로는 살아 있는 실행 틀의 요소가 지워지지 않는다', () => {

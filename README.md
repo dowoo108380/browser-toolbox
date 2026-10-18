@@ -63,7 +63,7 @@ src/
   contracts/   메시지 정의, 기능 정의의 타입
   platform/    chrome.* API를 감싸는 경계와 테스트용 가짜
   storage/     설정 저장 형식, 형식 이전, 설정 읽기 도우미
-  dom/         웹 페이지 위 화면 틀(닫힌 shadow root), 자원 범위, 외부 화면 요소 찾기
+  dom/         웹 페이지 위 화면 틀(닫힌 shadow root), 페이지 스타일, 자원 범위, 외부 화면 요소 찾기
   page/        콘텐츠 스크립트 실행 틀
   background/  서비스 워커(메시지 라우터, 설정 쓰기, 문제 기록)
   ui/          확장 화면(Preact)
