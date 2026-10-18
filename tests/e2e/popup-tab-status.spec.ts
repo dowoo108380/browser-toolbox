@@ -44,7 +44,7 @@ test('결정 0023 탐침은 실행 틀이 도는 페이지를 ready로, 확장�
   const popup = await openPopup(context, extensionId);
   expect(await tabStatusOf(popup, fixture)).toEqual({
     ok: true,
-    value: { page: 'ready', notFound: [] },
+    value: { page: 'ready', bundle: 'common', notFound: [] },
   });
   expect(await tabStatusOf(popup, internal)).toEqual({ ok: true, value: { page: 'denied' } });
   // 이 확장의 페이지(그 팝업 문서 자신)에도 넣을 수 없다.

@@ -1,5 +1,6 @@
 import {
   type ElementRef,
+  type PageBundle,
   type PageStatus,
   pageRuntimeKey,
   retireEventName,
@@ -36,6 +37,8 @@ export interface PageProblem {
 
 interface PageRuntimeDeps {
   readonly parts: readonly PagePart[];
+  // 이 실행 틀을 담은 콘텐츠 스크립트 묶음. 표식의 값이 되어 서비스 워커의 탐침이 읽는다(결정 0029).
+  readonly bundle: PageBundle;
   readonly context: PageContext;
   // 이 문서가 탭의 최상위 프레임인지. 진입점이 자기 창으로 정해 넘긴다. 실행 틀이 context.window로 정하지 않는 것은
   // DOM 시험이 Vitest의 iframe 안에서 돌기 때문이다.
@@ -49,7 +52,7 @@ interface PageRuntimeDeps {
   readonly listenStatus: (answer: () => PageStatus) => () => void;
 }
 
-// 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4).
+// 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4). 표식의 값은 그 실행 틀의 묶음이다.
 // 격리된 쪽의 전역은 같은 확장의 콘텐츠 스크립트끼리만 함께 본다.
 const runtimeMarker = Symbol.for(pageRuntimeKey);
 
@@ -57,8 +60,8 @@ const runtimeMarker = Symbol.for(pageRuntimeKey);
 const retireRecheckDelaysMs = [200, 1000, 5000];
 
 export function startPageRuntime(deps: PageRuntimeDeps): void {
-  if (Reflect.get(globalThis, runtimeMarker) === true) return;
-  Reflect.set(globalThis, runtimeMarker, true);
+  if (Reflect.get(globalThis, runtimeMarker) !== undefined) return;
+  Reflect.set(globalThis, runtimeMarker, deps.bundle);
 
   let retired = false;
   let unsubscribe: () => void = () => undefined;

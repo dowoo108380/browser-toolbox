@@ -127,17 +127,19 @@ async function retireInTab(
   return null;
 }
 
-// 탭의 최상위 문서에서 이 확장의 실행 틀이 도는지(결정 0023). 이 확장의 격리된 세계에서 돌므로 실행 틀이 그 세계의
-// 전역에 둔 표식이 보인다. 확장을 다시 불러온 뒤의 옛 탭은 새 세계라 표식이 없다(2026-10-16 실험). Chrome이 함수
-// 본문만 옮겨 실행하므로 바깥의 이름을 쓰지 않고 표식 이름을 args로 받는다.
-export function hasPageRuntime(key?: string): boolean {
-  return key !== undefined && Reflect.get(globalThis, Symbol.for(key)) === true;
+// 탭의 최상위 문서에서 이 확장의 실행 틀이 둔 표식의 값(결정 0023, 0029). 이 확장의 격리된 세계에서 돌므로 실행 틀이 그
+// 세계의 전역에 둔 표식이 보인다. 확장을 다시 불러온 뒤의 옛 탭은 새 세계라 표식이 없다(2026-10-16 실험). 없으면 null이다.
+// Chrome이 함수 본문만 옮겨 실행하므로 바깥의 이름을 쓰지 않고 표식 이름을 args로 받는다.
+export function pageRuntimeMarker(key?: string): unknown {
+  if (key === undefined) return null;
+  const marker: unknown = Reflect.get(globalThis, Symbol.for(key));
+  return marker ?? null;
 }
 
-// 탐침 결과. ran: 넣었고 실행 틀이 있는지(runtime), unavailable: Chrome이 그 페이지에 넣기를 거절함(확장이 접근할 수
-// 없는 페이지), failed: 그 밖의 거절.
+// 탐침 결과. ran: 넣었고, 그 문서의 실행 틀 표식 값(marker, 없으면 null. 무엇인지 검증은 받는 쪽이 한다),
+// unavailable: Chrome이 그 페이지에 넣기를 거절함(확장이 접근할 수 없는 페이지), failed: 그 밖의 거절.
 export type PageProbe =
-  | { readonly status: 'ran'; readonly runtime: boolean }
+  | { readonly status: 'ran'; readonly marker: unknown }
   | { readonly status: 'unavailable' }
   | { readonly status: 'failed' };
 
@@ -150,13 +152,14 @@ export async function probePageRuntime(tabId: number, runtimeKey: string): Promi
   try {
     const [frame] = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
-      func: hasPageRuntime,
+      func: pageRuntimeMarker,
       args: [runtimeKey],
       // 문서가 다 실리기를 기다릴 이유가 없다(정리와 같은 까닭).
       injectImmediately: true,
     });
     if (frame === undefined) return { status: 'failed' };
-    return { status: 'ran', runtime: frame.result === true };
+    const marker: unknown = frame.result;
+    return { status: 'ran', marker: marker ?? null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return cannotProbe.some((known) => known.test(message))

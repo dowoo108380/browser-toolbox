@@ -12,7 +12,7 @@ import { type BuildOptions, type Plugin, build } from 'esbuild';
 import { features as productFeatures } from '../src/features/list.ts';
 import { pageScriptBudgetBytes } from './budgets.ts';
 import { createManifest, minimumChromeVersion } from './manifest.ts';
-import { syncGenerated } from './registry.ts';
+import { contentBundles, syncGenerated } from './registry.ts';
 
 // dist/에 압축 해제된 확장을 만든다(결정 0002, 아키텍처 10장).
 // --fixture이면 시험 빌드를 dist-fixture/에 만든다(결정 0025): 진입점이 가져오는 기능 목록과 서비스 워커·콘텐츠
@@ -89,10 +89,16 @@ const builds: BuildOptions[] = [
     },
     format: 'esm',
   },
-  // 콘텐츠 스크립트는 manifest에서 모듈로 쓸 수 있다는 문서가 없어 파일 하나로 묶는다(N-08).
+  // 콘텐츠 스크립트는 manifest에서 모듈로 쓸 수 있다는 문서가 없어 묶음마다 파일 하나로 묶는다(N-08). 사이트 묶음은
+  // 그 사이트 전용 기능이 있을 때만 있다(결정 0029).
   {
     ...common,
-    entryPoints: { 'content-common': 'src/entries/content-common.ts' },
+    entryPoints: Object.fromEntries(
+      contentBundles(features).map((bundle) => [
+        `content-${bundle}`,
+        `src/entries/content-${bundle}.ts`,
+      ]),
+    ),
     format: 'iife',
   },
 ];
@@ -100,7 +106,7 @@ const builds: BuildOptions[] = [
 for (const options of builds) await build(options);
 
 // 웹 페이지에 실리는 묶음은 크기 예산을 넘으면 빌드를 멈춘다(quality 111).
-for (const file of ['content-common.js']) {
+for (const file of contentBundles(features).map((bundle) => `content-${bundle}.js`)) {
   const size = statSync(path.join(outdir, file)).size;
   if (size > pageScriptBudgetBytes) {
     throw new Error(

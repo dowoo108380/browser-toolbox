@@ -115,6 +115,7 @@ function startExtension() {
   });
   startPageRuntime({
     parts: [regionPart],
+    bundle: 'common',
     context: { window, document },
     // 시험 문서는 Vitest의 iframe이지만, 서비스 워커가 묻는 탭의 최상위 프레임 노릇을 한다.
     topFrame: true,

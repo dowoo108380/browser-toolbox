@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppError } from '../shared/index.ts';
 import {
-  hasPageRuntime,
+  pageRuntimeMarker,
   probePageRuntime,
   retireInAllFrames,
   retireTimeoutMs,
@@ -242,9 +242,11 @@ describe('결정 0023 지금 탭의 탐침', () => {
     return executeScript;
   }
 
-  it('최상위 문서에만 바로 넣고, 실행 틀이 있는지 돌려준다', async () => {
-    const executeScript = fakeProbe(() => Promise.resolve([{ documentId: 'a', result: true }]));
-    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', runtime: true });
+  it('결정 0029 최상위 문서에만 바로 넣고, 실행 틀의 표식 값을 돌려준다(없으면 null)', async () => {
+    const executeScript = fakeProbe(() =>
+      Promise.resolve([{ documentId: 'a', result: 'chatgpt' }]),
+    );
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', marker: 'chatgpt' });
     expect(executeScript).toHaveBeenCalledWith(
       expect.objectContaining({
         target: { tabId: 7, frameIds: [0] },
@@ -252,8 +254,10 @@ describe('결정 0023 지금 탭의 탐침', () => {
         injectImmediately: true,
       }),
     );
-    fakeProbe(() => Promise.resolve([{ documentId: 'a', result: false }]));
-    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', runtime: false });
+    fakeProbe(() => Promise.resolve([{ documentId: 'a', result: null }]));
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', marker: null });
+    fakeProbe(() => Promise.resolve([{ documentId: 'a', result: undefined }]));
+    expect(await probePageRuntime(7, 'key')).toEqual({ status: 'ran', marker: null });
   });
 
   it('Chrome이 넣을 수 없는 페이지라고 거절하면 unavailable이다(Chromium 156에서 받은 문구)', async () => {
@@ -277,13 +281,13 @@ describe('결정 0023 지금 탭의 탐침', () => {
     expect(await probePageRuntime(7, 'key')).toEqual({ status: 'failed' });
   });
 
-  it('탐침 함수는 그 이름의 표식이 참일 때만 참이다', () => {
+  it('탐침 함수는 그 이름의 표식 값을 돌려주고, 없으면 null이다', () => {
     const key = 'browser-toolbox.test-runtime';
-    expect(hasPageRuntime(key)).toBe(false);
-    Reflect.set(globalThis, Symbol.for(key), true);
+    expect(pageRuntimeMarker(key)).toBeNull();
+    Reflect.set(globalThis, Symbol.for(key), 'common');
     try {
-      expect(hasPageRuntime(key)).toBe(true);
-      expect(hasPageRuntime()).toBe(false);
+      expect(pageRuntimeMarker(key)).toBe('common');
+      expect(pageRuntimeMarker()).toBeNull();
     } finally {
       Reflect.deleteProperty(globalThis, Symbol.for(key));
     }

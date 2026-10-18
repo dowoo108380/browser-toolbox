@@ -49,6 +49,7 @@ function setup(parts: readonly PagePart[], connected = true, topFrame = true) {
   let statusListeners = 0;
   const deps = {
     parts,
+    bundle: 'common' as const,
     context: { window, document },
     topFrame,
     subscribe: (next: SettingsReaderHandlers) => {
@@ -130,8 +131,10 @@ const ping = () => document.dispatchEvent(new Event('test-ping'));
 describe('콘텐츠 스크립트 실행 틀', () => {
   it('COM-1.4 같은 프레임에 두 번 실려도 실행 틀은 하나다', () => {
     const { deps, subscriptions } = setup([]);
-    startPageRuntime(deps);
+    startPageRuntime({ ...deps, bundle: 'chatgpt' });
     expect(subscriptions()).toBe(1);
+    // 표식의 값은 먼저 시작한 실행 틀의 묶음이다(결정 0029). 서비스 워커의 탐침이 이 값을 읽는다.
+    expect(Reflect.get(globalThis, Symbol.for(pageRuntimeKey))).toBe('common');
   });
 
   it('켜면 시작하고, 끄면 정리하며, 바뀌지 않은 기능은 다시 시작하지 않는다', () => {

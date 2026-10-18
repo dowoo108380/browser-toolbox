@@ -211,7 +211,7 @@ for (const { label, origin, secure } of origins) {
     await page.reload();
     expect(await tabStatusOf(reopened, page)).toEqual({
       ok: true,
-      value: { page: 'ready', notFound: [] },
+      value: { page: 'ready', bundle: 'common', notFound: [] },
     });
   });
 }

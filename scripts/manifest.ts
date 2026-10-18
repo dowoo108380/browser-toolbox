@@ -1,4 +1,5 @@
-import type { FeatureDefinition } from '../src/contracts/index.ts';
+import { type FeatureDefinition, siteMatches } from '../src/contracts/index.ts';
+import { contentBundles } from './registry.ts';
 
 // manifest는 기능 목록에서 만든다(결정 0004, 0009). 기능이 쓰지 않는 권한은 들어가지 않는다.
 
@@ -10,6 +11,23 @@ const pageMatches = ['http://*/*', 'https://*/*'];
 // 그 밖의 공용 권한(offscreen 등)은 처음 쓰는 기능을 만들 때 더한다.
 const commonPermissions = ['storage', 'scripting'];
 
+// 콘텐츠 스크립트 묶음 하나의 항목. 모든 프레임에 싣고, about:blank 같은 프레임에도 만든 문서의 출처를 보고 싣는다
+// (아키텍처 2장).
+function contentScript(
+  file: string,
+  matches: readonly string[],
+  excludeMatches: readonly string[],
+) {
+  return {
+    matches,
+    ...(excludeMatches.length === 0 ? {} : { exclude_matches: excludeMatches }),
+    js: [file],
+    all_frames: true,
+    match_origin_as_fallback: true,
+    run_at: 'document_start',
+  };
+}
+
 export function createManifest(
   features: readonly FeatureDefinition[],
   version: string,
@@ -17,6 +35,11 @@ export function createManifest(
   const featurePermissions = features.flatMap((feature) => feature.permissions);
   const permissions = [...new Set([...commonPermissions, ...featurePermissions])].sort();
   const pageFeatures = features.filter((feature) => feature.content !== null);
+  // 사이트 묶음이 있는 사이트에는 그 묶음만 싣는다. 사이트 묶음이 공통 기능도 담으므로 한 프레임에 실행 틀은 하나다
+  // (결정 0029, COM-1.4).
+  const siteBundles = contentBundles(features).flatMap((bundle) =>
+    bundle === 'common' ? [] : [bundle],
+  );
   return {
     manifest_version: 3,
     name: 'Browser Toolbox',
@@ -31,14 +54,14 @@ export function createManifest(
       pageFeatures.length === 0
         ? []
         : [
-            {
-              matches: pageMatches,
-              js: ['content-common.js'],
-              // about:blank 같은 프레임에도 만든 문서의 출처를 보고 싣는다(아키텍처 2장).
-              all_frames: true,
-              match_origin_as_fallback: true,
-              run_at: 'document_start',
-            },
+            contentScript(
+              'content-common.js',
+              pageMatches,
+              siteBundles.flatMap((site) => siteMatches[site]),
+            ),
+            ...siteBundles.map((site) =>
+              contentScript(`content-${site}.js`, siteMatches[site], []),
+            ),
           ],
   };
 }

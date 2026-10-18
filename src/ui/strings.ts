@@ -1,4 +1,4 @@
-import type { Category } from '../contracts/index.ts';
+import type { Category, Site } from '../contracts/index.ts';
 
 // 팝업의 문구(결정 0007). 기능의 이름과 설명은 기능 정의에 있다. 상태 문구는 모든 화면에서 같다(quality 018).
 
@@ -15,6 +15,10 @@ export const strings = {
   unavailable: (reason: string) => `쓸 수 없음: ${reason}`,
   pageDenied: '확장이 이 페이지에 접근할 수 없음',
   pageReload: '이 탭을 새로 고쳐야 쓸 수 있음',
+  // 사이트 전용 기능을 다른 사이트에서 열었을 때(결정 0029).
+  siteOnly: {
+    chatgpt: 'chatgpt.com에서만 쓸 수 있음',
+  } satisfies Record<Site, string>,
   // 기능이 기대는 외부 화면 요소를 제한 시간 안에 찾지 못했다(COM-6, 용어집). '찾지 못함'은 모든 화면에서 같은 상태 문구다.
   notFound: (elementName: string) => `찾지 못함: ${elementName}`,
   noCurrentTab: '지금 탭을 알 수 없어 기능을 쓸 수 있는지 확인하지 못했다.',

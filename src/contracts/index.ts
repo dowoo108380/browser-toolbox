@@ -4,11 +4,14 @@ export {
   type ContentTarget,
   type FeatureDefinition,
   type PageToggleFeature,
+  type Site,
   type ToggleFeature,
   type ToggleSettings,
   categories,
   defineFeature,
   featuresWithSettings,
+  siteMatches,
+  sites,
 } from './feature.ts';
 export {
   type ElementRef,
@@ -17,6 +20,7 @@ export {
   type TabStatus,
   elementRefSchema,
   noticeTextLimit,
+  pageBundleSchema,
   pageStatus,
   popupPort,
   popupRemember,
@@ -31,6 +35,6 @@ export {
   taskSeen,
   taskStart,
 } from './messages.ts';
-export { pageRuntimeKey, retireEventName } from './events.ts';
+export { type PageBundle, pageBundles, pageRuntimeKey, retireEventName } from './events.ts';
 // 런타임 검증의 어휘(결정 0028). valibot은 contracts/schema.ts만 가져오고, 다른 곳은 이 v를 쓴다.
 export * as v from './schema.ts';

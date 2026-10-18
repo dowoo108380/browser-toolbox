@@ -81,7 +81,7 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
     },
     onInstalled: () => undefined,
     retireOldScripts: () => Promise.resolve(),
-    probePage: options.probePage ?? (() => Promise.resolve({ status: 'ran', runtime: true })),
+    probePage: options.probePage ?? (() => Promise.resolve({ status: 'ran', marker: 'common' })),
     askPage:
       options.askPage ??
       (() => Promise.resolve({ delivery: 'delivered', value: { notFound: [] } } as const)),

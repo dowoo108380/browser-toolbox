@@ -1,5 +1,6 @@
 import * as v from './schema.ts';
 import { errorKinds } from '../shared/index.ts';
+import { pageBundles } from './events.ts';
 import { categories } from './feature.ts';
 
 // 구성 요소 사이의 요청은 여기서 한 번만 정의한다(결정 0006). 타입은 스키마에서 끌어낸다.
@@ -90,11 +91,15 @@ export const popupRemember = defineRequest({
 // 실행 틀이 지금 기대는 외부 화면 요소를 찾지 못한 기능과 그 요소(결정 0026).
 const notFoundSchema = v.array(v.object({ featureId: v.string(), element: elementRefSchema }));
 
+// 실행 틀을 담은 콘텐츠 스크립트 묶음(결정 0029). 서비스 워커가 탐침으로 읽은 실행 틀의 표식 값을 이것으로 검증한다.
+export const pageBundleSchema = v.picklist(pageBundles);
+
 // 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지(결정 0023). ready: 이 확장의 실행 틀이 그 탭의 최상위 문서에서
-// 돈다. 그 실행 틀이 찾지 못한 기능도 함께 싣는다(결정 0026). reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시
-// 불러오기 전에 연 페이지, 새로 고치면 쓸 수 있다). denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
+// 돈다. 그 실행 틀의 묶음(사이트 전용 기능을 그 탭에서 쓸 수 있는지, 결정 0029)과 찾지 못한 기능(결정 0026)을 함께
+// 싣는다. reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시 불러오기 전에 연 페이지, 새로 고치면 쓸 수 있다).
+// denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
 const tabStatusSchema = v.union([
-  v.object({ page: v.literal('ready'), notFound: notFoundSchema }),
+  v.object({ page: v.literal('ready'), bundle: pageBundleSchema, notFound: notFoundSchema }),
   v.object({ page: v.picklist(['reload', 'denied']) }),
 ]);
 

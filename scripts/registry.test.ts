@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type FeatureDefinition, defineFeature, v } from '../src/contracts/index.ts';
-import { contentCommonSource, swSource } from './registry.ts';
+import { contentBundles, contentSource, swSource, syncGenerated } from './registry.ts';
 
 // 결정 0004: 빌드가 기능 목록에서 진입점별 등록 목록을 만든다. 그 생성 규칙(어느 기능의 어느 자리 파일을 넣는가)을 본다.
 // 자리 파일이 있는지는 실제 폴더를 보므로 시험마다 임시 폴더에 기능 폴더를 만든다.
@@ -59,13 +59,14 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
       'no-page': ['feature.ts'],
       'not-on-pages': ['feature.ts', 'page.ts'],
     });
-    const source = contentCommonSource(
+    const source = contentSource(
       [
         toggle('media-speed', { sites: 'all', frames: 'all' }),
         toggle('no-page', { sites: 'all', frames: 'top' }),
         toggle('not-on-pages', null),
       ],
       root,
+      'common',
     );
     expect(source).toContain(
       "import { page as mediaSpeed } from '../../features/media-speed/page.ts';",
@@ -73,6 +74,45 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
     expect(source).toContain('export const pageParts: readonly FeaturePagePart[] = [mediaSpeed];');
     expect(source).not.toContain('noPage');
     expect(source).not.toContain('notOnPages');
+  });
+
+  it('결정 0029 사이트 묶음에는 모든 사이트의 기능과 그 사이트 전용 기능을 넣고, 공통 묶음에는 사이트 전용 기능을 넣지 않는다', () => {
+    const root = rootWith({
+      'media-speed': ['feature.ts', 'page.ts'],
+      'chatgpt-width': ['feature.ts', 'page.ts'],
+    });
+    const features = [
+      toggle('media-speed', { sites: 'all', frames: 'all' }),
+      toggle('chatgpt-width', { sites: 'chatgpt', frames: 'top' }),
+    ];
+    expect(contentBundles(features)).toEqual(['common', 'chatgpt']);
+    expect(contentSource(features, root, 'chatgpt')).toContain(
+      'export const pageParts: readonly FeaturePagePart[] = [mediaSpeed, chatgptWidth];',
+    );
+    expect(contentSource(features, root, 'common')).toContain(
+      'export const pageParts: readonly FeaturePagePart[] = [mediaSpeed];',
+    );
+    // 그 사이트 전용 기능이 없으면 사이트 묶음도 없다.
+    expect(contentBundles([toggle('media-speed', { sites: 'all', frames: 'all' })])).toEqual([
+      'common',
+    ]);
+  });
+
+  it('결정 0029 사이트 전용 기능을 모두 지우면 그 사이트의 등록 목록을 맞지 않는 것으로 알리고, 만들 때 지운다', async () => {
+    const root = rootWith({ 'media-speed': ['feature.ts', 'page.ts'] });
+    const features = [toggle('media-speed', { sites: 'all', frames: 'all' })];
+    expect(await syncGenerated(features, root, true)).toEqual([
+      path.join('src', 'entries', 'generated', 'content-common.ts'),
+      path.join('src', 'entries', 'generated', 'sw.ts'),
+    ]);
+    const leftover = path.join(root, 'src', 'entries', 'generated', 'content-chatgpt.ts');
+    writeFileSync(leftover, '');
+    const stale = [path.join('src', 'entries', 'generated', 'content-chatgpt.ts')];
+    expect(await syncGenerated(features, root, false)).toEqual(stale);
+    expect(existsSync(leftover)).toBe(true);
+    expect(await syncGenerated(features, root, true)).toEqual(stale);
+    expect(existsSync(leftover)).toBe(false);
+    expect(await syncGenerated(features, root, false)).toEqual([]);
   });
 
   it('결정 0024 서비스 워커의 등록 목록에는 실행 기능 가운데 background.ts가 있는 것의 task만 넣는다', () => {

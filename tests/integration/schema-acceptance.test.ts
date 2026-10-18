@@ -673,9 +673,15 @@ describe('메시지의 받아들임과 거절', () => {
         ['빈 객체', {}, 'failed'],
       ]);
     }
+    const ready = { page: 'ready', bundle: 'common' };
     await values(tabStatus, [
-      ['쓸 수 있음', { page: 'ready', notFound: [] }, accepted({ page: 'ready', notFound: [] })],
-      ['찾지 못함', { page: 'ready', notFound }, accepted({ page: 'ready', notFound })],
+      ['쓸 수 있음', { ...ready, notFound: [] }, accepted({ ...ready, notFound: [] })],
+      ['찾지 못함', { ...ready, notFound }, accepted({ ...ready, notFound })],
+      [
+        'ChatGPT 묶음',
+        { page: 'ready', bundle: 'chatgpt', notFound: [] },
+        accepted({ page: 'ready', bundle: 'chatgpt', notFound: [] }),
+      ],
       ['새로 고쳐야 함', { page: 'reload' }, accepted({ page: 'reload' })],
       ['접근할 수 없음', { page: 'denied' }, accepted({ page: 'denied' })],
       [
@@ -683,18 +689,20 @@ describe('메시지의 받아들임과 거절', () => {
         { page: 'reload', notFound: [] },
         accepted({ page: 'reload' }),
       ],
-      ['쓸 수 있음에 찾지 못함 없음', { page: 'ready' }, 'failed'],
+      ['쓸 수 있음에 찾지 못함 없음', ready, 'failed'],
+      ['쓸 수 있음에 묶음 없음', { page: 'ready', notFound: [] }, 'failed'],
+      ['모르는 묶음', { page: 'ready', bundle: 'youtube', notFound: [] }, 'failed'],
       ['모르는 단계', { page: 'nope' }, 'failed'],
-      ['찾지 못함이 객체', { page: 'ready', notFound: {} }, 'failed'],
+      ['찾지 못함이 객체', { ...ready, notFound: {} }, 'failed'],
       [
         '찾지 못함의 요소 이름 65자',
         {
-          page: 'ready',
+          ...ready,
           notFound: [{ featureId: 'f', element: { ...element, name: '가'.repeat(65) } }],
         },
         'failed',
       ],
-      ['찾지 못함의 원소가 배열', { page: 'ready', notFound: [[]] }, 'failed'],
+      ['찾지 못함의 원소가 배열', { ...ready, notFound: [[]] }, 'failed'],
     ]);
     await values(taskStart, [
       ['작업 id', { taskId: 'task-1' }, accepted({ taskId: 'task-1' })],

@@ -2,6 +2,7 @@ import {
   type FeatureDefinition,
   type PageStatus,
   featuresWithSettings,
+  pageBundleSchema,
   popupRemember,
   problemReport,
   repairNoticeDismiss,
@@ -10,6 +11,7 @@ import {
   tabStatus,
   taskSeen,
   taskStart,
+  v,
 } from '../contracts/index.ts';
 import type {
   Delivery,
@@ -63,7 +65,7 @@ export interface BackgroundDeps {
   // 열린 탭의 옛 스크립트에게 물러나라고 알린다(결정 0008). 넣을 수 없는 탭이 아닌데 실패한 것을 탭마다 끝나는 대로
   // report로 알리고, 모든 탭이 끝나거나 제한 시간을 넘기면 끝난다.
   readonly retireOldScripts: (report: (problem: AppError) => void) => Promise<void>;
-  // 그 탭의 최상위 문서에 탐침을 넣어 이 확장의 실행 틀이 도는지 본다(결정 0023).
+  // 그 탭의 최상위 문서에 탐침을 넣어 이 확장의 실행 틀이 도는지와 그 묶음을 본다(결정 0023, 0029).
   readonly probePage: (tabId: number) => Promise<PageProbe>;
   // 그 탭의 최상위 프레임의 실행 틀에 지금 상태(찾지 못한 기능)를 묻는다(page.status, 결정 0026).
   readonly askPage: (tabId: number, timeoutMs: number) => Promise<TabResponse<PageStatus>>;
@@ -143,10 +145,20 @@ export function startBackground(deps: BackgroundDeps): void {
       route(tabStatus, async (payload) => {
         const probe = await deps.probePage(payload.tabId);
         switch (probe.status) {
-          case 'ran':
-            return probe.runtime
-              ? ok({ page: 'ready', notFound: await notFoundOn(payload.tabId) })
-              : ok({ page: 'reload' });
+          case 'ran': {
+            if (probe.marker === null) return ok({ page: 'reload' });
+            // 표식은 같은 판의 실행 틀만 둔다(옛 판은 다른 세계다). 묶음 이름이 아니면 일어나면 안 되는 상태다.
+            const bundle = v.safeParse(pageBundleSchema, probe.marker);
+            if (!bundle.success) {
+              record({ featureId: null, kind: 'unexpected' });
+              return ok({ page: 'reload' });
+            }
+            return ok({
+              page: 'ready',
+              bundle: bundle.output,
+              notFound: await notFoundOn(payload.tabId),
+            });
+          }
           case 'unavailable':
             return ok({ page: 'denied' });
           case 'failed':

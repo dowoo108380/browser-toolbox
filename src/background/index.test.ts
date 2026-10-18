@@ -46,7 +46,7 @@ function start(
       installed = listener;
     },
     retireOldScripts: retire,
-    probePage: () => Promise.resolve({ status: 'ran', runtime: true }),
+    probePage: () => Promise.resolve({ status: 'ran', marker: 'common' }),
     askPage: () => Promise.resolve({ delivery: 'delivered', value: { notFound: [] } }),
   });
   return () => {
@@ -197,12 +197,29 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
   }
 
   it('그 탭의 최상위 문서에 실행 틀이 있으면 ready, 넣을 수는 있는데 없으면 reload다', async () => {
-    const ready = await statusWith({ status: 'ran', runtime: true });
-    expect(ready.result).toEqual({ ok: true, value: { page: 'ready', notFound: [] } });
+    const ready = await statusWith({ status: 'ran', marker: 'common' });
+    expect(ready.result).toEqual({
+      ok: true,
+      value: { page: 'ready', bundle: 'common', notFound: [] },
+    });
     expect(ready.probed).toEqual([7]);
-    const reload = await statusWith({ status: 'ran', runtime: false });
+    const reload = await statusWith({ status: 'ran', marker: null });
     expect(reload.result).toEqual({ ok: true, value: { page: 'reload' } });
     expect(reload.recorded).toEqual([]);
+  });
+
+  it('결정 0029 ready에는 실행 틀의 표식이 알린 묶음을 싣고, 표식이 묶음 이름이 아니면 unexpected로 기록하고 reload로 답한다', async () => {
+    const chatgpt = await statusWith({ status: 'ran', marker: 'chatgpt' });
+    expect(chatgpt.result).toEqual({
+      ok: true,
+      value: { page: 'ready', bundle: 'chatgpt', notFound: [] },
+    });
+    for (const marker of [true, 'youtube', 1]) {
+      const strange = await statusWith({ status: 'ran', marker });
+      expect(strange.result, String(marker)).toEqual({ ok: true, value: { page: 'reload' } });
+      expect(strange.recorded, String(marker)).toEqual(['unexpected']);
+      expect(strange.asked, String(marker)).toEqual([]);
+    }
   });
 
   it('Chrome이 알려진 문구로 거절하면 denied이고 기록하지 않는다', async () => {
@@ -222,17 +239,20 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
       { featureId: 'sample', element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } },
     ];
     const ready = await statusWith(
-      { status: 'ran', runtime: true },
+      { status: 'ran', marker: 'common' },
       { delivery: 'delivered', value: { notFound } },
     );
-    expect(ready.result).toEqual({ ok: true, value: { page: 'ready', notFound } });
+    expect(ready.result).toEqual({
+      ok: true,
+      value: { page: 'ready', bundle: 'common', notFound },
+    });
     expect(ready.asked).toEqual([[7, 1000]]);
     expect(ready.recorded).toEqual([]);
   });
 
   it('결정 0026 실행 틀이 없거나 넣을 수 없는 탭에는 묻지 않는다', async () => {
     for (const probe of [
-      { status: 'ran', runtime: false },
+      { status: 'ran', marker: null },
       { status: 'unavailable' },
       { status: 'failed' },
     ] as const) {
@@ -247,8 +267,11 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
       ['failed', ['platform']],
     ] as const;
     for (const [delivery, recorded] of cases) {
-      const answered = await statusWith({ status: 'ran', runtime: true }, { delivery });
-      expect(answered.result).toEqual({ ok: true, value: { page: 'ready', notFound: [] } });
+      const answered = await statusWith({ status: 'ran', marker: 'common' }, { delivery });
+      expect(answered.result).toEqual({
+        ok: true,
+        value: { page: 'ready', bundle: 'common', notFound: [] },
+      });
       expect(answered.recorded).toEqual(recorded);
     }
   });

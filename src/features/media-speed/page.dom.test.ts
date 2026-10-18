@@ -541,6 +541,7 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
     let handlers: SettingsReaderHandlers | undefined;
     startPageRuntime({
       parts: [page, other],
+      bundle: 'common',
       context: { window, document },
       topFrame: true,
       subscribe: (next) => {

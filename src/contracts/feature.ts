@@ -8,11 +8,22 @@ export type Category = (typeof categories)[number];
 // 기능이 요청하는 Chrome 권한. 기능을 만들며 필요한 것을 더한다(결정 0009).
 type FeaturePermission = never;
 
+// 사이트 전용 기능이 작용하는 사이트(결정 0029). 사이트마다 콘텐츠 스크립트 묶음 하나가 그 주소에 실리고, 모든 사이트의
+// 묶음(공통)은 그 주소에 실리지 않는다. YouTube는 그 사이트의 기능을 만들 때 더한다.
+export const sites = ['chatgpt'] as const;
+
+export type Site = (typeof sites)[number];
+
+// 사이트의 주소 패턴(manifest의 matches). manifest 생성이 쓰는 원본이다.
+export const siteMatches: Readonly<Record<Site, readonly string[]>> = {
+  chatgpt: ['https://chatgpt.com/*'],
+};
+
 // 기능이 페이지에 작용하는 곳(아키텍처 2장). 사이트는 빌드가 그 기능의 페이지 쪽 일을 넣을 콘텐츠 스크립트 묶음을 고르고
 // (scripts/registry.ts), 프레임은 실행 틀이 그 프레임에서 시작할 기능을 고른다(src/page/runtime.ts). 묶음은 모든 프레임에
-// 실린다. YouTube·chatgpt.com 전용 묶음은 그 사이트의 기능을 만들 때 더한다.
+// 실린다. 'all'이면 모든 http·https 페이지(공통 묶음과 모든 사이트 묶음), 사이트 이름이면 그 사이트의 묶음에만 든다.
 export interface ContentTarget {
-  readonly sites: 'all';
+  readonly sites: 'all' | Site;
   // 'top'이면 탭의 최상위 프레임에서만 작용한다.
   readonly frames: 'all' | 'top';
 }

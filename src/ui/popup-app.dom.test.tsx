@@ -118,7 +118,8 @@ async function show({
   readRemembered = () => Promise.resolve(null),
   remember = () => Promise.resolve(ok(null)),
   currentTab = () => Promise.resolve(ok(7)),
-  tabStatus = () => Promise.resolve(ok({ page: 'ready' as const, notFound: [] })),
+  tabStatus = () =>
+    Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, notFound: [] })),
   startTask = () => Promise.resolve(ok(null)),
   taskSeen = () => Promise.resolve(ok(null)),
   holdTaskRead = false,
@@ -511,7 +512,11 @@ describe('COM-2 기대 동작 4 지금 탭에서 쓸 수 없는 기능의 이유
       features: both,
       tabStatus: () =>
         Promise.resolve(
-          ok({ page: 'ready' as const, notFound: [{ featureId: 'on-pages', element }] }),
+          ok({
+            page: 'ready' as const,
+            bundle: 'common' as const,
+            notFound: [{ featureId: 'on-pages', element }],
+          }),
         ),
     });
     await popup.awake();
@@ -710,7 +715,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     await click(button('capture'));
     expect(popup.starts).not.toHaveBeenCalled();
     await act(() => {
-      answer(ok({ page: 'ready', notFound: [] }));
+      answer(ok({ page: 'ready', bundle: 'common', notFound: [] }));
     });
     await vi.waitFor(() => {
       expect(button('capture').hasAttribute('aria-disabled')).toBe(false);
@@ -996,7 +1001,9 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           rememberedCategory={() => Promise.resolve(null)}
           rememberCategory={() => Promise.resolve(ok(null))}
           currentTab={() => Promise.resolve(ok(1))}
-          tabStatus={() => Promise.resolve(ok({ page: 'ready' as const, notFound: [] }))}
+          tabStatus={() =>
+            Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, notFound: [] }))
+          }
           startTask={() => Promise.resolve(ok(null))}
           watchTask={() => () => undefined}
           taskSeen={() => Promise.resolve(ok(null))}
