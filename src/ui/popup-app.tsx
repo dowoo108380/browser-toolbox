@@ -41,10 +41,11 @@ interface PopupProps {
   readonly watchRepairs: (handlers: RepairNoticeHandlers) => () => void;
   // 서비스 워커를 깨운다. 응답이 오면 깨어 있는 것이다.
   readonly wake: () => Promise<Result<unknown, AppError>>;
+  // 설정을 바꾼다. 저장하면 저장한 값의 세대 번호(revision)를 준다.
   readonly update: (
     featureId: string,
     patch: Readonly<Record<string, unknown>>,
-  ) => Promise<Result<unknown, AppError>>;
+  ) => Promise<Result<{ readonly revision: number }, AppError>>;
   // 사용자가 본 복구 알림(stamp)을 확인했다고 서비스 워커에 알린다.
   readonly dismissRepair: (stamp: number) => Promise<Result<unknown, AppError>>;
   // 지난번에 고른 범주. 없거나 읽지 못하면 null이다(결정 0023).
@@ -65,6 +66,12 @@ interface PopupProps {
   // 그 탭을 본다고 서비스 워커에 알린다(팝업의 연결, 결정 0024). 그 탭에서 끝난 작업은 페이지 위에 알리지 않고 이 팝업이
   // 보인다. renew는 연결이 끊겼으면(서비스 워커가 다시 시작함) 다시 잇는다.
   readonly announceTab: (tabId: number) => PopupAnnouncement;
+}
+
+// 읽기 도우미가 받아들인 설정과 그 세대 번호(결정 0036). 화면 조각이 자기 저장이 담겼는지 가른다.
+interface Stored {
+  readonly snapshot: Snapshot;
+  readonly revision: number | null;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -110,7 +117,7 @@ export function PopupApp({
   taskSeen,
   announceTab,
 }: PopupProps) {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [stored, setStored] = useState<Stored | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   // 서비스 워커가 깨어났는지(첫 깨우기의 응답을 받았는지). 그 전에는 스위치를 쓸 수 없다.
   // 깨어나는 중에 보낸 요청은 팝업이 곧바로 닫히면 닿지 않기 때문이다(N-12, R-23).
@@ -269,12 +276,14 @@ export function PopupApp({
   useEffect(
     () =>
       subscribe({
-        apply: setSnapshot,
+        apply: (snapshot, revision) => {
+          setStored({ snapshot, revision });
+        },
         corrupt: (scope) => {
           setSeenRepair((previous) => mergeRepairs(previous, scope));
         },
         newer: () => {
-          setSnapshot(null);
+          setStored(null);
           setNotice({ message: strings.newer });
         },
         problem: (error) => {
@@ -316,14 +325,14 @@ export function PopupApp({
   }, [wake]);
 
   // 화면은 저장된 값을 보인다. 저장에 실패하면 알리고, 스위치와 화면 조각은 저장된 값으로 돌아간다(COM-3 기대 동작 3).
-  // 거절하지 않고 저장했는지를 돌려준다.
+  // 거절하지 않고, 저장했으면 저장한 값의 세대 번호를, 못 했으면 null을 돌려준다.
   const save = async (
     featureId: string,
     patch: Readonly<Record<string, unknown>>,
-  ): Promise<boolean> => {
+  ): Promise<number | null> => {
     const result = await update(featureId, patch);
     setNotice(result.ok ? null : { message: result.error.message });
-    return result.ok;
+    return result.ok ? result.value.revision : null;
   };
 
   // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
@@ -345,7 +354,7 @@ export function PopupApp({
     (feature.content === null || tabState !== undefined);
 
   // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치(와 그 기능의 화면 조각), 실행은 단추다.
-  const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
+  const itemOf = (feature: FeatureDefinition, { snapshot: settings, revision }: Stored) => {
     switch (feature.kind) {
       case 'toggle': {
         const part = uiParts.find((candidate) => candidate.featureId === feature.id);
@@ -363,6 +372,7 @@ export function PopupApp({
               part === undefined
                 ? null
                 : part.render(settings, {
+                    revision,
                     disabled: !awake,
                     save: (patch) => save(feature.id, patch),
                   })
@@ -409,7 +419,7 @@ export function PopupApp({
   return (
     <main ref={root}>
       <TaskStatus task={task.shown} nameOf={nameOf} />
-      {snapshot === null || !categoryRead ? (
+      {stored === null || !categoryRead ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (
         <>
@@ -441,7 +451,7 @@ export function PopupApp({
                   <ul class="features">
                     {features
                       .filter((feature) => feature.category === category)
-                      .map((feature) => itemOf(feature, snapshot))}
+                      .map((feature) => itemOf(feature, stored))}
                   </ul>
                 </section>
               </div>
@@ -449,9 +459,7 @@ export function PopupApp({
           )}
         </>
       )}
-      {snapshot !== null && categoryRead && notice !== null && (
-        <p role="status">{notice.message}</p>
-      )}
+      {stored !== null && categoryRead && notice !== null && <p role="status">{notice.message}</p>}
       {!isEmptyRepair(repair) && (
         <section class="repair" aria-label={strings.repairLabel} aria-live="polite">
           {repair.whole && <p>{strings.repairWhole}</p>}

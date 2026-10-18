@@ -140,10 +140,10 @@ function startGpt2() {
     document.dispatchEvent(new Event(retireEventName));
     Reflect.deleteProperty(globalThis, Symbol.for(pageRuntimeKey));
   });
-  handlers?.apply({
-    features: new Map([['chatgpt-width', { enabled: true, width: 1200 }]]),
-    sites: new Map(),
-  });
+  handlers?.apply(
+    { features: new Map([['chatgpt-width', { enabled: true, width: 1200 }]]), sites: new Map() },
+    1,
+  );
   return { reports, status: () => answerStatus?.() };
 }
 

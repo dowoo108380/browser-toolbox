@@ -44,6 +44,13 @@ describe('한 시점의 값만 쓴다', () => {
     expect(otherEnabled(state)).toEqual({ enabled: true });
   });
 
+  it('결정 0036 적용할 때 그 값의 revision을 함께 낸다(화면이 자기 저장이 담겼는지 가른다)', () => {
+    const revisions = run([stored(t), stored(t + 5)]).effects.map((effect) =>
+      effect.kind === 'apply' ? effect.revision : effect.kind,
+    );
+    expect(revisions).toEqual([t, t + 5]);
+  });
+
   it('같은 revision을 다시 받으면 아무것도 하지 않는다', () => {
     const value = stored(t, { other: { enabled: true } });
     expect(run([value, value]).effects.map((effect) => effect.kind)).toEqual(['apply']);
@@ -64,7 +71,7 @@ describe('COM-3.10 전체 손상 뒤 복구', () => {
     expect(state.accepted).toBeNull();
     expect(otherEnabled(state)).toBeUndefined();
     expect(effects.slice(1)).toEqual([
-      { kind: 'apply', snapshot: { features: new Map(), sites: new Map() } },
+      { kind: 'apply', snapshot: { features: new Map(), sites: new Map() }, revision: null },
       { kind: 'corrupt', scope: { whole: true, features: [], sites: [] } },
       { kind: 'ensureReady' },
     ]);

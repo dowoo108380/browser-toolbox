@@ -17,7 +17,10 @@ export interface SettingsReaderDeps {
 }
 
 export interface SettingsReaderHandlers {
-  readonly apply: (snapshot: Snapshot) => void;
+  // 받아들인 설정과 그 값의 revision(세대 번호). 서비스 워커는 쓸 때마다 앞 값보다 크게 정하므로, 화면은 자기가 보낸
+  // 저장이 받은 설정에 담겼는지(그 저장의 응답이 준 revision보다 작지 않은지) 가를 수 있다(결정 0011, 0036). 기본값으로
+  // 대신 쓰면 null이다.
+  readonly apply: (snapshot: Snapshot, revision: number | null) => void;
   // 손상을 보아 기본값으로 대신 쓰는 범위(설정 전체, 손상 항목).
   readonly corrupt: (scope: RepairScope) => void;
   readonly newer: (version: number) => void;
@@ -48,7 +51,7 @@ export function startSettingsReader(
     for (const effect of step.effects) {
       switch (effect.kind) {
         case 'apply':
-          handlers.apply(effect.snapshot);
+          handlers.apply(effect.snapshot, effect.revision);
           break;
         case 'corrupt':
           handlers.corrupt(effect.scope);

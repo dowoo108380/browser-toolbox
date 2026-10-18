@@ -17,6 +17,8 @@ function setup<Store extends Pick<KeyValueStore, 'get' | 'onChanged'>>(
   format: SettingsFormat = settingsFormat,
 ) {
   const applied: Snapshot[] = [];
+  // 적용한 값마다 함께 받은 revision.
+  const revisions: (number | null)[] = [];
   const problems: AppError[] = [];
   const corrupted: RepairScope[] = [];
   const newer: number[] = [];
@@ -32,13 +34,25 @@ function setup<Store extends Pick<KeyValueStore, 'get' | 'onChanged'>>(
   const stop = startSettingsReader(
     { store, request, format, specs },
     {
-      apply: (snapshot) => applied.push(snapshot),
+      apply: (snapshot, revision) => {
+        applied.push(snapshot);
+        revisions.push(revision);
+      },
       corrupt: (scope) => corrupted.push(scope),
       newer: (version) => newer.push(version),
       problem: (error) => problems.push(error),
     },
   );
-  return { store, applied, problems, corrupted, newer, stop, ensureCount: () => ensureCount };
+  return {
+    store,
+    applied,
+    revisions,
+    problems,
+    corrupted,
+    newer,
+    stop,
+    ensureCount: () => ensureCount,
+  };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -64,6 +78,15 @@ describe('읽기 도우미', () => {
     expect(harness.ensureCount()).toBe(1);
     expect(harness.applied.length).toBeGreaterThanOrEqual(1);
     expect(harness.problems).toEqual([]);
+  });
+
+  it('결정 0036 받아들인 값마다 그 revision을 함께 알린다', async () => {
+    const store = createFakeStore({ [settingsKey]: stored(t) });
+    const harness = setup(store, () => Promise.resolve(ok(null)));
+    await settle();
+    store.replace(settingsKey, stored(t + 7));
+    await settle();
+    expect(harness.revisions).toEqual([t, t + 7]);
   });
 
   it('준비 요청이 시간을 넘기면 기능을 시작하지 않고 문제를 알린다', async () => {

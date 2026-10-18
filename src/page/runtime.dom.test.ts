@@ -96,7 +96,7 @@ function setup(
   return {
     deps,
     reports,
-    apply: (value: Snapshot) => handlers?.apply(value),
+    apply: (value: Snapshot) => handlers?.apply(value, 1),
     problem: (error: AppError) => handlers?.problem(error),
     newer: (version: number) => handlers?.newer(version),
     subscriptions: () => subscriptions,

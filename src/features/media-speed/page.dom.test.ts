@@ -559,7 +559,7 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
       listenNotices: () => () => undefined,
       listenStatus: () => () => undefined,
     });
-    handlers?.apply(enabled);
+    handlers?.apply(enabled, 1);
     return reports;
   }
 

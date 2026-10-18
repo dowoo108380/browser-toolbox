@@ -102,7 +102,7 @@ interface Options {
   readonly features?: readonly FeatureDefinition[];
   readonly uiParts?: readonly FeatureUiPart[];
   readonly wake?: () => Promise<Result<unknown, AppError>>;
-  readonly update?: () => Promise<Result<unknown, AppError>>;
+  readonly update?: () => Promise<Result<{ readonly revision: number }, AppError>>;
   // 지난번 범주를 읽는 함수. 없으면 남긴 범주가 없다.
   readonly readRemembered?: () => Promise<Category | null>;
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
@@ -128,7 +128,7 @@ async function show({
   taskSeen = () => Promise.resolve(ok(null)),
   holdTaskRead = false,
 }: Options = {}) {
-  const updates = vi.fn(update ?? (() => Promise.resolve(ok(null))));
+  const updates = vi.fn(update ?? (() => Promise.resolve(ok({ revision: 2 }))));
   const starts = vi.fn(startTask);
   const seens = vi.fn(taskSeen);
   // 작업 기록은 시험이 보낸다(task). 팝업이 어느 탭의 기록을 들었는지 남긴다.
@@ -166,7 +166,7 @@ async function show({
   let handlers: SettingsReaderHandlers | undefined;
   const subscribe = (next: SettingsReaderHandlers) => {
     handlers = next;
-    next.apply(off);
+    next.apply(off, 1);
     return () => undefined;
   };
   await act(() => {
@@ -231,7 +231,9 @@ async function show({
     taskText: () => container.querySelector('.task')?.textContent ?? '',
     state: () => container.querySelector('.state')?.textContent,
     status: () => container.querySelector('[role=status]')?.textContent,
-    apply: (snapshot: Snapshot) => act(() => handlers?.apply(snapshot)),
+    // 저장된 설정이 바뀐 것처럼 알린다(세대 번호를 주지 않으면 2).
+    apply: (snapshot: Snapshot, revision: number | null = 2) =>
+      act(() => handlers?.apply(snapshot, revision)),
     tab: (name: string) => {
       const found = [...container.querySelectorAll<HTMLElement>('[role=tab]')].find(
         (element) => element.textContent === name,
@@ -920,7 +922,7 @@ describe('COM-3 기대 동작 3 저장에 실패하면 화면은 저장된 값�
       popup.toggle().click();
       await Promise.resolve();
     });
-    popup.updates.mockImplementation(() => Promise.resolve(ok(null)));
+    popup.updates.mockImplementation(() => Promise.resolve(ok({ revision: 2 })));
     await act(async () => {
       popup.toggle().click();
       await Promise.resolve();
@@ -947,12 +949,13 @@ describe('결정 0030 기능의 화면 조각', () => {
       defaults: { enabled: false, size: 3 },
     },
   });
-  // 저장된 크기를 보이고, 누르면 크기 5를 저장하며 저장했는지를 보이는 조각.
-  const sizedPart = defineUiPart(sized, ({ settings, disabled, save }) => {
-    const [saved, setSaved] = useState<boolean | null>(null);
+  // 저장된 크기와 그 세대 번호를 보이고, 누르면 크기 5를 저장하며 저장한 세대 번호(못 했으면 null)를 보이는 조각.
+  const sizedPart = defineUiPart(sized, ({ settings, revision, disabled, save }) => {
+    const [saved, setSaved] = useState<number | null | undefined>(undefined);
     return (
       <div class="controls">
         <span class="size">{settings.size}</span>
+        <span class="revision">{String(revision)}</span>
         <button
           type="button"
           disabled={disabled}
@@ -978,13 +981,17 @@ describe('결정 0030 기능의 화면 조각', () => {
     const item = container.querySelector('[data-feature="sized"]')?.closest('li');
     expect(item?.querySelector('.description + .controls')).not.toBeNull();
     expect(text('.size')).toBe('3');
+    expect(text('.revision')).toBe('1');
     // 조각이 없는 기능에는 아무것도 붙지 않는다.
     expect(container.querySelectorAll('.controls')).toHaveLength(1);
-    await popup.apply({
-      features: new Map([['sized', { enabled: false, size: 8 }]]),
-      sites: new Map(),
-    });
-    expect(text('.size')).toBe('8');
+    // 결정 0036 읽기 도우미가 받아들인 설정의 세대 번호도 함께 준다(기본값으로 대신 쓰면 null).
+    await popup.apply(
+      { features: new Map([['sized', { enabled: false, size: 8 }]]), sites: new Map() },
+      9,
+    );
+    expect([text('.size'), text('.revision')]).toEqual(['8', '9']);
+    await popup.apply({ features: new Map(), sites: new Map() }, null);
+    expect([text('.size'), text('.revision')]).toEqual(['3', 'null']);
   });
 
   it('N-12 서비스 워커가 깨어나기 전에는 조각의 조작도 막는다', async () => {
@@ -1002,8 +1009,8 @@ describe('결정 0030 기능의 화면 조각', () => {
     expect(button().disabled).toBe(false);
   });
 
-  it('COM-3 기대 동작 3 저장은 그 기능의 설정 바꾸기로 가고, 저장했는지를 조각에 돌려주며, 실패하면 알린다', async () => {
-    let result: Result<unknown, AppError> = ok(null);
+  it('COM-3 기대 동작 3 결정 0036 저장은 그 기능의 설정 바꾸기로 가고, 저장한 세대 번호(못 했으면 null)를 조각에 돌려주며, 실패하면 알린다', async () => {
+    let result: Result<{ readonly revision: number }, AppError> = ok({ revision: 7 });
     const popup = await show({
       features: [sized],
       uiParts: [sizedPart],
@@ -1015,7 +1022,7 @@ describe('결정 0030 기능의 화면 조각', () => {
     });
     expect(popup.updates).toHaveBeenLastCalledWith('sized', { size: 5 });
     await vi.waitFor(() => {
-      expect(text('.saved')).toBe('true');
+      expect(text('.saved')).toBe('7');
     });
     expect(popup.status()).toBeUndefined();
 
@@ -1024,7 +1031,7 @@ describe('결정 0030 기능의 화면 조각', () => {
       button().click();
     });
     await vi.waitFor(() => {
-      expect(text('.saved')).toBe('false');
+      expect(text('.saved')).toBe('null');
     });
     expect(popup.status()).toBe(saveFailed.message);
   });
@@ -1078,7 +1085,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
 
   async function showWith({
     subscribe = (handlers) => {
-      handlers.apply(off);
+      handlers.apply(off, 1);
     },
     dismiss,
   }: Wiring) {
@@ -1100,7 +1107,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
             return () => undefined;
           }}
           wake={() => Promise.resolve(ok(null))}
-          update={() => Promise.resolve(ok(null))}
+          update={() => Promise.resolve(ok({ revision: 2 }))}
           dismissRepair={dismissals}
           rememberedCategory={() => Promise.resolve(null)}
           rememberCategory={() => Promise.resolve(ok(null))}
@@ -1140,7 +1147,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
   it('COM-3.4 손상 항목이 있으면 기본값을 보이고 그 기능 이름을 알린다', async () => {
     const popup = await showWith({
       subscribe: (handlers) => {
-        handlers.apply({ features: new Map(), sites: new Map() });
+        handlers.apply({ features: new Map(), sites: new Map() }, 1);
         handlers.corrupt(scope(['sample']));
       },
     });
@@ -1218,7 +1225,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
   it('COM-3.8 더 새 형식의 설정이면 기능을 보이지 않고 이유를 알린다', async () => {
     await showWith({
       subscribe: (handlers) => {
-        handlers.apply(off);
+        handlers.apply(off, 1);
         handlers.newer(2);
       },
     });
