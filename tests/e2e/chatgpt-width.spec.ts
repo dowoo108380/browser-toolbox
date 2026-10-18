@@ -358,6 +358,36 @@ test('결정 0031 대화 열이 없는 대화 화면에서 15초가 되기 전�
   expect(await widths(page, signedOut)).toEqual({ thread: null, composer: 1200 });
 });
 
+test('COM-6 기대 동작 4 결정 0033 대화 열을 찾지 못해 멈춘 뒤(15초가 지난 뒤) 새 대화로 가면 그 화면에 있어야 할 작성란만 찾아 너비가 돌아오고 찾지 못함이 없어진다', async ({
+  context,
+  extensionId,
+}) => {
+  test.setTimeout(120_000);
+  const worker = await serviceWorkerOf(context);
+  const { page, errors } = await openChatgpt(context, signedOut, '/c/abc');
+  await removeThread(page, signedOut);
+  const enabled = await popupOn(context, extensionId, page);
+  await enabled.feature.check();
+  await enabled.popup.close();
+  await expect.poll(() => widths(page, signedOut)).toEqual({ thread: null, composer: 1200 });
+  await expect
+    .poll(() => problemRecords(worker), { timeout: elementTimeoutMs + 10_000 })
+    .toHaveLength(1);
+  // 찾지 못해 기능이 멈췄다(작성란도 원래 너비).
+  expect(await widths(page, signedOut)).toEqual({ thread: null, composer: 768 });
+
+  await navigateInPage(page, signedOut, '/');
+  await expect.poll(() => widths(page, signedOut)).toEqual({ thread: null, composer: 1200 });
+  const moved = await popupOn(context, extensionId, page);
+  await expect(moved.reason).toHaveCount(0);
+  await moved.popup.close();
+  // 새 대화 화면에서 15초가 넘도록 기다려도 앞 화면의 대화 열을 찾지 못함으로 다시 알리지 않는다.
+  await page.waitForTimeout(elementTimeoutMs + 3000);
+  expect(await problemRecords(worker)).toHaveLength(1);
+  expect(await widths(page, signedOut)).toEqual({ thread: null, composer: 1200 });
+  expect(errors).toEqual([]);
+});
+
 test('COM-2 기대 동작 4 결정 0029 다른 사이트의 탭에서는 팝업이 이 기능을 chatgpt.com에서만 쓸 수 있다고 보이고, chatgpt.com에서는 보이지 않는다', async ({
   context,
   extensionId,

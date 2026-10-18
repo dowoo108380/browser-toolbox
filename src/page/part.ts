@@ -19,7 +19,8 @@ export interface PageStart extends PageContext {
   readonly scope: Scope;
   // 기대는 외부 화면 요소를 찾는다(COM-6, 결정 0026). 있거나 생기면 onFound를 부른다. 늘 있는 요소는 시작할 때, 조작해야
   // 생기는 요소는 그 조작을 받았을 때 부른다. 부른 때부터 탭이 보인 시간이 15초가 되도록 찾지 못하면 실행 틀이 이 기능을
-  // 멈추고(scope에 맡긴 것을 모두 되돌림) 문제를 기록하며, 그 요소가 나타나면 다시 시작한다. 돌려준 함수는 이 찾기만 그만둔다.
+  // 멈추고(scope에 맡긴 것을 모두 되돌림) 문제를 기록하며, 그 요소가 나타나거나 페이지 안에서 이동하면 다시 시작한다(그 화면에
+  // 있어야 할 것을 기능이 다시 정한다, 결정 0033). 돌려준 함수는 이 찾기만 그만둔다.
   readonly find: (
     element: NamedElement,
     onFound: (found: Element) => void | Promise<void>,

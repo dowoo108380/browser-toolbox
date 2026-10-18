@@ -663,6 +663,45 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     return { part, counts };
   }
 
+  // 화면마다 있어야 할 요소가 다른 기능(사이트 기능의 모양, 결정 0031). 주소의 #가 region인 화면에는 시험 영역이 있어야 하고
+  // 다른 화면에는 있어야 할 것이 없다. 시작할 때와 페이지 안에서 이동할 때 그 화면의 것을 찾는다. 켜지면 문서 루트에 표시를
+  // 단다(찾는 동안에도 걸려 있는 변경).
+  function screenPart() {
+    const counts = { started: 0 };
+    const part: PagePart = {
+      featureId: 'screen',
+      frames: 'all',
+      start: (value, { scope, find }) => {
+        if (!isEnabled(value, 'screen')) return;
+        counts.started += 1;
+        const root = document.documentElement;
+        root.setAttribute('data-test-screen', '');
+        scope.defer(() => {
+          root.removeAttribute('data-test-screen');
+        });
+        let stop: () => void = () => undefined;
+        const expectHere = () => {
+          stop();
+          stop = location.hash === '#region' ? find(region, () => undefined) : () => undefined;
+        };
+        expectHere();
+        scope.listen(window.navigation, 'currententrychange', expectHere);
+      },
+    };
+    return { part, counts };
+  }
+
+  // 시험 문서(Vitest의 iframe)의 주소를 #hash로 바꾸는 페이지 안 이동. 시험이 끝나면 처음 주소로 되돌린다.
+  const originalUrl = location.href;
+  const moveTo = (hash: string, how: 'push' | 'replace' = 'push') => {
+    const url = `${originalUrl.split('#')[0] ?? ''}${hash}`;
+    if (how === 'push') history.pushState(null, '', url);
+    else history.replaceState(null, '', url);
+  };
+  afterEach(() => {
+    history.replaceState(null, '', originalUrl);
+  });
+
   const notFoundReport = (featureId: string, element: NamedElement): PageProblem => ({
     featureId,
     kind: 'not-found',
@@ -775,6 +814,50 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     } finally {
       document.removeEventListener('visibilitychange', showRegion);
     }
+  });
+
+  it('COM-6 기대 동작 4 결정 0033 찾지 못한 뒤 페이지 안에서 이동하면 앞 화면의 요소를 기다리지 않고 다시 시작해 그 화면에 있어야 할 것을 새로 찾는다', () => {
+    moveTo('#region', 'replace');
+    const feature = screenPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ screen: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toEqual([notFoundReport('screen', region)]);
+    expect(document.documentElement.hasAttribute('data-test-screen')).toBe(false);
+
+    // 시험 영역이 있어야 하지 않는 화면으로 간다. 다시 작용하고 찾지 못함이 아니며, 오래 지나도 기록하지 않는다.
+    moveTo('#other');
+    expect(feature.counts.started).toBe(2);
+    expect(document.documentElement.hasAttribute('data-test-screen')).toBe(true);
+    expect(runtime.status()).toEqual({ notFound: [] });
+    vi.advanceTimersByTime(10 * elementTimeoutMs);
+    expect(runtime.reports).toHaveLength(1);
+
+    // 있어야 할 화면으로 돌아오면 그때부터 15초 뒤에 또 찾지 못함이고, 또 이동하면 또 다시 시작한다.
+    moveTo('#region');
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(runtime.reports).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(runtime.reports).toEqual([
+      notFoundReport('screen', region),
+      notFoundReport('screen', region),
+    ]);
+    moveTo('#other', 'replace');
+    expect(feature.counts.started).toBe(3);
+    expect(document.documentElement.hasAttribute('data-test-screen')).toBe(true);
+  });
+
+  it('결정 0033 결정 0008 찾지 못한 뒤의 이동에 연결이 끊겼으면 다시 시작하지 않고 물러난다', () => {
+    moveTo('#region', 'replace');
+    const feature = screenPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ screen: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    runtime.deps.isConnected = () => false;
+    moveTo('#other');
+    expect(feature.counts.started).toBe(1);
+    expect(document.documentElement.hasAttribute('data-test-screen')).toBe(false);
+    expect(runtime.unsubscribed()).toBe(1);
   });
 
   it('COM-6 기대 동작 2 서비스 워커가 물으면 지금 찾지 못한 기능과 그 요소를 답하고, 다시 찾으면 목록에서 뺀다', async () => {

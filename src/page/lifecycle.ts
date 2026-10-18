@@ -6,7 +6,7 @@
 // 기능 하나의 상태. 맵에 없으면 멈춤이다(시작한 적이 없거나 모두 멈춤).
 // - running: 이 설정(key)으로 시작했고 실행 run의 자원이 살아 있다.
 // - notFound: 이 설정으로 시작했다가 기대는 외부 화면 요소를 찾지 못해 그 실행을 닫았다(결정 0026). 실행 run은 그 요소가
-//   나타나는지 지켜보는 자원이고, 나타나면 start로 다시 시작한다.
+//   나타나는지 지켜보는 자원이고, 나타나거나 페이지 안에서 이동하면 start로 다시 시작한다(결정 0033).
 // - failed: 이 설정으로 시작했다가 실패해 자원을 치웠다. 남은 자원이 없으므로 실행 번호가 없다.
 //   설정이 바뀔 때까지 다시 시작하지 않는다(quality 010).
 type FeaturePhase<T, E> =
@@ -48,6 +48,8 @@ export type LifecycleEvent<T, E> =
     }
   // 찾지 못한 요소를 지켜보던 실행 run이 그 요소를 찾았다.
   | { readonly type: 'found'; readonly featureId: string; readonly run: number }
+  // 페이지 안에서 이동했다(문서를 다시 싣지 않고 주소가 바뀜). 화면이 바뀌면 있어야 할 요소도 바뀐다(결정 0033).
+  | { readonly type: 'navigated' }
   // 모두 멈춘다(더 새 형식의 설정, 물러남).
   | { readonly type: 'stopAll' };
 
@@ -157,6 +159,29 @@ export function transition<T, E>(
           { type: 'start', featureId: event.featureId, run: restart, start: current.start },
         ],
       };
+    }
+    case 'navigated': {
+      // 찾지 못한 기능은 앞 화면의 요소를 더 기다리지 않는다. 지켜보기를 닫고 새 번호로 다시 시작해, 새 화면에 있어야 할
+      // 것을 그 기능이 다시 정하고 그때부터 15초를 센다(COM-6 기대 동작 4). 돌거나 실패한 기능은 그대로다. 도는 기능은 이동을
+      // 스스로 듣는다(결정 0031).
+      const features = new Map(state.features);
+      const effects: LifecycleEffect<T, E>[] = [];
+      let nextRun = state.nextRun;
+      for (const [featureId, phase] of state.features) {
+        if (phase.phase !== 'notFound') continue;
+        features.set(featureId, {
+          phase: 'running',
+          key: phase.key,
+          run: nextRun,
+          start: phase.start,
+        });
+        effects.push(
+          { type: 'close', run: phase.run },
+          { type: 'start', featureId, run: nextRun, start: phase.start },
+        );
+        nextRun += 1;
+      }
+      return { state: { features, nextRun }, effects };
     }
     case 'stopAll': {
       const effects: LifecycleEffect<T, E>[] = [];

@@ -243,8 +243,10 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   const onVisibilityChange = () => {
     if (deps.context.document.visibilityState === 'visible') checkConnection();
   };
+  // 찾지 못해 멈춘 기능은 이동한 화면에서 다시 시작한다(결정 0033). 화면마다 있어야 할 요소가 다르기 때문이다. 연결이
+  // 끊겼으면 물러난다.
   const onNavigation = () => {
-    checkConnection();
+    if (checkConnection()) dispatch({ type: 'navigated' });
   };
   // 페이지 안 이동(history.pushState, 주소의 # 바꾸기, 뒤로·앞으로)은 Navigation API가 한 이벤트로 알린다(Chrome 102부터).
   const { navigation } = deps.context.window;

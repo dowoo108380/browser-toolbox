@@ -149,6 +149,7 @@ describe('기능의 켜기·끄기 수명(상태 기계)', () => {
     const watching = run(initialLifecycle, want(['a', 'on']), notFound('a', 1));
     const watched = structuredClone([...watching.state.features]);
     transition(watching.state, found('a', 2));
+    transition(watching.state, { type: 'navigated' });
     expect([...watching.state.features]).toEqual(watched);
     expect(initialLifecycle.features.size).toBe(0);
   });
@@ -230,6 +231,45 @@ describe('외부 화면 요소를 찾지 못함(결정 0026)', () => {
     const { state, effects } = transition(watching.state, fail('a', 2));
     expect(effects).toEqual([unexpected('a'), { type: 'close', run: 2 }]);
     expect(state.features.get('a')).toEqual({ phase: 'failed', key: 'on' });
+  });
+
+  it('COM-6 기대 동작 4 결정 0033 페이지 안에서 이동하면 찾지 못한 기능만 지켜보기를 닫고 새 번호로 다시 시작하며, 돌거나 실패한 기능은 그대로다', () => {
+    const mixed = run(
+      initialLifecycle,
+      want(['a', 'on'], ['b', 'on'], ['c', 'on'], ['d', 'on']),
+      notFound('a', 1),
+      fail('b', 2),
+      notFound('d', 4),
+    );
+    const { state, effects } = transition(mixed.state, { type: 'navigated' });
+    expect(effects).toEqual([
+      { type: 'close', run: 5 },
+      { type: 'start', featureId: 'a', run: 7, start: 'start a on' },
+      { type: 'close', run: 6 },
+      { type: 'start', featureId: 'd', run: 8, start: 'start d on' },
+    ]);
+    expect([...state.features]).toEqual([
+      ['a', { phase: 'running', key: 'on', run: 7, start: 'start a on' }],
+      ['b', { phase: 'failed', key: 'on' }],
+      ['c', mixed.state.features.get('c')],
+      ['d', { phase: 'running', key: 'on', run: 8, start: 'start d on' }],
+    ]);
+    expect(notFoundOf(state)).toEqual([]);
+    // 닫힌 지켜보기의 늦은 찾음은 버리고, 다시 시작한 실행이 또 찾지 못하면 또 기록한다.
+    expect(transition(state, found('a', 5)).effects).toEqual([]);
+    expect(transition(state, notFound('a', 7)).effects).toEqual([
+      { type: 'close', run: 7 },
+      { type: 'report', featureId: 'a', problem: { kind: 'not-found', element: '대상' } },
+      { type: 'watch', featureId: 'a', run: 9, element: '대상' },
+    ]);
+  });
+
+  it('결정 0033 찾지 못한 기능이 없으면 이동에 할 일이 없다', () => {
+    const started = run(initialLifecycle, want(['a', 'on']), fail('a', 1), want(['b', 'on']));
+    const { state, effects } = transition(started.state, { type: 'navigated' });
+    expect(effects).toEqual([]);
+    expect(state).toEqual(started.state);
+    expect(transition(initialLifecycle, { type: 'navigated' }).effects).toEqual([]);
   });
 
   it('모두 멈추면 지켜보기도 닫는다', () => {
