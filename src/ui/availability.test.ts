@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { type FeatureDefinition, type TabStatus, defineFeature, v } from '../contracts/index.ts';
+import {
+  type FeatureDefinition,
+  type TabStatus,
+  type UnmetReason,
+  defineFeature,
+  v,
+} from '../contracts/index.ts';
 import { unavailableReason } from './availability.ts';
 
 function featureWith(content: FeatureDefinition['content']) {
@@ -21,14 +27,18 @@ const offPages = featureWith(null);
 
 const onChatgpt = featureWith({ sites: 'chatgpt', frames: 'top' });
 
-const ready: TabStatus = { page: 'ready', bundle: 'common', notFound: [] };
-const readyOnChatgpt: TabStatus = { page: 'ready', bundle: 'chatgpt', notFound: [] };
+const ready: TabStatus = { page: 'ready', bundle: 'common', unmet: [] };
+const readyOnChatgpt: TabStatus = { page: 'ready', bundle: 'chatgpt', unmet: [] };
 const denied: TabStatus = { page: 'denied' };
 const reload: TabStatus = { page: 'reload' };
-const missing = (featureId: string, bundle: 'common' | 'chatgpt' = 'common'): TabStatus => ({
+const unmet = (
+  featureId: string,
+  reason: UnmetReason = 'not-found',
+  bundle: 'common' | 'chatgpt' = 'common',
+): TabStatus => ({
   page: 'ready',
   bundle,
-  notFound: [{ featureId, element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } }],
+  unmet: [{ featureId, reason, element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } }],
 });
 
 describe('결정 0023 지금 탭에서 쓸 수 없는 이유', () => {
@@ -48,19 +58,26 @@ describe('결정 0023 지금 탭에서 쓸 수 없는 이유', () => {
   });
 
   it('페이지에 작용하지 않는 기능은 지금 탭과 상관없다', () => {
-    for (const tab of [ready, reload, denied, missing('sample'), null]) {
+    for (const tab of [ready, reload, denied, unmet('sample'), null]) {
       expect(unavailableReason(offPages, tab)).toBeNull();
     }
   });
 });
 
-describe('결정 0026 지금 탭에서 찾지 못한 외부 화면 요소', () => {
+describe('결정 0026 결정 0034 지금 탭에서 외부 화면에 기대한 것이 어긋난 기능', () => {
   it('COM-6 기대 동작 2 그 기능이 찾지 못한 요소의 이름을 "찾지 못함: (이름)"으로 보인다', () => {
-    expect(unavailableReason(onPages, missing('sample'))).toBe('찾지 못함: ChatGPT 대화 열');
+    expect(unavailableReason(onPages, unmet('sample'))).toBe('찾지 못함: ChatGPT 대화 열');
   });
 
-  it('다른 기능이 찾지 못한 것은 이 기능의 이유가 아니다', () => {
-    expect(unavailableReason(onPages, missing('other'))).toBeNull();
+  it('COM-6 기대 동작 5 그 기능이 건 변경이 작용하지 않은 요소의 이름을 "적용되지 않음: (이름)"으로 보인다', () => {
+    expect(unavailableReason(onPages, unmet('sample', 'not-applied'))).toBe(
+      '적용되지 않음: ChatGPT 대화 열',
+    );
+  });
+
+  it('다른 기능이 어긋난 것은 이 기능의 이유가 아니다', () => {
+    expect(unavailableReason(onPages, unmet('other'))).toBeNull();
+    expect(unavailableReason(onPages, unmet('other', 'not-applied'))).toBeNull();
   });
 });
 
@@ -71,7 +88,7 @@ describe('결정 0029 사이트 전용 기능', () => {
 
   it('그 사이트의 탭에서는 이유가 없고, 찾지 못한 요소가 있으면 그것을 보인다', () => {
     expect(unavailableReason(onChatgpt, readyOnChatgpt)).toBeNull();
-    expect(unavailableReason(onChatgpt, missing('sample', 'chatgpt'))).toBe(
+    expect(unavailableReason(onChatgpt, unmet('sample', 'not-found', 'chatgpt'))).toBe(
       '찾지 못함: ChatGPT 대화 열',
     );
   });

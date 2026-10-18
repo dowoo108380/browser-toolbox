@@ -29,7 +29,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(problemReport, () => Promise.resolve(ok(null))),
       route(popupRemember, () => Promise.resolve(ok(null))),
       route(tabStatus, () =>
-        Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, notFound: [] })),
+        Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, unmet: [] })),
       ),
       route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
       route(taskSeen, () => Promise.resolve(ok(null))),
@@ -77,7 +77,7 @@ describe('요청 검증(결정 0006)', () => {
     const { router } = setup();
     const status = { type: 'tab.status', payload: { tabId: 3 } };
     expect(await router(status, extension)).toEqual(
-      ok({ page: 'ready', bundle: 'common', notFound: [] }),
+      ok({ page: 'ready', bundle: 'common', unmet: [] }),
     );
     const fromContent = await router(status, content);
     expect(fromContent.ok).toBe(false);
@@ -147,7 +147,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(problemReport, () => Promise.resolve(ok(null))),
         route(popupRemember, () => Promise.resolve(ok(null))),
         route(tabStatus, () =>
-          Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, notFound: [] })),
+          Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, unmet: [] })),
         ),
         route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
         route(taskSeen, () => Promise.resolve(ok(null))),

@@ -38,6 +38,27 @@ describe('페이지 스타일(결정 0031)', () => {
     expect(getComputedStyle(list).maxWidth).toBe('none');
     expect(document.documentElement.outerHTML).toBe(before);
   });
+
+  it('결정 0034 규칙을 잠시 바꾼 채 재고 되돌린다. 재는 함수가 던져도 되돌린다', () => {
+    const list = target();
+    const css = 'ol { max-width: 120px !important; }';
+    const style = createPageStyle(document, { name: 'test-width', css });
+    cleanups.push(style.remove);
+    const measured = style.measureWith(
+      'ol { max-width: 60px !important; }',
+      () => getComputedStyle(list).maxWidth,
+    );
+    expect(measured).toBe('60px');
+    expect(getComputedStyle(list).maxWidth).toBe('120px');
+    expect(document.documentElement.lastElementChild?.textContent).toBe(css);
+
+    expect(() =>
+      style.measureWith('ol { max-width: 30px !important; }', () => {
+        throw new Error('재기 실패');
+      }),
+    ).toThrow('재기 실패');
+    expect(getComputedStyle(list).maxWidth).toBe('120px');
+  });
 });
 
 describe('이 세계가 넣은 요소(결정 0008)', () => {

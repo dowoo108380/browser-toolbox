@@ -25,6 +25,12 @@ export interface PageStart extends PageContext {
     element: NamedElement,
     onFound: (found: Element) => void | Promise<void>,
   ) => () => void;
+  // 기능이 찾은 요소에 건 변경이 실제로 작용하는지 본다(COM-6, 결정 0034). check는 변경이 작용하지 않는 요소를 돌려주고, 모두
+  // 작용하거나 판단할 수 없으면 null이다. 곧바로 보고, null이 아니면 부른 때부터 탭이 보인 시간이 15초가 될 때(그 사이 탭이 다시
+  // 보이면 그때도) 다시 본다. 그래도 아니면 실행 틀이 이 기능을 멈추고(scope에 맡긴 것을 모두 되돌림) 그 요소와 함께 기록하며,
+  // 팝업에 "적용되지 않음: (요소 이름)"이 보인다. 설정이 바뀌거나 페이지 안에서 이동하면 다시 시작한다. check는 그려진 크기처럼
+  // 문서의 배치를 계산하게 하는 것을 읽어도 된다(문서가 바뀔 때마다 부르지 않는다). 돌려준 함수는 이 확인만 그만둔다.
+  readonly verify: (check: () => NamedElement | null) => () => void;
 }
 
 export interface PagePart {

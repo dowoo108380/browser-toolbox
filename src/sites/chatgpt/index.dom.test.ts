@@ -63,6 +63,23 @@ describe('로그인한 chatgpt.com의 이름 붙은 요소(결정 0032)', () => 
   });
 });
 
+describe('화면에 보이는 대화 열과 작성란(결정 0034)', () => {
+  it('앞 화면이 숨긴 채 남긴 것이 문서 앞쪽에 있어도 보이는 것을 내고, 보이는 것이 없으면 null이다', () => {
+    const hidden = element('div', { hidden: '' });
+    element('div', { 'data-thread-find-target': '' }, hidden);
+    element('form', { 'data-chatgpt-composer': '' }, hidden);
+    expect(thread.find(document)).not.toBeNull();
+    expect(thread.shown(document)).toBeNull();
+    expect(composer.shown(document)).toBeNull();
+    const target = element('div', { 'data-thread-find-target': '' });
+    const transcript = element('ol', { 'data-conversation-transcript': '' });
+    element('li', { 'data-message-role': 'user' }, transcript);
+    expect(thread.shown(document)).toBe(target);
+    target.remove();
+    expect(thread.shown(document)).toBe(transcript);
+  });
+});
+
 describe('chatgpt.com의 사이트 안 이동 신호(결정 0031)', () => {
   it('Navigation API의 currententrychange를 알리고, 범위가 닫히면 그만 듣는다', () => {
     const scope = createScope({ window, onError: () => undefined, isLive: () => true });

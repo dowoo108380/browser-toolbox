@@ -67,7 +67,7 @@ export interface BackgroundDeps {
   readonly retireOldScripts: (report: (problem: AppError) => void) => Promise<void>;
   // 그 탭의 최상위 문서에 탐침을 넣어 이 확장의 실행 틀이 도는지와 그 묶음을 본다(결정 0023, 0029).
   readonly probePage: (tabId: number) => Promise<PageProbe>;
-  // 그 탭의 최상위 프레임의 실행 틀에 지금 상태(찾지 못한 기능)를 묻는다(page.status, 결정 0026).
+  // 그 탭의 최상위 프레임의 실행 틀에 지금 상태(외부 화면에 기대한 것이 어긋난 기능)를 묻는다(page.status, 결정 0026, 0034).
   readonly askPage: (tabId: number, timeoutMs: number) => Promise<TabResponse<PageStatus>>;
 }
 
@@ -118,12 +118,13 @@ export function startBackground(deps: BackgroundDeps): void {
     record,
   });
   const popupState = createPopupState({ store: deps.store, record });
-  // 실행 틀이 찾지 못한 기능(결정 0026). 묻지 못하면 비워 답한다. 받는 쪽이 없는 것(탐침 뒤에 물러남)은 기록하지 않는다.
-  const notFoundOn = async (tabId: number): Promise<PageStatus['notFound']> => {
+  // 실행 틀에서 외부 화면에 기대한 것이 어긋난 기능(결정 0026, 0034). 묻지 못하면 비워 답한다. 받는 쪽이 없는 것(탐침 뒤에
+  // 물러남)은 기록하지 않는다.
+  const unmetOn = async (tabId: number): Promise<PageStatus['unmet']> => {
     const response = await deps.askPage(tabId, askPageTimeoutMs);
     switch (response.delivery) {
       case 'delivered':
-        return response.value.notFound;
+        return response.value.unmet;
       case 'unreachable':
         return [];
       case 'timeout':
@@ -156,7 +157,7 @@ export function startBackground(deps: BackgroundDeps): void {
             return ok({
               page: 'ready',
               bundle: bundle.output,
-              notFound: await notFoundOn(payload.tabId),
+              unmet: await unmetOn(payload.tabId),
             });
           }
           case 'unavailable':

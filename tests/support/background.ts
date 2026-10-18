@@ -84,7 +84,7 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
     probePage: options.probePage ?? (() => Promise.resolve({ status: 'ran', marker: 'common' })),
     askPage:
       options.askPage ??
-      (() => Promise.resolve({ delivery: 'delivered', value: { notFound: [] } } as const)),
+      (() => Promise.resolve({ delivery: 'delivered', value: { unmet: [] } } as const)),
   });
   const deliver = options.deliver ?? ((_type, send) => send());
   return async (definition, payload) => {

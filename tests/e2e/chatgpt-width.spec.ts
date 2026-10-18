@@ -63,6 +63,11 @@ const signedIn: Shell = {
 const shells: readonly Shell[] = [signedOut, signedIn];
 
 const wide = { width: 1800, height: 900 };
+const narrow = { width: 900, height: 800 };
+
+function fixtureOf(shell: Shell): string {
+  return readFileSync(path.join(import.meta.dirname, '..', 'fixtures', shell.fixture), 'utf8');
+}
 
 async function openChatgpt(
   context: BrowserContext,
@@ -70,10 +75,7 @@ async function openChatgpt(
   pathname: string,
   viewport = wide,
 ) {
-  const body = readFileSync(
-    path.join(import.meta.dirname, '..', 'fixtures', shell.fixture),
-    'utf8',
-  );
+  const body = fixtureOf(shell);
   await context.route('https://chatgpt.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body }),
   );
@@ -214,7 +216,7 @@ for (const shell of shells) {
     context,
     extensionId,
   }) => {
-    const { page } = await openChatgpt(context, shell, '/c/abc', { width: 900, height: 800 });
+    const { page } = await openChatgpt(context, shell, '/c/abc', narrow);
     const before = await widths(page, shell);
     const { feature } = await popupOn(context, extensionId, page);
     await feature.check();
@@ -356,6 +358,115 @@ test('결정 0031 대화 열이 없는 대화 화면에서 15초가 되기 전�
   await page.waitForTimeout(elementTimeoutMs + 3000);
   expect(await problemRecords(worker)).toEqual([]);
   expect(await widths(page, signedOut)).toEqual({ thread: null, composer: 1200 });
+});
+
+// 로그인한 화면에서 사이트가 열 너비 변수를 그만 쓴 것을 흉내 낸다: 대화 열과 작성란의 바깥 상자가 최대 너비를 변수 없이 같은
+// 값(808px)으로 둔다. 요소와 단서는 그대로다(결정 0032의 한계, 0034).
+function dropWidthVariable(page: Page) {
+  return page.evaluate(() => {
+    const rules = document.createElement('style');
+    rules.textContent = '.column { max-width: 808px; }';
+    document.head.append(rules);
+  });
+}
+
+test('GPT-2.6 COM-6.8 결정 0034 로그인한 화면에서 사이트가 열 너비 변수를 쓰지 않으면(요소는 그대로) 15초 뒤 그 기능만 멈춰 되돌리고 팝업에 "적용되지 않음: ChatGPT 대화 열"을 보이며 기록한다', async ({
+  context,
+  extensionId,
+}) => {
+  test.setTimeout(90_000);
+  const worker = await serviceWorkerOf(context);
+  const { page, errors } = await openChatgpt(context, signedIn, '/c/abc');
+  await dropWidthVariable(page);
+  const before = await documentWithoutExtension(page);
+
+  const first = await popupOn(context, extensionId, page);
+  const enabledAt = Date.now();
+  await first.feature.check();
+  await first.popup.close();
+  // 스타일은 걸렸지만 대화 열과 작성란의 너비는 그대로다.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (attribute) => document.querySelector(`style[${attribute}]`) !== null,
+        pageElementAttribute,
+      ),
+    )
+    .toBe(true);
+  expect(await widths(page, signedIn)).toEqual(signedIn.original);
+
+  await expect
+    .poll(() => problemRecords(worker), { timeout: elementTimeoutMs + 10_000 })
+    .toEqual([
+      {
+        featureId: 'chatgpt-width',
+        kind: 'not-applied',
+        element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' },
+        at: expect.any(Number),
+      },
+    ]);
+  const [record] = await problemRecords(worker);
+  const at = typeof record === 'object' && record !== null && 'at' in record ? record.at : null;
+  expect(typeof at === 'number' && at >= enabledAt + elementTimeoutMs - 100).toBe(true);
+  // 그 기능이 바꾼 것은 모두 되돌려졌다.
+  expect(await documentWithoutExtension(page)).toBe(before);
+  expect(await widths(page, signedIn)).toEqual(signedIn.original);
+  const shown = await popupOn(context, extensionId, page);
+  await expect(shown.reason).toHaveText('적용되지 않음: ChatGPT 대화 열');
+  await expect(shown.feature).toBeChecked();
+  await shown.popup.close();
+  expect(errors).toEqual([]);
+});
+
+test('GPT-2.3 COM-6.8 결정 0034 너비 규칙이 작용하면 두 화면 모두 넓은 창이든 정한 너비보다 좁은 창이든 15초가 지나도 적용되지 않음이 되지 않는다', async ({
+  context,
+  extensionId,
+}) => {
+  test.setTimeout(90_000);
+  const worker = await serviceWorkerOf(context);
+  // 한 번의 15초로 네 경우를 함께 본다. 주소로 화면을 가른다(로그인하지 않은 화면의 대화는 /uc/, 로그인한 화면은 /c/).
+  const bodies = { signedOut: fixtureOf(signedOut), signedIn: fixtureOf(signedIn) };
+  await context.route('https://chatgpt.com/**', (route) => {
+    const { pathname } = new URL(route.request().url());
+    const body = pathname.startsWith('/uc/') ? bodies.signedOut : bodies.signedIn;
+    return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body });
+  });
+  const cases = [
+    {
+      shell: signedOut,
+      pathname: '/uc/wide',
+      viewport: wide,
+      expected: { thread: 1200, composer: 1200 },
+    },
+    { shell: signedOut, pathname: '/uc/narrow', viewport: narrow, expected: signedOut.narrow },
+    {
+      shell: signedIn,
+      pathname: '/c/wide',
+      viewport: wide,
+      expected: { thread: 1200, composer: 1200 },
+    },
+    { shell: signedIn, pathname: '/c/narrow', viewport: narrow, expected: signedIn.narrow },
+  ];
+  const opened: ((typeof cases)[number] & { readonly page: Page })[] = [];
+  for (const entry of cases) {
+    const page = await context.newPage();
+    await page.setViewportSize(entry.viewport);
+    await page.goto(`https://chatgpt.com${entry.pathname}`);
+    opened.push({ ...entry, page });
+  }
+  const [first] = opened;
+  if (first === undefined) throw new Error('연 탭이 없다.');
+  const { popup, feature } = await popupOn(context, extensionId, first.page);
+  await feature.check();
+  await popup.close();
+  for (const { page, shell, expected } of opened) {
+    await expect.poll(() => widths(page, shell)).toEqual(expected);
+  }
+  await first.page.waitForTimeout(elementTimeoutMs + 3000);
+  expect(await problemRecords(worker)).toEqual([]);
+  for (const { page, shell, expected } of opened) {
+    expect(await widths(page, shell)).toEqual(expected);
+  }
 });
 
 test('COM-6 기대 동작 4 결정 0033 대화 열을 찾지 못해 멈춘 뒤(15초가 지난 뒤) 새 대화로 가면 그 화면에 있어야 할 작성란만 찾아 너비가 돌아오고 찾지 못함이 없어진다', async ({

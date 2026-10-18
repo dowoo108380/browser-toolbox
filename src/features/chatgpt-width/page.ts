@@ -1,26 +1,48 @@
 import { createPageStyle } from '../../dom/index.ts';
 import { definePagePart } from '../../page/index.ts';
 import { contentWidthCss, expectedElements, watchNavigation } from '../../sites/chatgpt/index.ts';
+import { unappliedIndex } from './core/width.ts';
 import { chatgptWidth } from './feature.ts';
 
-// 대화 열과 작성란의 최대 너비를 정한 값으로 바꾼다(GPT-2, 결정 0031, 0032). 사이트 모듈이 낸 너비 규칙을 페이지 스타일 요소
-// 하나로 넣는다. 사이트가 요소를 다시 그려도(다른 대화, 새 대화) 새 요소에 그대로 걸리므로 찾은 요소를 따라가지 않는다.
-// 찾기는 그 화면에 있어야 할 요소가 없어졌는지(사이트가 구조를 바꿨는지) 알아채는 데만 쓴다(COM-6). 끄거나 찾지 못하면
-// 실행 틀이 범위를 닫아 스타일 요소를 지운다.
-export const page = definePagePart(chatgptWidth, (settings, { window, document, scope, find }) => {
-  const style = createPageStyle(document, {
-    name: 'chatgpt-width',
-    css: contentWidthCss(settings.width),
-  });
-  scope.defer(style.remove);
+// 대화 열과 작성란의 최대 너비를 정한 값으로 바꾼다(GPT-2, 결정 0031, 0032, 0034). 사이트 모듈이 낸 너비 규칙을 페이지 스타일
+// 요소 하나로 넣는다. 사이트가 요소를 다시 그려도(다른 대화, 새 대화) 새 요소에 그대로 걸리므로 찾은 요소를 따라가지 않는다.
+// 찾기는 그 화면에 있어야 할 요소가 없어졌는지(사이트가 구조를 바꿨는지), 확인은 찾은 요소에 너비가 실제로 걸렸는지(사이트가
+// 너비를 정하는 방법을 바꿨는지) 알아채는 데 쓴다(COM-6). 끄거나 어긋나면 실행 틀이 범위를 닫아 스타일 요소를 지운다.
+export const page = definePagePart(
+  chatgptWidth,
+  (settings, { window, document, scope, find, verify }) => {
+    const style = createPageStyle(document, {
+      name: 'chatgpt-width',
+      css: contentWidthCss(settings.width),
+    });
+    scope.defer(style.remove);
 
-  // 지금 화면에 있어야 할 요소를 찾는다. 페이지 안에서 이동하면 앞 화면의 찾기를 그만두고 새 화면의 것을 찾는다(15초를
-  // 그때부터 센다, COM-6 기대 동작 4). 찾으면 할 일은 없다. 스타일은 이미 걸려 있다.
-  let searches: readonly (() => void)[] = [];
-  const expectHere = () => {
-    for (const stop of searches) stop();
-    searches = expectedElements(window.location).map((element) => find(element, () => undefined));
-  };
-  expectHere();
-  watchNavigation(scope, window, expectHere);
-});
+    // 지금 화면에 있어야 할 요소를 찾고, 모두 찾으면 그 요소들에 정한 너비가 걸렸는지 확인한다. 페이지 안에서 이동하면 앞 화면의
+    // 찾기와 확인을 그만두고 새 화면의 것을 한다(15초를 그때부터 센다, COM-6 기대 동작 4).
+    const watching: (() => void)[] = [];
+    const expectHere = () => {
+      for (const stop of watching.splice(0)) stop();
+      const expected = expectedElements(window.location);
+      let missing = expected.length;
+      const onFound = () => {
+        missing -= 1;
+        if (missing > 0) return;
+        watching.push(
+          verify(() => {
+            // 화면에 보이는 그 요소들의 그려진 너비. 규칙을 다른 너비로 잠시 바꿔 잴 수 있다(한 작업 안이라 그려지지 않는다).
+            const shown = expected.map((element) => element.shown(document));
+            const widths = () =>
+              shown.map((element) => element?.getBoundingClientRect().width ?? null);
+            const index = unappliedIndex(settings.width, (px) =>
+              px === settings.width ? widths() : style.measureWith(contentWidthCss(px), widths),
+            );
+            return index === null ? null : (expected[index] ?? null);
+          }),
+        );
+      };
+      for (const element of expected) watching.push(find(element, onFound));
+    };
+    expectHere();
+    watchNavigation(scope, window, expectHere);
+  },
+);

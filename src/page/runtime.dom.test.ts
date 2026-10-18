@@ -829,7 +829,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     moveTo('#other');
     expect(feature.counts.started).toBe(2);
     expect(document.documentElement.hasAttribute('data-test-screen')).toBe(true);
-    expect(runtime.status()).toEqual({ notFound: [] });
+    expect(runtime.status()).toEqual({ unmet: [] });
     vi.advanceTimersByTime(10 * elementTimeoutMs);
     expect(runtime.reports).toHaveLength(1);
 
@@ -866,14 +866,20 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     runtime.apply(snapshot({ region: { enabled: true } }));
     // 찾는 중(15초 전)에는 찾지 못함이 아니다.
     vi.advanceTimersByTime(elementTimeoutMs - 1);
-    expect(runtime.status()).toEqual({ notFound: [] });
+    expect(runtime.status()).toEqual({ unmet: [] });
     vi.advanceTimersByTime(1);
     expect(runtime.status()).toEqual({
-      notFound: [{ featureId: 'region', element: { id: 'test.region', name: '시험 영역' } }],
+      unmet: [
+        {
+          featureId: 'region',
+          reason: 'not-found',
+          element: { id: 'test.region', name: '시험 영역' },
+        },
+      ],
     });
     add('시험 영역');
     await settle();
-    expect(runtime.status()).toEqual({ notFound: [] });
+    expect(runtime.status()).toEqual({ unmet: [] });
   });
 
   it('찾지 못한 기능을 끄면 목록에서 빠지고, 물러나면 묻기를 듣지 않는다', () => {
@@ -882,7 +888,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     runtime.apply(snapshot({ region: { enabled: true } }));
     vi.advanceTimersByTime(elementTimeoutMs);
     runtime.apply(snapshot({ region: { enabled: false } }));
-    expect(runtime.status()).toEqual({ notFound: [] });
+    expect(runtime.status()).toEqual({ unmet: [] });
     expect(runtime.statusListeners()).toBe(1);
     runtime.deps.isConnected = () => false;
     document.dispatchEvent(new Event(retireEventName));
@@ -949,6 +955,159 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     await settle();
     expect(counts.started).toBe(1);
   });
+
+  // 찾은 요소에 건 변경이 작용하는지 확인하는 기능(결정 0034). 켜지면 문서 루트에 표시를 달고(변경), 시험 영역을 찾으면 verify로
+  // 그 변경이 작용하는지 본다. 작용하는지는 시험이 정하고(applies), 확인 함수를 부른 횟수를 센다.
+  function verifyingPart() {
+    const state = { applies: false, checks: 0, started: 0 };
+    const part: PagePart = {
+      featureId: 'verifying',
+      frames: 'all',
+      start: (value, { scope, find, verify }) => {
+        if (!isEnabled(value, 'verifying')) return;
+        state.started += 1;
+        const root = document.documentElement;
+        root.setAttribute('data-test-verifying', '');
+        scope.defer(() => {
+          root.removeAttribute('data-test-verifying');
+        });
+        find(region, () => {
+          verify(() => {
+            state.checks += 1;
+            return state.applies ? null : region;
+          });
+        });
+      },
+    };
+    return { part, state };
+  }
+
+  const notAppliedReport = (featureId: string, element: NamedElement): PageProblem => ({
+    featureId,
+    kind: 'not-applied',
+    element: { id: element.id, name: element.name },
+  });
+  const changed = () => document.documentElement.hasAttribute('data-test-verifying');
+
+  it('COM-6 기대 동작 5 COM-6.8 결정 0034 찾은 요소에 건 변경이 15초 안에 작용하지 않으면 그 기능만 멈춰 되돌리고, 그 요소와 함께 적용되지 않음으로 기록하며 서비스 워커에 그 까닭으로 답한다', async () => {
+    add('시험 영역');
+    const feature = verifyingPart();
+    const other = countingPart('other');
+    const runtime = setup([feature.part, other.part]);
+    runtime.apply(snapshot({ verifying: { enabled: true }, other: { enabled: true } }));
+    expect(feature.state.checks).toBe(1);
+    // 문서가 바뀌어도 다시 보지 않는다(확인은 배치를 계산하게 할 수 있다).
+    add('다른 영역');
+    await settle();
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(feature.state.checks).toBe(1);
+    expect(runtime.reports).toEqual([]);
+    expect(runtime.status()).toEqual({ unmet: [] });
+    // 한도에 이르면 한 번 더 보고, 그래도 아니면 적용되지 않음이다.
+    vi.advanceTimersByTime(1);
+    expect(feature.state.checks).toBe(2);
+    expect(runtime.reports).toEqual([notAppliedReport('verifying', region)]);
+    expect(changed()).toBe(false);
+    expect(runtime.status()).toEqual({
+      unmet: [
+        {
+          featureId: 'verifying',
+          reason: 'not-applied',
+          element: { id: 'test.region', name: '시험 영역' },
+        },
+      ],
+    });
+    // 같은 페이지의 다른 기능은 그대로 돈다(COM-6.2).
+    ping();
+    expect(other.counts).toEqual({ started: 1, disposed: 0, pings: 1 });
+  });
+
+  it('결정 0034 처음 본 때 작용하지 않아도 한도까지 작용하게 되면(사이트가 스타일을 늦게 실음) 적용되지 않음이 아니다', () => {
+    add('시험 영역');
+    const feature = verifyingPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ verifying: { enabled: true } }));
+    vi.advanceTimersByTime(10_000);
+    feature.state.applies = true;
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(feature.state.checks).toBe(2);
+    expect(runtime.reports).toEqual([]);
+    expect(changed()).toBe(true);
+  });
+
+  it('결정 0034 숨겨진 동안은 세지 않고, 다시 보이면 곧바로 다시 본다', () => {
+    add('시험 영역');
+    const feature = verifyingPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ verifying: { enabled: true } }));
+    vi.advanceTimersByTime(5000);
+    setVisibility('hidden');
+    vi.advanceTimersByTime(60_000);
+    expect(runtime.reports).toEqual([]);
+    feature.state.applies = true;
+    setVisibility('visible');
+    expect(feature.state.checks).toBe(2);
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toEqual([]);
+    expect(changed()).toBe(true);
+  });
+
+  it('결정 0034 결정 0033 적용되지 않은 뒤에는 지켜보지 않아 문서가 바뀌거나 탭이 다시 보여도 다시 시작하지 않고, 페이지 안에서 이동하거나 설정이 바뀌면 다시 시작한다', async () => {
+    add('시험 영역');
+    const feature = verifyingPart();
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ verifying: { enabled: true } }));
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toHaveLength(1);
+    add('다른 영역');
+    await settle();
+    setVisibility('hidden');
+    setVisibility('visible');
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(feature.state.started).toBe(1);
+    expect(changed()).toBe(false);
+
+    moveTo('#elsewhere');
+    expect(feature.state.started).toBe(2);
+    expect(changed()).toBe(true);
+    expect(runtime.status()).toEqual({ unmet: [] });
+    // 그 화면에서도 작용하지 않으면 15초 뒤 또 기록한다.
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toEqual([
+      notAppliedReport('verifying', region),
+      notAppliedReport('verifying', region),
+    ]);
+    feature.state.applies = true;
+    runtime.apply(snapshot({ verifying: { enabled: true, note: 'changed' } }));
+    expect(feature.state.started).toBe(3);
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(runtime.reports).toHaveLength(2);
+    expect(changed()).toBe(true);
+  });
+
+  it('quality 010 결정 0034 확인 함수가 던지면 그 기능의 실패로 기록하고 되돌린다', () => {
+    add('시험 영역');
+    const part: PagePart = {
+      featureId: 'broken-check',
+      frames: 'all',
+      start: (value, { scope, find, verify }) => {
+        if (!isEnabled(value, 'broken-check')) return;
+        document.documentElement.setAttribute('data-test-verifying', '');
+        scope.defer(() => {
+          document.documentElement.removeAttribute('data-test-verifying');
+        });
+        find(region, () => {
+          verify(() => {
+            throw new Error('사이트 모듈의 결함');
+          });
+        });
+      },
+    };
+    const runtime = setup([part]);
+    runtime.apply(snapshot({ 'broken-check': { enabled: true } }));
+    expect(runtime.reports).toEqual([{ featureId: 'broken-check', kind: 'unexpected' }]);
+    expect(changed()).toBe(false);
+  });
 });
 
 describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames, 아키텍처 2장)', () => {
@@ -1008,7 +1167,7 @@ describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames
     expect(everywhere.marked()).toBe(true);
     vi.advanceTimersByTime(elementTimeoutMs);
     expect(runtime.reports).toEqual([notFound('everywhere')]);
-    expect(runtime.status()?.notFound.map(({ featureId }) => featureId)).toEqual(['everywhere']);
+    expect(runtime.status()?.unmet.map(({ featureId }) => featureId)).toEqual(['everywhere']);
   });
 
   it('페이지에 작용하지 않는 기능(content: null)에는 페이지 쪽 일을 만들 수 없다(타입 검사가 막는다)', () => {

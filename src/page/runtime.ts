@@ -2,12 +2,14 @@ import {
   type ElementRef,
   type PageBundle,
   type PageStatus,
+  type UnmetReason,
   pageRuntimeKey,
   retireEventName,
 } from '../contracts/index.ts';
 import {
   type NamedElement,
   type Scope,
+  awaitApplied,
   awaitElement,
   claimOwnedElements,
   createScope,
@@ -20,19 +22,25 @@ import {
   type LifecycleEffect,
   type LifecycleEvent,
   initialLifecycle,
-  notFoundOf,
   transition,
+  unmetOf,
 } from './lifecycle.ts';
 import { createNoticeBoard } from './notice.ts';
 import type { PageContext, PagePart, PageStart } from './part.ts';
 
 // 콘텐츠 스크립트 실행 틀(아키텍처 2·3장). 설정을 구독해 기능을 시작하고 정리한다.
 
-// 서비스 워커에 기록을 부탁하는 문제(problem.report). 찾지 못함은 그 요소를 싣는다(결정 0026).
+// 서비스 워커에 기록을 부탁하는 문제(problem.report). 어긋남(찾지 못함, 적용되지 않음)은 그 요소를 싣는다(결정 0026, 0034).
 export interface PageProblem {
   readonly featureId: string | null;
   readonly kind: ErrorKind;
   readonly element?: ElementRef;
+}
+
+// 기능이 외부 화면에 기대한 것이 어긋난 까닭과 그 요소(결정 0026, 0034). 기능 수명은 이것을 넘기기만 한다.
+interface Unmet {
+  readonly reason: UnmetReason;
+  readonly element: NamedElement;
 }
 
 interface PageRuntimeDeps {
@@ -48,7 +56,8 @@ interface PageRuntimeDeps {
   readonly isConnected: () => boolean;
   // 서비스 워커가 보낸 작업 결과 알림의 글을 받는다(결정 0024). 돌려준 함수로 듣기를 그만둔다.
   readonly listenNotices: (show: (text: string) => void) => () => void;
-  // 서비스 워커가 지금 상태(찾지 못한 기능)를 물으면 answer로 답한다(결정 0026). 돌려준 함수로 듣기를 그만둔다.
+  // 서비스 워커가 지금 상태(외부 화면에 기대한 것이 어긋난 기능)를 물으면 answer로 답한다(결정 0026, 0034). 돌려준 함수로 듣기를
+  // 그만둔다.
   readonly listenStatus: (answer: () => PageStatus) => () => void;
 }
 
@@ -70,12 +79,12 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   // 콘텐츠 스크립트는 모든 프레임에 실리므로(아키텍처 2장) 정의의 프레임 범위는 여기서 지킨다.
   const parts = deps.topFrame ? deps.parts : deps.parts.filter((part) => part.frames === 'all');
 
-  // 시작하는 방법: 이 실행의 자원 범위와 외부 화면 요소 찾기를 받아 기능을 시작한다.
-  type Start = (run: Pick<PageStart, 'scope' | 'find'>) => void;
+  // 시작하는 방법: 이 실행의 자원 범위와 외부 화면 요소 찾기·적용 확인을 받아 기능을 시작한다.
+  type Start = (run: Pick<PageStart, 'scope' | 'find' | 'verify'>) => void;
 
   // 기능의 켜기·끄기 수명은 상태 기계(lifecycle.ts)가 정하고, 실행 틀은 그 할 일만 한다(quality 062).
   // 상태 기계는 실행 번호만 알고, 그 실행의 자원 범위는 여기 둔다. 'start'와 'watch'가 만들고 'close'가 닫고 지운다.
-  let lifecycle: Lifecycle<Start, NamedElement> = initialLifecycle;
+  let lifecycle: Lifecycle<Start, Unmet> = initialLifecycle;
   const scopes = new Map<number, Scope>();
 
   const report = (problem: PageProblem) => {
@@ -99,9 +108,9 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   // 사건은 하나씩 끝까지 처리한다(run-to-completion). 할 일을 하는 도중에 생긴 사건(시작 도중의 실패, 연결이 끊겨
   // 물러남)은 줄에 두었다가 지금 사건의 할 일을 모두 마친 뒤 처리한다. 그러지 않으면 바로 처리한 사건 뒤에 남은
   // 할 일이 그 사건이 만든 상태와 어긋난다(예: 모두 멈춘 뒤에 남은 'start'가 기능을 시작해 정리되지 않고 남음).
-  const queue: LifecycleEvent<Start, NamedElement>[] = [];
+  const queue: LifecycleEvent<Start, Unmet>[] = [];
   let dispatching = false;
-  const dispatch = (event: LifecycleEvent<Start, NamedElement>) => {
+  const dispatch = (event: LifecycleEvent<Start, Unmet>) => {
     queue.push(event);
     if (dispatching) return;
     dispatching = true;
@@ -131,9 +140,10 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   };
 
   // 기능 하나의 실패(시작, 콜백, 정리에서 난 예외)는 그 기능만 멈추고 정리한 뒤 기록한다(quality 010, 결정 0014).
-  // 기대는 외부 화면 요소를 찾지 못한 기능도 그 기능만 멈추고 되돌린 뒤, 그 요소가 나타나면 다시 시작한다(결정 0026).
+  // 외부 화면에 기대한 것이 어긋난 기능(요소를 찾지 못함, 찾은 요소에 건 변경이 작용하지 않음)도 그 기능만 멈추고 되돌린 뒤,
+  // 찾지 못한 요소가 나타나거나 페이지 안에서 이동하면 다시 시작한다(결정 0026, 0033, 0034).
   // 다른 기능과 실행 틀은 그대로 돈다.
-  const perform = (effect: LifecycleEffect<Start, NamedElement>) => {
+  const perform = (effect: LifecycleEffect<Start, Unmet>) => {
     switch (effect.type) {
       case 'start': {
         const { featureId, run } = effect;
@@ -147,12 +157,34 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
             limit: {
               ms: elementTimeoutMs,
               onTimeout: () => {
-                dispatch({ type: 'notFound', featureId, run, element });
+                dispatch({
+                  type: 'unmet',
+                  featureId,
+                  run,
+                  unmet: { reason: 'not-found', element },
+                });
+              },
+            },
+          });
+        const verify: PageStart['verify'] = (check) =>
+          awaitApplied({
+            scope,
+            window: deps.context.window,
+            check,
+            limit: {
+              ms: elementTimeoutMs,
+              onTimeout: (element) => {
+                dispatch({
+                  type: 'unmet',
+                  featureId,
+                  run,
+                  unmet: { reason: 'not-applied', element },
+                });
               },
             },
           });
         try {
-          effect.start({ scope, find });
+          effect.start({ scope, find, verify });
         } catch {
           // 시작 도중의 예외: 그때까지 범위에 맡긴 자원을 치우고 기록한다.
           dispatch({ type: 'fail', featureId, run });
@@ -160,16 +192,18 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
         return;
       }
       case 'watch': {
-        // 찾지 못한 요소가 나타나는지 한도 없이 지켜본다. 숨겨진 동안은 쉰다.
-        const { featureId, run } = effect;
+        // 찾지 못한 요소가 나타나는지 한도 없이 지켜본다. 숨겨진 동안은 쉰다. 적용되지 않은 기능은 지켜볼 것이 없다: 변경을
+        // 되돌린 뒤라 작용하는지 볼 수 없고, 설정이 바뀌거나 페이지 안에서 이동하면 다시 시작한다(결정 0034).
+        const { featureId, run, unmet } = effect;
         const scope = openScope(featureId, run);
+        if (unmet.reason === 'not-applied') return;
         try {
           awaitElement({
             scope,
             window: deps.context.window,
-            element: effect.element,
+            element: unmet.element,
             onFound: () => {
-              dispatch({ type: 'found', featureId, run });
+              dispatch({ type: 'met', featureId, run });
             },
             limit: null,
           });
@@ -191,8 +225,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
           report({ featureId, kind: 'unexpected' });
           return;
         }
-        const { id, name } = problem.element;
-        report({ featureId, kind: 'not-found', element: { id, name } });
+        const { reason, element } = problem.unmet;
+        report({ featureId, kind: reason, element: { id: element.id, name: element.name } });
         return;
       }
     }
@@ -209,8 +243,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       desired: parts.map((part) => ({
         featureId: part.featureId,
         key: JSON.stringify(snapshot.features.get(part.featureId) ?? null),
-        start: ({ scope, find }: Pick<PageStart, 'scope' | 'find'>) => {
-          part.start(snapshot, { ...deps.context, scope, find });
+        start: (run: Pick<PageStart, 'scope' | 'find' | 'verify'>) => {
+          part.start(snapshot, { ...deps.context, ...run });
         },
       })),
     });
@@ -259,11 +293,12 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     if (checkConnection()) notices.show(text);
   });
 
-  // 팝업이 열릴 때 서비스 워커가 최상위 프레임에 묻는다(결정 0026). 상태 기계의 지금 상태에서 계산한다.
+  // 팝업이 열릴 때 서비스 워커가 최상위 프레임에 묻는다(결정 0026, 0034). 상태 기계의 지금 상태에서 계산한다.
   const stopStatus = deps.listenStatus(() => ({
-    notFound: notFoundOf(lifecycle).map(({ featureId, element }) => ({
+    unmet: unmetOf(lifecycle).map(({ featureId, unmet }) => ({
       featureId,
-      element: { id: element.id, name: element.name },
+      reason: unmet.reason,
+      element: { id: unmet.element.id, name: unmet.element.name },
     })),
   }));
 

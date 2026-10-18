@@ -2,8 +2,8 @@ import { type ElementRef, elementRefSchema, v } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
 import { type ErrorKind, createSerialQueue, errorKinds } from '../shared/index.ts';
 
-// 문제 기록(COM-5). 주소, 제목, 사이트 이름, 파일 이름은 넣지 않는다(quality 082). 찾지 못한 외부 화면 요소의 이름표와
-// 이름은 코드에 적힌 글이라 넣는다(COM-5 기대 동작 2, 결정 0026).
+// 문제 기록(COM-5). 주소, 제목, 사이트 이름, 파일 이름은 넣지 않는다(quality 082). 찾지 못했거나 기능이 건 변경이 작용하지
+// 않은 외부 화면 요소의 이름표와 이름은 코드에 적힌 글이라 넣는다(COM-5 기대 동작 2, 결정 0026, 0034).
 
 const problemsKey = 'problems';
 // 최근 100개만 남긴다(COM-5 기대 동작 4).
@@ -12,7 +12,7 @@ const problemLimit = 100;
 export interface Problem {
   readonly featureId: string | null;
   readonly kind: ErrorKind;
-  // 찾지 못한 외부 화면 요소. 그 밖의 문제에는 없다.
+  // 찾지 못했거나(not-found) 기능이 건 변경이 작용하지 않은(not-applied, 결정 0034) 외부 화면 요소. 그 밖의 문제에는 없다.
   readonly element?: ElementRef | undefined;
 }
 

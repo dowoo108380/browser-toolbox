@@ -87,7 +87,10 @@ function start(snapshot: Snapshot) {
   const find = () => {
     throw new Error('배속 표시창은 외부 화면 요소를 찾지 않는다.');
   };
-  page.start(snapshot, { window, document, scope, find });
+  const verify = () => {
+    throw new Error('배속 표시창은 외부 화면 요소에 건 변경을 확인하지 않는다.');
+  };
+  page.start(snapshot, { window, document, scope, find, verify });
   return { close: scope.close, errors };
 }
 

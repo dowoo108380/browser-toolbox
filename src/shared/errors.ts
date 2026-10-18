@@ -2,6 +2,7 @@
 export const errorKinds = [
   'invalid-input',
   'not-found',
+  'not-applied',
   'timeout',
   'unavailable',
   'permission',

@@ -18,6 +18,7 @@ export {
   type PageStatus,
   type RequestDefinition,
   type TabStatus,
+  type UnmetReason,
   elementRefSchema,
   noticeTextLimit,
   pageBundleSchema,

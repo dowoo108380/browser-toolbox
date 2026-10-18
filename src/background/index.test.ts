@@ -47,7 +47,7 @@ function start(
     },
     retireOldScripts: retire,
     probePage: () => Promise.resolve({ status: 'ran', marker: 'common' }),
-    askPage: () => Promise.resolve({ delivery: 'delivered', value: { notFound: [] } }),
+    askPage: () => Promise.resolve({ delivery: 'delivered', value: { unmet: [] } }),
   });
   return () => {
     installed();
@@ -173,7 +173,7 @@ describe('결정 0026 콘텐츠 스크립트가 알린 문제(problem.report)', 
 describe('결정 0023 지금 탭의 상태(tab.status)', () => {
   async function statusWith(
     probe: PageProbe,
-    answer: TabResponse<PageStatus> = { delivery: 'delivered', value: { notFound: [] } },
+    answer: TabResponse<PageStatus> = { delivery: 'delivered', value: { unmet: [] } },
   ) {
     const store = createFakeStore();
     const probed: number[] = [];
@@ -200,7 +200,7 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
     const ready = await statusWith({ status: 'ran', marker: 'common' });
     expect(ready.result).toEqual({
       ok: true,
-      value: { page: 'ready', bundle: 'common', notFound: [] },
+      value: { page: 'ready', bundle: 'common', unmet: [] },
     });
     expect(ready.probed).toEqual([7]);
     const reload = await statusWith({ status: 'ran', marker: null });
@@ -212,7 +212,7 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
     const chatgpt = await statusWith({ status: 'ran', marker: 'chatgpt' });
     expect(chatgpt.result).toEqual({
       ok: true,
-      value: { page: 'ready', bundle: 'chatgpt', notFound: [] },
+      value: { page: 'ready', bundle: 'chatgpt', unmet: [] },
     });
     for (const marker of [true, 'youtube', 1]) {
       const strange = await statusWith({ status: 'ran', marker });
@@ -234,17 +234,26 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
     expect(failed.recorded).toEqual(['platform']);
   });
 
-  it('COM-6 기대 동작 2 결정 0026 실행 틀이 있는 탭은 그 최상위 프레임의 실행 틀에 1초 안에 물어 찾지 못한 기능을 함께 답한다', async () => {
-    const notFound = [
-      { featureId: 'sample', element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } },
+  it('COM-6 기대 동작 2 결정 0026 결정 0034 실행 틀이 있는 탭은 그 최상위 프레임의 실행 틀에 1초 안에 물어 외부 화면에 기대한 것이 어긋난 기능(찾지 못함, 적용되지 않음)을 함께 답한다', async () => {
+    const unmet = [
+      {
+        featureId: 'sample',
+        reason: 'not-found' as const,
+        element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' },
+      },
+      {
+        featureId: 'other',
+        reason: 'not-applied' as const,
+        element: { id: 'chatgpt.composer', name: 'ChatGPT 작성란' },
+      },
     ];
     const ready = await statusWith(
       { status: 'ran', marker: 'common' },
-      { delivery: 'delivered', value: { notFound } },
+      { delivery: 'delivered', value: { unmet } },
     );
     expect(ready.result).toEqual({
       ok: true,
-      value: { page: 'ready', bundle: 'common', notFound },
+      value: { page: 'ready', bundle: 'common', unmet },
     });
     expect(ready.asked).toEqual([[7, 1000]]);
     expect(ready.recorded).toEqual([]);
@@ -270,7 +279,7 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
       const answered = await statusWith({ status: 'ran', marker: 'common' }, { delivery });
       expect(answered.result).toEqual({
         ok: true,
-        value: { page: 'ready', bundle: 'common', notFound: [] },
+        value: { page: 'ready', bundle: 'common', unmet: [] },
       });
       expect(answered.recorded).toEqual(recorded);
     }

@@ -5,6 +5,9 @@ import { ownElement } from './owned.ts';
 
 interface PageStyle {
   readonly remove: () => void;
+  // 규칙을 잠시 css로 바꾼 채 read를 부르고 되돌린다. 한 작업 안에서 끝나므로 그 사이가 화면에 그려지지 않는다. 그 규칙이
+  // 실제로 작용하는지 잴 때 쓴다(결정 0034). read가 던져도 되돌린다.
+  readonly measureWith: <T>(css: string, read: () => T) => T;
 }
 
 export function createPageStyle(
@@ -15,5 +18,13 @@ export function createPageStyle(
   const remove = ownElement(style, options.name);
   style.textContent = options.css;
   document.documentElement.append(style);
-  return { remove };
+  const measureWith = <T>(css: string, read: () => T): T => {
+    style.textContent = css;
+    try {
+      return read();
+    } finally {
+      style.textContent = options.css;
+    }
+  };
+  return { remove, measureWith };
 }

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type NamedElement, awaitElement, elementTimeoutMs } from './find.ts';
+import { type NamedElement, awaitApplied, awaitElement, elementTimeoutMs } from './find.ts';
 import { createScope } from './scope.ts';
 
-// 외부 화면 요소 찾기(COM-6, 결정 0026). 시계는 가짜이고, 문서가 보이는지는 시험이 정한다(headless Chromium의 문서는
-// 늘 visible이다, 결정 0024의 실험 5).
+// 외부 화면 요소 찾기와 적용 확인(COM-6, 결정 0026, 0034). 시계는 가짜이고, 문서가 보이는지는 시험이 정한다(headless
+// Chromium의 문서는 늘 visible이다, 결정 0024의 실험 5).
 
 let visibility: DocumentVisibilityState = 'visible';
 const added: Element[] = [];
@@ -212,6 +212,17 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
     expect(errors).toHaveLength(1);
   });
 
+  it('결정 0034 한도에 이르면 마지막으로 한 번 더 찾는다(문서의 바뀜 없이 찾게 된 요소)', () => {
+    let ready = false;
+    const late: NamedElement = { ...target, find: () => (ready ? document.body : null) };
+    const { found, timeouts } = search(late);
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    ready = true;
+    vi.advanceTimersByTime(1);
+    expect(found).toEqual([document.body]);
+    expect(timeouts()).toBe(0);
+  });
+
   it('찾았다는 알림이 던지면 범위의 실패로 알린다', () => {
     addTarget();
     const errors: unknown[] = [];
@@ -229,6 +240,130 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
       },
       limit: { ms: elementTimeoutMs, onTimeout: () => undefined },
     });
+    expect(errors).toHaveLength(1);
+  });
+});
+
+describe('찾은 요소에 건 변경의 적용 확인(결정 0034)', () => {
+  // 확인 함수. 작용하는지는 시험이 정하고(applied, 처음 값은 받음), 부른 횟수를 센다.
+  function verification(applied = false) {
+    const state = { applied, checks: 0 };
+    const errors: unknown[] = [];
+    const timedOut: NamedElement[] = [];
+    const scope = createScope({
+      window,
+      onError: (error) => errors.push(error),
+      isLive: () => true,
+    });
+    const stop = awaitApplied({
+      scope,
+      window,
+      check: () => {
+        state.checks += 1;
+        return state.applied ? null : target;
+      },
+      limit: {
+        ms: elementTimeoutMs,
+        onTimeout: (element) => {
+          timedOut.push(element);
+        },
+      },
+    });
+    return { state, scope, stop, errors, timedOut };
+  }
+
+  it('곧바로 작용하면 그 자리에서 끝나고 듣기와 타이머를 남기지 않는다', () => {
+    const listen = vi.spyOn(document, 'addEventListener');
+    const { state, timedOut } = verification(true);
+    expect(state.checks).toBe(1);
+    expect(listen).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(elementTimeoutMs * 2);
+    expect(state.checks).toBe(1);
+    expect(timedOut).toEqual([]);
+  });
+
+  it('작용하지 않으면 문서가 바뀌어도 다시 보지 않고(관찰하지 않음), 한도에 이를 때 한 번 더 보고 그래도 아니면 그 요소로 알린다', async () => {
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe');
+    const { state, timedOut } = verification();
+    addTarget('다른 것');
+    await settle();
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(state.checks).toBe(1);
+    expect(observe).not.toHaveBeenCalled();
+    expect(timedOut).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(state.checks).toBe(2);
+    expect(timedOut).toEqual([target]);
+    vi.advanceTimersByTime(elementTimeoutMs * 2);
+    expect(state.checks).toBe(2);
+  });
+
+  it('한도 때 작용하게 되었으면 알리지 않는다', () => {
+    const { state, timedOut } = verification();
+    vi.advanceTimersByTime(elementTimeoutMs - 1);
+    state.applied = true;
+    vi.advanceTimersByTime(1);
+    expect(timedOut).toEqual([]);
+  });
+
+  it('COM-6 기대 동작 4 숨겨진 동안은 세지 않고, 다시 보이면 곧바로 본다', () => {
+    const { state, timedOut } = verification();
+    vi.advanceTimersByTime(10_000);
+    setVisibility('hidden');
+    vi.advanceTimersByTime(60_000);
+    expect(timedOut).toEqual([]);
+    setVisibility('visible');
+    expect(state.checks).toBe(2);
+    vi.advanceTimersByTime(elementTimeoutMs - 10_000 - 1);
+    expect(timedOut).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(timedOut).toEqual([target]);
+  });
+
+  it('그만두거나 범위가 닫히면 다시 보지도 알리지도 않는다', () => {
+    const stopped = verification();
+    stopped.stop();
+    const closed = verification();
+    closed.scope.close();
+    vi.advanceTimersByTime(elementTimeoutMs);
+    for (const { state, timedOut } of [stopped, closed]) {
+      expect(state.checks).toBe(1);
+      expect(timedOut).toEqual([]);
+    }
+  });
+
+  it('확인 함수가 처음에 던지면 부른 쪽에 던지고, 그 뒤에 던지면 범위의 실패로 알린다', () => {
+    const scope = createScope({ window, onError: () => undefined, isLive: () => true });
+    const throwing = () => {
+      throw new Error('확인 실패');
+    };
+    expect(() =>
+      awaitApplied({
+        scope,
+        window,
+        check: throwing,
+        limit: { ms: elementTimeoutMs, onTimeout: () => undefined },
+      }),
+    ).toThrow('확인 실패');
+
+    let broken = false;
+    const errors: unknown[] = [];
+    const later = createScope({
+      window,
+      onError: (error) => errors.push(error),
+      isLive: () => true,
+    });
+    awaitApplied({
+      scope: later,
+      window,
+      check: () => {
+        if (broken) throw new Error('나중의 실패');
+        return target;
+      },
+      limit: { ms: elementTimeoutMs, onTimeout: () => undefined },
+    });
+    broken = true;
+    vi.advanceTimersByTime(elementTimeoutMs);
     expect(errors).toHaveLength(1);
   });
 });

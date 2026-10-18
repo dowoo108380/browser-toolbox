@@ -3,9 +3,9 @@ import { type NamedElement, createScope, pageElementAttribute } from '../../dom/
 import type { Snapshot } from '../../storage/index.ts';
 import { page } from './page.ts';
 
-// GPT-2의 페이지 쪽 일을 실행 틀 없이 시작해 본다(결정 0031). 시험 문서에 chatgpt.com 구조의 뼈대(2026-10-18에 로그인하지
-// 않은 화면에서 본 것)를 만든다: 대화 기록 목록(최대 너비 없음)과 작성란 상자(최대 너비 768px, 가운데).
-// 화면마다 찾는 요소는 시험 문서(Vitest의 iframe)의 주소를 history로 바꿔 보고, 끝나면 처음 주소로 되돌린다.
+// GPT-2의 페이지 쪽 일을 실행 틀 없이 시작해 본다(결정 0031, 0032, 0034). 시험 문서에 chatgpt.com 구조의 뼈대(2026-10-18에
+// 본 두 화면)를 만든다. 화면마다 찾는 요소는 시험 문서(Vitest의 iframe)의 주소를 history로 바꿔 보고, 끝나면 처음 주소로
+// 되돌린다. 너비가 걸렸는지의 확인은 실제 Chromium의 배치로 잰다.
 
 const originalUrl = location.href;
 const cleanups: (() => void)[] = [];
@@ -45,34 +45,49 @@ function layout(width: number) {
 
 // 로그인한 화면의 뼈대(2026-10-18, 사용자의 Chrome, 결정 0032): 대화 열(찾기 대상)과 작성란(ChatGPT 작성 양식)을 각각 바깥
 // 상자가 묶는다. 바깥 상자는 사이트의 CSS 변수(48rem)에 좌우 안쪽 여백 20px를 더한 최대 너비로 가운데에 놓인다. 사이트처럼
-// 변수와 최대 너비는 클래스 규칙으로 둔다.
-function signedInLayout(width: number) {
+// 변수와 최대 너비는 클래스 규칙으로 둔다. variable이 거짓이면 사이트가 그 변수를 그만 쓰고 같은 값(808px)을 바로 둔 화면이다
+// (결정 0034). previous면 앞 화면이 숨긴 채 남긴 대화 열과 작성란이 문서 앞쪽에 있다.
+function signedInLayout(
+  width: number,
+  { variable = true, previous = false }: { variable?: boolean; previous?: boolean } = {},
+) {
   const rules = document.createElement('style');
+  const maxWidth = variable ? 'calc(var(--thread-content-max-width) + 40px)' : '808px';
   rules.textContent = `.signed-in-column {
     --thread-content-max-width: 48rem;
     box-sizing: border-box; display: flex; flex-direction: column; width: 100%;
-    max-width: calc(var(--thread-content-max-width) + 40px); margin-inline: auto; padding-inline: 20px;
+    max-width: ${maxWidth}; margin-inline: auto; padding-inline: 20px;
   }`;
   document.head.append(rules);
   const container = document.createElement('section');
   container.style.cssText = `width: ${String(width)}px; display: flex; flex-direction: column; overflow-x: auto;`;
-  const column = () => {
-    const bound = document.createElement('div');
-    bound.className = 'signed-in-column';
-    container.append(bound);
-    return bound;
+  const screen = (parent: Element) => {
+    const column = () => {
+      const bound = document.createElement('div');
+      bound.className = 'signed-in-column';
+      parent.append(bound);
+      return bound;
+    };
+    const threadBound = column();
+    threadBound.setAttribute('data-thread-user-message-navigation-content', '');
+    const target = document.createElement('div');
+    target.setAttribute('data-thread-find-target', '');
+    const turn = document.createElement('div');
+    turn.setAttribute('data-turn-key', '');
+    target.append(turn);
+    threadBound.append(target);
+    const form = document.createElement('form');
+    form.setAttribute('data-chatgpt-composer', '');
+    column().append(form);
+    return { target, form };
   };
-  const threadBound = column();
-  threadBound.setAttribute('data-thread-user-message-navigation-content', '');
-  const target = document.createElement('div');
-  target.setAttribute('data-thread-find-target', '');
-  const turn = document.createElement('div');
-  turn.setAttribute('data-turn-key', '');
-  target.append(turn);
-  threadBound.append(target);
-  const form = document.createElement('form');
-  form.setAttribute('data-chatgpt-composer', '');
-  column().append(form);
+  if (previous) {
+    const hidden = document.createElement('div');
+    hidden.hidden = true;
+    container.append(hidden);
+    screen(hidden);
+  }
+  const { target, form } = screen(container);
   document.body.append(container);
   cleanups.push(() => {
     container.remove();
@@ -90,20 +105,31 @@ const settings = (value: unknown): Snapshot => ({
   sites: new Map(),
 });
 
-// 실행 틀 없이 기능만 시작한다. 찾기는 부른 요소와 그만두었는지를 적는다.
+// 실행 틀 없이 기능만 시작한다. 찾기는 부른 요소와 그만두었는지를 적고, 그 요소가 문서에 있으면 곧바로 찾았다고 알린다.
+// 확인은 받은 확인 함수와 그만두었는지를 적는다(시험이 그 함수를 부른다).
 function start(snapshot: Snapshot) {
   const scope = createScope({ window, onError: () => undefined, isLive: () => true });
   cleanups.push(scope.close);
   const searches: { readonly id: string; stopped: boolean }[] = [];
-  const find = (element: NamedElement) => {
+  const find = (element: NamedElement, onFound: (found: Element) => void | Promise<void>) => {
     const search = { id: element.id, stopped: false };
     searches.push(search);
+    const found = element.find(document);
+    if (found !== null) void onFound(found);
     return () => {
       search.stopped = true;
     };
   };
-  page.start(snapshot, { window, document, scope, find });
-  return { close: scope.close, searches };
+  const verifications: { readonly check: () => NamedElement | null; stopped: boolean }[] = [];
+  const verify = (check: () => NamedElement | null) => {
+    const verification = { check, stopped: false };
+    verifications.push(verification);
+    return () => {
+      verification.stopped = true;
+    };
+  };
+  page.start(snapshot, { window, document, scope, find, verify });
+  return { close: scope.close, searches, verifications };
 }
 
 const styles = () => document.querySelectorAll(`style[${pageElementAttribute}="chatgpt-width"]`);
@@ -184,5 +210,74 @@ describe('GPT-2 로그인한 화면의 대화 열·작성란 너비(결정 0032,
     // 바깥 상자의 좌우 안쪽 여백(20px씩)을 뺀 너비다.
     expect(widths()).toEqual({ thread: 660, composer: 660 });
     expect(container.scrollWidth).toBe(container.clientWidth);
+  });
+});
+
+describe('GPT-2 너비가 실제로 걸렸는지 확인(결정 0034)', () => {
+  const on = settings({ enabled: true, width: 1200 });
+
+  // 대화 화면에서 시작해, 그 화면의 요소를 모두 찾고 받은 확인을 부른다. 걸리지 않은 요소의 이름표를 돌려준다.
+  function verifyConversation(): string | null {
+    history.replaceState(null, '', '/c/abc');
+    const { verifications } = start(on);
+    expect(verifications).toHaveLength(1);
+    return verifications[0]?.check()?.id ?? null;
+  }
+
+  it.each([
+    ['로그인하지 않은 화면, 넓은 창', () => layout(1500)],
+    ['로그인하지 않은 화면, 정한 너비보다 좁은 창', () => layout(700)],
+    ['로그인한 화면, 넓은 창', () => signedInLayout(1500)],
+    ['로그인한 화면, 정한 너비보다 좁은 창', () => signedInLayout(1000)],
+    ['로그인한 화면, 사이트의 원래 너비보다 좁은 창', () => signedInLayout(700)],
+  ])('GPT-2.3 COM-6.8 %s: 너비 규칙이 작용하면 확인을 통과한다', (_name, draw) => {
+    draw();
+    expect(verifyConversation()).toBeNull();
+  });
+
+  it.each([
+    ['넓은 창', 1500],
+    ['정한 너비보다 좁은 창', 1000],
+    ['사이트의 원래 너비보다 좁은 창', 700],
+  ])(
+    'GPT-2.6 로그인한 화면에서 사이트가 열 너비 변수를 쓰지 않으면 %s에서도 대화 열이 걸리지 않은 것이다',
+    (_name, width) => {
+      signedInLayout(width, { variable: false });
+      expect(verifyConversation()).toBe('chatgpt.thread');
+    },
+  );
+
+  it('확인은 규칙을 잠시 바꿨다 되돌려 문서와 너비가 확인 전과 같다', () => {
+    const { widths } = signedInLayout(700);
+    history.replaceState(null, '', '/c/abc');
+    const { verifications } = start(on);
+    const before = { html: document.documentElement.outerHTML, widths: widths() };
+    expect(verifications[0]?.check()).toBeNull();
+    expect({ html: document.documentElement.outerHTML, widths: widths() }).toEqual(before);
+  });
+
+  it('앞 화면이 숨긴 채 남긴 요소가 문서 앞쪽에 있어도 화면에 보이는 것을 잰다', () => {
+    signedInLayout(1500, { previous: true });
+    expect(verifyConversation()).toBeNull();
+  });
+
+  it('새 대화 화면에서는 작성란만 찾아 확인하고, 있어야 할 요소를 다 찾지 못하면 확인하지 않는다', () => {
+    signedInLayout(1500, { variable: false });
+    history.replaceState(null, '', '/');
+    const newChat = start(on);
+    expect(newChat.verifications[0]?.check()?.id).toBe('chatgpt.composer');
+    newChat.close();
+
+    for (const element of document.querySelectorAll('[data-thread-find-target]')) element.remove();
+    history.replaceState(null, '', '/c/abc');
+    expect(start(on).verifications).toEqual([]);
+  });
+
+  it('페이지 안에서 이동하면 앞 화면의 확인을 그만두고 새 화면의 것을 한다', () => {
+    signedInLayout(1500);
+    history.replaceState(null, '', '/c/abc');
+    const { verifications } = start(on);
+    history.pushState(null, '', '/c/def');
+    expect(verifications.map((verification) => verification.stopped)).toEqual([true, false]);
   });
 });

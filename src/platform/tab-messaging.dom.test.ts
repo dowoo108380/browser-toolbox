@@ -56,15 +56,19 @@ describe('탭에 보내기(sendToTab)', () => {
   });
 
   it('결정 0026 받는 쪽이 답한 값을 그 요청의 정의로 검증해 돌려준다', async () => {
-    const notFound = [
-      { featureId: 'gpt', element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' } },
+    const unmet = [
+      {
+        featureId: 'gpt',
+        reason: 'not-found',
+        element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' },
+      },
     ];
-    fakeTabs(() => Promise.resolve(ok({ notFound })));
+    fakeTabs(() => Promise.resolve(ok({ unmet })));
     expect(await sendToTab(pageStatus, 4, {}, 1000)).toEqual({
       delivery: 'delivered',
-      value: { notFound },
+      value: { unmet },
     });
-    fakeTabs(() => Promise.resolve(ok({ notFound: [{ featureId: 'gpt' }] })));
+    fakeTabs(() => Promise.resolve(ok({ unmet: [{ featureId: 'gpt' }] })));
     expect(await sendToTab(pageStatus, 4, {}, 1000)).toEqual({ delivery: 'failed' });
   });
 

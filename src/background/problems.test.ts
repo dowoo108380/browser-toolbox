@@ -21,15 +21,17 @@ describe('문제 기록', () => {
     });
   });
 
-  it('COM-5 기대 동작 2 찾지 못한 외부 화면 요소는 이름표와 이름을 함께 남기고, 그 밖의 문제에는 요소 칸이 없다', async () => {
+  it('COM-5 기대 동작 2 결정 0034 찾지 못했거나 변경이 작용하지 않은 외부 화면 요소는 이름표와 이름을 함께 남기고, 그 밖의 문제에는 요소 칸이 없다', async () => {
     const store = createFakeStore();
     const log = createProblemLog({ store, now: () => 5 });
     const element = { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' };
     await log.record({ featureId: 'chatgpt-width', kind: 'not-found', element });
+    await log.record({ featureId: 'chatgpt-width', kind: 'not-applied', element });
     await log.record({ featureId: null, kind: 'platform' });
     // toStrictEqual은 값이 undefined인 칸도 칸으로 본다.
     expect(store.peek('problems')).toStrictEqual([
       { at: 5, featureId: 'chatgpt-width', kind: 'not-found', element },
+      { at: 5, featureId: 'chatgpt-width', kind: 'not-applied', element },
       { at: 5, featureId: null, kind: 'platform' },
     ]);
   });

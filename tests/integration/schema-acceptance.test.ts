@@ -388,6 +388,11 @@ describe('저장된 값의 받아들임과 거절', () => {
           [{ ...record, featureId: 'f', kind: 'not-found', element }],
           [{ ...record, featureId: 'f', kind: 'not-found', element }, added],
         ],
+        [
+          '결정 0034 적용되지 않음의 기록',
+          [{ ...record, featureId: 'f', kind: 'not-applied', element }],
+          [{ ...record, featureId: 'f', kind: 'not-applied', element }, added],
+        ],
         ['모르는 키', [{ ...record, extra: 1 }], [record, added]],
         [
           '요소의 모르는 키',
@@ -574,6 +579,11 @@ describe('메시지의 받아들임과 거절', () => {
         accepted({ featureId: 'f', kind: 'not-found', element }),
       ],
       [
+        '결정 0034 적용되지 않은 요소',
+        { featureId: 'f', kind: 'not-applied', element },
+        accepted({ featureId: 'f', kind: 'not-applied', element }),
+      ],
+      [
         '요소 undefined',
         { featureId: 'f', kind: 'timeout', element: undefined },
         accepted({ featureId: 'f', kind: 'timeout' }),
@@ -678,7 +688,10 @@ describe('메시지의 받아들임과 거절', () => {
 
   it('결정 0006 요청 정의마다의 응답 값', async () => {
     const element = { id: 'chatgpt.thread', name: '대화 열' };
-    const notFound = [{ featureId: 'f', element }];
+    const unmet = [
+      { featureId: 'f', reason: 'not-found', element },
+      { featureId: 'g', reason: 'not-applied', element },
+    ];
     await values(settingsUpdate, [
       ['revision', { revision: 5 }, accepted({ revision: 5 })],
       ['revision 1.5', { revision: 1.5 }, 'failed'],
@@ -699,44 +712,54 @@ describe('메시지의 받아들임과 거절', () => {
     }
     const ready = { page: 'ready', bundle: 'common' };
     await values(tabStatus, [
-      ['쓸 수 있음', { ...ready, notFound: [] }, accepted({ ...ready, notFound: [] })],
-      ['찾지 못함', { ...ready, notFound }, accepted({ ...ready, notFound })],
+      ['쓸 수 있음', { ...ready, unmet: [] }, accepted({ ...ready, unmet: [] })],
+      ['어긋남(찾지 못함, 적용되지 않음)', { ...ready, unmet }, accepted({ ...ready, unmet })],
       [
         'ChatGPT 묶음',
-        { page: 'ready', bundle: 'chatgpt', notFound: [] },
-        accepted({ page: 'ready', bundle: 'chatgpt', notFound: [] }),
+        { page: 'ready', bundle: 'chatgpt', unmet: [] },
+        accepted({ page: 'ready', bundle: 'chatgpt', unmet: [] }),
       ],
       ['새로 고쳐야 함', { page: 'reload' }, accepted({ page: 'reload' })],
       ['접근할 수 없음', { page: 'denied' }, accepted({ page: 'denied' })],
       [
-        '새로 고쳐야 함의 찾지 못함은 빠짐',
-        { page: 'reload', notFound: [] },
+        '새로 고쳐야 함의 어긋남은 빠짐',
+        { page: 'reload', unmet: [] },
         accepted({ page: 'reload' }),
       ],
-      ['쓸 수 있음에 찾지 못함 없음', ready, 'failed'],
-      ['쓸 수 있음에 묶음 없음', { page: 'ready', notFound: [] }, 'failed'],
-      ['모르는 묶음', { page: 'ready', bundle: 'youtube', notFound: [] }, 'failed'],
+      ['쓸 수 있음에 어긋남 없음', ready, 'failed'],
+      ['결정 0034 앞 판의 답(notFound)', { ...ready, notFound: [] }, 'failed'],
+      ['쓸 수 있음에 묶음 없음', { page: 'ready', unmet: [] }, 'failed'],
+      ['모르는 묶음', { page: 'ready', bundle: 'youtube', unmet: [] }, 'failed'],
       ['모르는 단계', { page: 'nope' }, 'failed'],
-      ['찾지 못함이 객체', { ...ready, notFound: {} }, 'failed'],
+      ['어긋남이 객체', { ...ready, unmet: {} }, 'failed'],
       [
-        '찾지 못함의 요소 이름 65자',
+        '어긋남의 요소 이름 65자',
         {
           ...ready,
-          notFound: [{ featureId: 'f', element: { ...element, name: '가'.repeat(65) } }],
+          unmet: [
+            { featureId: 'f', reason: 'not-found', element: { ...element, name: '가'.repeat(65) } },
+          ],
         },
         'failed',
       ],
-      ['찾지 못함의 원소가 배열', { ...ready, notFound: [[]] }, 'failed'],
+      ['어긋남의 원소가 배열', { ...ready, unmet: [[]] }, 'failed'],
+      ['어긋남의 까닭 없음', { ...ready, unmet: [{ featureId: 'f', element }] }, 'failed'],
+      [
+        '모르는 까닭',
+        { ...ready, unmet: [{ featureId: 'f', reason: 'timeout', element }] },
+        'failed',
+      ],
     ]);
     await values(taskStart, [
       ['작업 id', { taskId: 'task-1' }, accepted({ taskId: 'task-1' })],
       ['작업 id 없음', {}, 'failed'],
     ]);
     await values(pageStatus, [
-      ['찾지 못함 없음', { notFound: [] }, accepted({ notFound: [] })],
-      ['찾지 못함', { notFound }, accepted({ notFound })],
-      ['찾지 못함이 객체', { notFound: {} }, 'failed'],
-      ['키를 가진 배열', arrayWith({ notFound: [] }), 'failed'],
+      ['어긋남 없음', { unmet: [] }, accepted({ unmet: [] })],
+      ['어긋남', { unmet }, accepted({ unmet })],
+      ['어긋남이 객체', { unmet: {} }, 'failed'],
+      ['결정 0034 앞 판의 답(notFound)', { notFound: [] }, 'failed'],
+      ['키를 가진 배열', arrayWith({ unmet: [] }), 'failed'],
     ]);
   });
 

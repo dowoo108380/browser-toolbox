@@ -19,8 +19,11 @@ export const strings = {
   siteOnly: {
     chatgpt: 'chatgpt.com에서만 쓸 수 있음',
   } satisfies Record<Site, string>,
-  // 기능이 기대는 외부 화면 요소를 제한 시간 안에 찾지 못했다(COM-6, 용어집). '찾지 못함'은 모든 화면에서 같은 상태 문구다.
+  // 기능이 외부 화면에 기대한 것이 어긋났다(COM-6, 용어집). 둘 다 모든 화면에서 같은 상태 문구다.
+  // 찾지 못함: 기능이 기대는 외부 화면 요소를 제한 시간 안에 찾지 못했다.
   notFound: (elementName: string) => `찾지 못함: ${elementName}`,
+  // 적용되지 않음: 기능이 찾은 요소에 건 변경이 제한 시간 안에 작용하지 않았다(결정 0034).
+  notApplied: (elementName: string) => `적용되지 않음: ${elementName}`,
   noCurrentTab: '지금 탭을 알 수 없어 기능을 쓸 수 있는지 확인하지 못했다.',
   categories: {
     media: '미디어',
