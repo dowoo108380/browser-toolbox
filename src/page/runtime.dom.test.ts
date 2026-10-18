@@ -649,7 +649,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
   const labelled = (id: string, name: string): NamedElement => ({
     id,
     name,
-    find: (root) => root.querySelector(`[aria-label="${name}"]`),
+    candidates: (root) => root.querySelectorAll(`[aria-label="${name}"]`),
   });
   const region = labelled('test.region', '시험 영역');
   const editArea = labelled('test.edit-area', '시험 수정 영역');
@@ -978,9 +978,9 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     let broken = false;
     const fragile: NamedElement = {
       ...region,
-      find: (root) => {
+      candidates: (root) => {
         if (broken) throw new Error('사이트 모듈의 결함');
-        return region.find(root);
+        return region.candidates(root);
       },
     };
     const counts = { started: 0 };
@@ -1009,8 +1009,8 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     expect(counts.started).toBe(1);
   });
 
-  // 찾은 요소에 건 변경이 작용하는지 확인하는 기능(결정 0034). 켜지면 문서 루트에 표시를 달고(변경), 시험 영역을 찾으면 verify로
-  // 그 변경이 작용하는지 본다. 작용하는지는 시험이 정하고(applies), 확인 함수를 부른 횟수를 센다.
+  // 찾은 요소에 건 변경이 작용하는지 확인하는 기능(결정 0034, 0035). 켜지면 문서 루트에 표시를 달고(변경), 시험 영역을 찾으면
+  // verify로 그 변경이 작용하는지 본다. 작용하는지는 시험이 정하고(applies), 확인 함수를 부른 횟수를 센다.
   function verifyingPart() {
     const state = { applies: false, checks: 0, started: 0 };
     const part: PagePart = {
@@ -1025,9 +1025,9 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
           root.removeAttribute('data-test-verifying');
         });
         find(region, () => {
-          verify(() => {
+          verify([region], () => {
             state.checks += 1;
-            return state.applies ? null : region;
+            return state.applies ? null : 0;
           });
         });
       },
@@ -1048,17 +1048,17 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     const other = countingPart('other');
     const runtime = setup([feature.part, other.part]);
     runtime.apply(snapshot({ verifying: { enabled: true }, other: { enabled: true } }));
-    expect(feature.state.checks).toBe(1);
-    // 문서가 바뀌어도 다시 보지 않는다(확인은 배치를 계산하게 할 수 있다).
+    // 한도 전에는 보지 않는다. 문서가 바뀌어도 그렇다(확인은 배치를 계산하게 할 수 있다).
+    expect(feature.state.checks).toBe(0);
     add('다른 영역');
     await settle();
     vi.advanceTimersByTime(elementTimeoutMs - 1);
-    expect(feature.state.checks).toBe(1);
+    expect(feature.state.checks).toBe(0);
     expect(runtime.reports).toEqual([]);
     expect(runtime.status()).toEqual({ unmet: [] });
-    // 한도에 이르면 한 번 더 보고, 그래도 아니면 적용되지 않음이다.
+    // 한도에 이르면 지금 화면의 요소로 보고, 작용하지 않으면 적용되지 않음이다.
     vi.advanceTimersByTime(1);
-    expect(feature.state.checks).toBe(2);
+    expect(feature.state.checks).toBe(1);
     expect(runtime.reports).toEqual([notAppliedReport('verifying', region)]);
     expect(changed()).toBe(false);
     expect(runtime.status()).toEqual({
@@ -1083,12 +1083,12 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     vi.advanceTimersByTime(10_000);
     feature.state.applies = true;
     vi.advanceTimersByTime(elementTimeoutMs);
-    expect(feature.state.checks).toBe(2);
+    expect(feature.state.checks).toBe(1);
     expect(runtime.reports).toEqual([]);
     expect(changed()).toBe(true);
   });
 
-  it('결정 0034 숨겨진 동안은 세지 않고, 다시 보이면 곧바로 다시 본다', () => {
+  it('결정 0034 결정 0035 숨겨진 동안은 세지 않고, 다시 보여도 한도 전에는 보지 않는다', () => {
     add('시험 영역');
     const feature = verifyingPart();
     const runtime = setup([feature.part]);
@@ -1096,13 +1096,44 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     vi.advanceTimersByTime(5000);
     setVisibility('hidden');
     vi.advanceTimersByTime(60_000);
-    expect(runtime.reports).toEqual([]);
-    feature.state.applies = true;
     setVisibility('visible');
-    expect(feature.state.checks).toBe(2);
-    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(feature.state.checks).toBe(0);
+    vi.advanceTimersByTime(elementTimeoutMs - 5000 - 1);
     expect(runtime.reports).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(runtime.reports).toEqual([notAppliedReport('verifying', region)]);
+  });
+
+  it('COM-6.1 COM-6.3 결정 0035 확인할 때 그 요소가 지금 화면에 없으면(숨겨짐) 판단할 수 없어 찾지 못함으로 멈춰 되돌리고 기록하며, 지금 화면에 나타나면 다시 시작한다', async () => {
+    const element = add('시험 영역');
+    const feature = verifyingPart();
+    feature.state.applies = true;
+    const runtime = setup([feature.part]);
+    runtime.apply(snapshot({ verifying: { enabled: true } }));
+    // 찾은 뒤 사이트가 그 요소를 숨긴다(앞 화면이 됨).
+    element.setAttribute('style', 'display: none;');
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(feature.state.checks).toBe(0);
+    expect(runtime.reports).toEqual([notFoundReport('verifying', region)]);
+    expect(changed()).toBe(false);
+    expect(runtime.status()).toEqual({
+      unmet: [
+        {
+          featureId: 'verifying',
+          reason: 'not-found',
+          element: { id: 'test.region', name: '시험 영역' },
+        },
+      ],
+    });
+
+    element.removeAttribute('style');
+    await settle();
+    expect(feature.state.started).toBe(2);
     expect(changed()).toBe(true);
+    expect(runtime.status()).toEqual({ unmet: [] });
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(feature.state.checks).toBe(1);
+    expect(runtime.reports).toHaveLength(1);
   });
 
   it('결정 0034 결정 0033 적용되지 않은 뒤에는 지켜보지 않아 문서가 바뀌거나 탭이 다시 보여도 다시 시작하지 않고, 페이지 안에서 이동하거나 설정이 바뀌면 다시 시작한다', async () => {
@@ -1150,7 +1181,7 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
           document.documentElement.removeAttribute('data-test-verifying');
         });
         find(region, () => {
-          verify(() => {
+          verify([region], () => {
             throw new Error('사이트 모듈의 결함');
           });
         });
@@ -1158,6 +1189,8 @@ describe('COM-6 기대는 외부 화면 요소를 찾지 못함(결정 0026)', (
     };
     const runtime = setup([part]);
     runtime.apply(snapshot({ 'broken-check': { enabled: true } }));
+    expect(changed()).toBe(true);
+    vi.advanceTimersByTime(elementTimeoutMs);
     expect(runtime.reports).toEqual([{ featureId: 'broken-check', kind: 'unexpected' }]);
     expect(changed()).toBe(false);
   });
@@ -1173,7 +1206,7 @@ describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames
   });
 
   // 이 문서에 없는 외부 화면 요소.
-  const missing: NamedElement = { id: 'test.missing', name: '없는 영역', find: () => null };
+  const missing: NamedElement = { id: 'test.missing', name: '없는 영역', candidates: () => [] };
 
   // 그 프레임 범위로 정의한 켜고 끄기 기능과 그 페이지 쪽 일. 켜지면 시작을 세고 문서 루트에 표시를 단 뒤 없는 영역을
   // 찾는다. 표시는 범위에 맡긴다.

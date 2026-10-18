@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type NamedElement, awaitApplied, awaitElement, elementTimeoutMs } from './find.ts';
-import { createScope } from './scope.ts';
+import { type Scope, createScope } from './scope.ts';
 
-// 외부 화면 요소 찾기와 적용 확인(COM-6, 결정 0026, 0034). 시계는 가짜이고, 문서가 보이는지는 시험이 정한다(headless
-// Chromium의 문서는 늘 visible이다, 결정 0024의 실험 5).
+// 외부 화면 요소 찾기와 적용 확인(COM-6, 결정 0026, 0034, 0035). 시계는 가짜이고, 문서가 보이는지는 시험이 정한다(headless
+// Chromium의 문서는 늘 visible이다, 결정 0024의 실험 5). 요소가 지금 화면에 그려지는지는 실제 Chromium이 정한다.
 
 let visibility: DocumentVisibilityState = 'visible';
 const added: Element[] = [];
+// 시험이 만든 범위. 끝나지 않은 찾기가 다음 시험의 보이기 바뀜을 받지 않게 닫는다(quality 104).
+const scopes: Scope[] = [];
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -17,6 +19,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const scope of scopes.splice(0)) scope.close();
   vi.useRealTimers();
   vi.restoreAllMocks();
   Reflect.deleteProperty(document, 'visibilityState');
@@ -32,15 +35,28 @@ function setVisibility(next: DocumentVisibilityState) {
 const target: NamedElement = {
   id: 'test.target',
   name: '시험 대상',
-  find: (root) => root.querySelector('[aria-label="시험 대상"]'),
+  candidates: (root) => root.querySelectorAll('[aria-label="시험 대상"]'),
 };
 
-function addTarget(label = '시험 대상'): Element {
+function addTarget(label = '시험 대상', parent: Element = document.body): HTMLElement {
   const element = document.createElement('section');
   element.setAttribute('aria-label', label);
-  document.body.append(element);
-  added.push(element);
+  parent.append(element);
+  if (parent === document.body) added.push(element);
   return element;
+}
+
+// 앞 화면이 숨긴 채 남긴 상자를 문서 앞쪽에 둔다. 로그인한 chatgpt.com은 style="display: none"으로 숨긴다(2026-10-19).
+function addHiddenScreen(
+  hide: (screen: HTMLElement) => void = (screen) => {
+    screen.style.display = 'none';
+  },
+): HTMLElement {
+  const screen = document.createElement('div');
+  hide(screen);
+  document.body.prepend(screen);
+  added.push(screen);
+  return screen;
 }
 
 // 관찰 알림(마이크로태스크)까지 처리한다.
@@ -54,6 +70,7 @@ function search(element: NamedElement = target, limitMs: number | null = element
   const found: Element[] = [];
   let timeouts = 0;
   const scope = createScope({ window, onError: (error) => errors.push(error), isLive: () => true });
+  scopes.push(scope);
   const stop = awaitElement({
     scope,
     window,
@@ -189,7 +206,7 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
     let calls = 0;
     const broken: NamedElement = {
       ...target,
-      find: () => {
+      candidates: () => {
         calls += 1;
         throw new Error(`찾는 함수 실패 ${String(calls)}`);
       },
@@ -198,9 +215,9 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
 
     const later: NamedElement = {
       ...target,
-      find: (root) => {
+      candidates: (root) => {
         if (root.querySelector('[data-break]') !== null) throw new Error('나중의 실패');
-        return null;
+        return [];
       },
     };
     const { errors } = search(later);
@@ -214,13 +231,71 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
 
   it('결정 0034 한도에 이르면 마지막으로 한 번 더 찾는다(문서의 바뀜 없이 찾게 된 요소)', () => {
     let ready = false;
-    const late: NamedElement = { ...target, find: () => (ready ? document.body : null) };
+    const late: NamedElement = { ...target, candidates: () => (ready ? [document.body] : []) };
     const { found, timeouts } = search(late);
     vi.advanceTimersByTime(elementTimeoutMs - 1);
     ready = true;
     vi.advanceTimersByTime(1);
     expect(found).toEqual([document.body]);
     expect(timeouts()).toBe(0);
+  });
+
+  it.each([
+    ['style="display: none"(로그인한 chatgpt.com)', undefined],
+    [
+      'hidden 속성',
+      (screen: HTMLElement) => {
+        screen.hidden = true;
+      },
+    ],
+    [
+      'content-visibility: hidden',
+      (screen: HTMLElement) => {
+        screen.style.contentVisibility = 'hidden';
+      },
+    ],
+  ])(
+    '결정 0035 앞 화면이 %s로 숨긴 채 문서 앞쪽에 남긴 요소는 단서에 맞아도 찾은 것이 아니고, 지금 화면에 그려지는 것을 찾는다',
+    async (_name, hide) => {
+      addTarget('시험 대상', addHiddenScreen(hide));
+      const { found, timeouts } = search();
+      expect(found).toEqual([]);
+      const current = addTarget();
+      await settle();
+      expect(found).toEqual([current]);
+      vi.advanceTimersByTime(elementTimeoutMs);
+      expect(timeouts()).toBe(0);
+    },
+  );
+
+  it('결정 0035 앞 화면의 숨은 요소만 있으면 15초 뒤 찾지 못함이고, 숨긴 상자가 다시 보이게 되면(속성의 바뀜) 찾는다', async () => {
+    const screen = addHiddenScreen();
+    const element = addTarget('시험 대상', screen);
+    const first = search();
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(first.found).toEqual([]);
+    expect(first.timeouts()).toBe(1);
+
+    const second = search(target, null);
+    screen.style.removeProperty('display');
+    await settle();
+    expect(second.found).toEqual([element]);
+  });
+
+  it('결정 0035 크기가 0이어도, display: contents여도 내용이 그려지는 요소는 지금 화면의 것이다', () => {
+    const empty = addTarget();
+    empty.setAttribute('style', 'width: 0; height: 0; overflow: hidden;');
+    expect(search().found).toEqual([empty]);
+    empty.remove();
+
+    const contents = addTarget();
+    contents.style.display = 'contents';
+    expect(search().found).toEqual([contents]);
+    contents.remove();
+
+    // 숨긴 상자 안의 display: contents는 그려지지 않는다.
+    addTarget('시험 대상', addHiddenScreen()).style.display = 'contents';
+    expect(search().found).toEqual([]);
   });
 
   it('찾았다는 알림이 던지면 범위의 실패로 알린다', () => {
@@ -244,126 +319,154 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
   });
 });
 
-describe('찾은 요소에 건 변경의 적용 확인(결정 0034)', () => {
-  // 확인 함수. 작용하는지는 시험이 정하고(applied, 처음 값은 받음), 부른 횟수를 센다.
-  function verification(applied = false) {
+describe('찾은 요소에 건 변경의 적용 확인(결정 0034, 0035)', () => {
+  // 확인 함수. 작용하는지는 시험이 정하고(applied, 처음 값은 받음), 받은 지금 화면의 요소들과 부른 횟수를 적는다. 작용하지 않으면
+  // unapplied가 낸 차례를 돌려준다.
+  function verification(
+    applied = false,
+    elements: readonly NamedElement[] = [target],
+    unapplied: (current: readonly Element[]) => number | null = () => 0,
+  ) {
     const state = { applied, checks: 0 };
+    const seen: (readonly Element[])[] = [];
     const errors: unknown[] = [];
-    const timedOut: NamedElement[] = [];
+    const missing: NamedElement[] = [];
+    const notApplied: NamedElement[] = [];
     const scope = createScope({
       window,
       onError: (error) => errors.push(error),
       isLive: () => true,
     });
+    scopes.push(scope);
     const stop = awaitApplied({
       scope,
       window,
-      check: () => {
+      elements,
+      check: (current) => {
         state.checks += 1;
-        return state.applied ? null : target;
+        seen.push(current);
+        return state.applied ? null : unapplied(current);
       },
-      limit: {
-        ms: elementTimeoutMs,
-        onTimeout: (element) => {
-          timedOut.push(element);
-        },
+      limitMs: elementTimeoutMs,
+      onMissing: (element) => {
+        missing.push(element);
+      },
+      onUnapplied: (element) => {
+        notApplied.push(element);
       },
     });
-    return { state, scope, stop, errors, timedOut };
+    return { state, seen, scope, stop, errors, missing, notApplied };
   }
 
-  it('곧바로 작용하면 그 자리에서 끝나고 듣기와 타이머를 남기지 않는다', () => {
-    const listen = vi.spyOn(document, 'addEventListener');
-    const { state, timedOut } = verification(true);
-    expect(state.checks).toBe(1);
-    expect(listen).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(elementTimeoutMs * 2);
-    expect(state.checks).toBe(1);
-    expect(timedOut).toEqual([]);
-  });
-
-  it('작용하지 않으면 문서가 바뀌어도 다시 보지 않고(관찰하지 않음), 한도에 이를 때 한 번 더 보고 그래도 아니면 그 요소로 알린다', async () => {
+  it('한도 전에는 보지 않는다: 곧바로도, 문서가 바뀌어도(관찰하지 않음), 다시 보여도. 한도 때 한 번 보아 작용하면 알리지 않고 끝난다', async () => {
+    addTarget();
     const observe = vi.spyOn(MutationObserver.prototype, 'observe');
-    const { state, timedOut } = verification();
+    const { state, missing, notApplied } = verification(true);
+    expect(state.checks).toBe(0);
     addTarget('다른 것');
     await settle();
+    setVisibility('hidden');
+    setVisibility('visible');
     vi.advanceTimersByTime(elementTimeoutMs - 1);
-    expect(state.checks).toBe(1);
+    expect(state.checks).toBe(0);
     expect(observe).not.toHaveBeenCalled();
-    expect(timedOut).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(state.checks).toBe(2);
-    expect(timedOut).toEqual([target]);
+    expect(state.checks).toBe(1);
+    expect([missing, notApplied]).toEqual([[], []]);
     vi.advanceTimersByTime(elementTimeoutMs * 2);
-    expect(state.checks).toBe(2);
+    expect(state.checks).toBe(1);
   });
 
-  it('한도 때 작용하게 되었으면 알리지 않는다', () => {
-    const { state, timedOut } = verification();
+  it('COM-6.8 한도 때 지금 화면의 그 요소에 작용하지 않으면 그 요소로 알린다(적용되지 않음)', () => {
+    const element = addTarget();
+    const { seen, missing, notApplied } = verification();
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(seen).toEqual([[element]]);
+    expect(notApplied).toEqual([target]);
+    expect(missing).toEqual([]);
+  });
+
+  it('결정 0034 처음에 작용하지 않아도 한도 때 작용하게 되었으면(사이트가 스타일을 늦게 실음) 알리지 않는다', () => {
+    addTarget();
+    const { state, missing, notApplied } = verification();
     vi.advanceTimersByTime(elementTimeoutMs - 1);
     state.applied = true;
     vi.advanceTimersByTime(1);
-    expect(timedOut).toEqual([]);
+    expect([missing, notApplied]).toEqual([[], []]);
   });
 
-  it('COM-6 기대 동작 4 숨겨진 동안은 세지 않고, 다시 보이면 곧바로 본다', () => {
-    const { state, timedOut } = verification();
+  it('결정 0035 한도 때 지금 화면에 그 요소가 없으면(앞 화면이 숨긴 것만 있음) 판단할 수 없어 작용함이 아니라 없음으로 알리고, 확인 함수를 부르지 않는다', () => {
+    addTarget('시험 대상', addHiddenScreen());
+    const { state, missing, notApplied } = verification(true);
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(state.checks).toBe(0);
+    expect(missing).toEqual([target]);
+    expect(notApplied).toEqual([]);
+  });
+
+  it('결정 0035 시작할 때 작용하던 요소가 한도 때 숨겨져 있고 지금 화면의 것이 없으면 없음이다(이동 신호 때 본 앞 화면의 요소)', () => {
+    const element = addTarget();
+    const { missing } = verification(true);
+    vi.advanceTimersByTime(5000);
+    element.style.display = 'none';
+    vi.advanceTimersByTime(elementTimeoutMs - 5000);
+    expect(missing).toEqual([target]);
+  });
+
+  it('결정 0035 확인 함수는 지금 화면의 요소들을 elements의 차례로 받고, 그가 낸 차례의 요소로 알린다', () => {
+    const second: NamedElement = {
+      id: 'test.second',
+      name: '두째 대상',
+      candidates: (root) => root.querySelectorAll('[aria-label="두째 대상"]'),
+    };
+    const hidden = addHiddenScreen();
+    addTarget('두째 대상', hidden);
+    addTarget('시험 대상', hidden);
+    const shownSecond = addTarget('두째 대상');
+    const shownTarget = addTarget();
+    const { seen, notApplied } = verification(false, [target, second], () => 1);
+    vi.advanceTimersByTime(elementTimeoutMs);
+    expect(seen).toEqual([[shownTarget, shownSecond]]);
+    expect(notApplied).toEqual([second]);
+  });
+
+  it('COM-6 기대 동작 4 숨겨진 동안은 세지 않는다', () => {
+    addTarget();
+    const { state, notApplied } = verification();
     vi.advanceTimersByTime(10_000);
     setVisibility('hidden');
     vi.advanceTimersByTime(60_000);
-    expect(timedOut).toEqual([]);
     setVisibility('visible');
-    expect(state.checks).toBe(2);
     vi.advanceTimersByTime(elementTimeoutMs - 10_000 - 1);
-    expect(timedOut).toEqual([]);
+    expect(state.checks).toBe(0);
+    expect(notApplied).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(timedOut).toEqual([target]);
+    expect(notApplied).toEqual([target]);
   });
 
-  it('그만두거나 범위가 닫히면 다시 보지도 알리지도 않는다', () => {
+  it('그만두거나 범위가 닫히면 보지도 알리지도 않는다', () => {
+    addTarget();
     const stopped = verification();
     stopped.stop();
     const closed = verification();
     closed.scope.close();
     vi.advanceTimersByTime(elementTimeoutMs);
-    for (const { state, timedOut } of [stopped, closed]) {
-      expect(state.checks).toBe(1);
-      expect(timedOut).toEqual([]);
+    for (const { state, missing, notApplied } of [stopped, closed]) {
+      expect(state.checks).toBe(0);
+      expect([missing, notApplied]).toEqual([[], []]);
     }
   });
 
-  it('확인 함수가 처음에 던지면 부른 쪽에 던지고, 그 뒤에 던지면 범위의 실패로 알린다', () => {
-    const scope = createScope({ window, onError: () => undefined, isLive: () => true });
-    const throwing = () => {
+  it('확인 함수가 던지거나 없는 차례를 내면 알리지 않고 범위의 실패로 알린다', () => {
+    addTarget();
+    const throwing = verification(false, [target], () => {
       throw new Error('확인 실패');
-    };
-    expect(() =>
-      awaitApplied({
-        scope,
-        window,
-        check: throwing,
-        limit: { ms: elementTimeoutMs, onTimeout: () => undefined },
-      }),
-    ).toThrow('확인 실패');
-
-    let broken = false;
-    const errors: unknown[] = [];
-    const later = createScope({
-      window,
-      onError: (error) => errors.push(error),
-      isLive: () => true,
     });
-    awaitApplied({
-      scope: later,
-      window,
-      check: () => {
-        if (broken) throw new Error('나중의 실패');
-        return target;
-      },
-      limit: { ms: elementTimeoutMs, onTimeout: () => undefined },
-    });
-    broken = true;
+    const outOfRange = verification(false, [target], () => 1);
     vi.advanceTimersByTime(elementTimeoutMs);
-    expect(errors).toHaveLength(1);
+    for (const { errors, missing, notApplied } of [throwing, outOfRange]) {
+      expect(errors).toHaveLength(1);
+      expect([missing, notApplied]).toEqual([[], []]);
+    }
   });
 });

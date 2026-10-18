@@ -10,7 +10,8 @@ import { definePagePart } from '../../src/page/index.ts';
 export const fixtureTarget: NamedElement = {
   id: 'fixture.target',
   name: '시험 대상 영역',
-  find: (document) => document.querySelector('[role="region"][aria-label="시험 대상 영역"]'),
+  candidates: (document) =>
+    document.querySelectorAll('[role="region"][aria-label="시험 대상 영역"]'),
 };
 
 // 기능이 페이지에 단 표시. 시험이 기능이 작용했는지 본다.

@@ -41,7 +41,7 @@ afterEach(() => {
 const region: NamedElement = {
   id: 'test.region',
   name: '시험 영역',
-  find: (root) => root.querySelector('[aria-label="시험 영역"]'),
+  candidates: (root) => root.querySelectorAll('[aria-label="시험 영역"]'),
 };
 
 const regionFeature = defineFeature({

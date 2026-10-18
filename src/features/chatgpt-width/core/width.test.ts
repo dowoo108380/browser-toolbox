@@ -39,7 +39,7 @@ describe('GPT-2 너비', () => {
 
 describe('GPT-2 너비가 걸렸는지의 판단(결정 0034)', () => {
   // 규칙을 px로 걸었을 때의 너비를 요소마다 정하는 가짜 잼. 잰 너비(px)를 차례로 적는다.
-  function measuring(widthsAt: (px: number) => readonly (number | null)[]) {
+  function measuring(widthsAt: (px: number) => readonly number[]) {
     const asked: number[] = [];
     return {
       asked,
@@ -90,16 +90,9 @@ describe('GPT-2 너비가 걸렸는지의 판단(결정 0034)', () => {
     expect(unappliedIndex(1200, measuring((px) => [px === 1200 ? 700 : 698.9]).measure)).toBeNull();
   });
 
-  it('보이지 않는 요소는 판단하지 않고, 다시 잴 때 보이지 않게 되면 줄어든 것이 아니다', () => {
-    for (const widths of [
-      [null, 1200],
-      [null, null],
-    ]) {
-      const { asked, measure } = measuring(() => widths);
-      expect(unappliedIndex(1200, measure), JSON.stringify(widths)).toBeNull();
-      expect(asked, JSON.stringify(widths)).toEqual([1200]);
-    }
-    expect(unappliedIndex(1200, measuring((px) => [px === 1200 ? 700 : null]).measure)).toBe(0);
-    expect(unappliedIndex(1200, measuring(() => []).measure)).toBeNull();
+  it('잴 요소가 없으면 작용하지 않는 요소도 없다', () => {
+    const { asked, measure } = measuring(() => []);
+    expect(unappliedIndex(1200, measure)).toBeNull();
+    expect(asked).toEqual([1200]);
   });
 });

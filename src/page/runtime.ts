@@ -148,6 +148,9 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       case 'start': {
         const { featureId, run } = effect;
         const scope = openScope(featureId, run);
+        const unmet = (reason: UnmetReason, element: NamedElement) => {
+          dispatch({ type: 'unmet', featureId, run, unmet: { reason, element } });
+        };
         const find: PageStart['find'] = (element, onFound) =>
           awaitElement({
             scope,
@@ -157,30 +160,23 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
             limit: {
               ms: elementTimeoutMs,
               onTimeout: () => {
-                dispatch({
-                  type: 'unmet',
-                  featureId,
-                  run,
-                  unmet: { reason: 'not-found', element },
-                });
+                unmet('not-found', element);
               },
             },
           });
-        const verify: PageStart['verify'] = (check) =>
+        // 확인할 때 지금 화면에 없는 요소는 찾지 못한 것이다(결정 0035). 나타나는지 지켜보다 다시 시작한다.
+        const verify: PageStart['verify'] = (elements, check) =>
           awaitApplied({
             scope,
             window: deps.context.window,
+            elements,
             check,
-            limit: {
-              ms: elementTimeoutMs,
-              onTimeout: (element) => {
-                dispatch({
-                  type: 'unmet',
-                  featureId,
-                  run,
-                  unmet: { reason: 'not-applied', element },
-                });
-              },
+            limitMs: elementTimeoutMs,
+            onMissing: (element) => {
+              unmet('not-found', element);
+            },
+            onUnapplied: (element) => {
+              unmet('not-applied', element);
             },
           });
         try {

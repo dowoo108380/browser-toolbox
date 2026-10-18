@@ -17,8 +17,14 @@
       옮긴 것: 대화 열 [data-thread-find-target](메시지 차례 [data-turn-key]를 담음)과 작성란 form[data-chatgpt-composer]를
       각각 바깥 상자가 묶는다. 바깥 상자는 사이트의 CSS 변수 --thread-content-max-width(48rem)에 좌우 안쪽 여백 20px를 더한
       최대 너비(808px)로 가운데에 놓인다. 대화 열의 바깥 상자에는 [data-thread-user-message-navigation-content]가 있고 작성란의
-      바깥 상자에는 속성이 없다. 앞 화면은 숨긴 채 문서에 남아 대화 열과 작성란이 둘씩 있다(보이는 것은 하나). 실제 화면의
-      클래스는 뜻 없는 원자 클래스라 옮기지 않고 같은 계산된 스타일을 아래 style에 적었다. 옆 메뉴는 260px로 줄였다.
+      바깥 상자에는 속성이 없다. 실제 화면의 클래스는 뜻 없는 원자 클래스라 옮기지 않고 같은 계산된 스타일을 아래 style에
+      적었다. 옆 메뉴는 260px로 줄였다.
+
+      2026-10-19에 같은 방법으로 더 본 것(페이지 안에서 이동하는 화면 바꾸기, 결정 0035): 화면마다 상자
+      [data-app-shell-page-surface]가 있어 그 화면의 main을 담고, 그 상자들은 같은 속성의 바깥 상자(flex) 하나에 들어 있다.
+      다른 화면으로 옮기면 앞 화면의 상자를 style="display: none"으로 숨긴 채 남기고 지금 화면의 상자(display: contents)를 그
+      뒤에 둔다. 그래서 대화 열과 작성란이 화면 수만큼 있고, 단서에 맞는 요소가 문서 앞쪽의 숨은 것부터 나온다(보이는 것은
+      하나). 상자의 깊이와 그 사이의 요소는 줄였다.
 
       로그인하지 않은 화면은 tests/fixtures/chatgpt.html이다. 확장 전체 시험(tests/e2e/chatgpt-width.spec.ts)이
       https://chatgpt.com/ 아래의 요청을 이 문서로 답한다. 실행 코드는 두지 않는다(tests/lint/fixtures.test.ts). 새 채팅 화면,
@@ -37,6 +43,16 @@
       }
       nav {
         flex: 0 0 260px;
+      }
+      [data-app-shell-page-surface] {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      /* 지금 화면의 상자. 앞 화면의 상자는 style="display: none"이 이긴다. */
+      [data-app-shell-page-surface] [data-app-shell-page-surface] {
+        display: contents;
       }
       main[data-app-shell-main-surface] {
         flex: 1;
@@ -88,38 +104,51 @@
     <div>
       <div data-app-shell-workspace-row>
         <nav>New chat</nav>
-        <main data-app-shell-main-surface>
+        <div data-app-shell-page-surface>
           <!-- 앞 화면: 숨긴 채 남아 있다. -->
-          <div hidden>
-            <div class="column" data-thread-user-message-navigation-content>
-              <div data-thread-find-target data-chatgpt-conversation-selection-target>
-                <div data-turn-key>Earlier message</div>
-              </div>
-            </div>
-            <div class="column">
-              <form data-chatgpt-composer data-thread-find-composer data-composer-placement>
-                <div data-composer-input></div>
-              </form>
-            </div>
-          </div>
-          <div data-app-shell-main-content-layout>
-            <div class="scroll">
-              <div>
-                <div class="column" data-thread-user-message-navigation-content>
-                  <div data-thread-find-target data-chatgpt-conversation-selection-target>
-                    <div data-turn-key><div data-conversation-role>Hello</div></div>
-                    <div data-turn-key><div>Hello! How can I help you today?</div></div>
+          <div data-app-shell-page-surface style="display: none">
+            <main data-app-shell-main-surface>
+              <div data-app-shell-main-content-layout>
+                <div class="scroll">
+                  <div>
+                    <div class="column" data-thread-user-message-navigation-content>
+                      <div data-thread-find-target data-chatgpt-conversation-selection-target>
+                        <div data-turn-key>Earlier message</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
+                <div class="column">
+                  <form data-chatgpt-composer data-thread-find-composer data-composer-placement>
+                    <div data-composer-input></div>
+                  </form>
+                </div>
               </div>
-            </div>
-            <div class="column">
-              <form data-chatgpt-composer data-thread-find-composer data-composer-placement>
-                <div data-composer-input contenteditable="true"></div>
-              </form>
-            </div>
+            </main>
           </div>
-        </main>
+          <!-- 지금 화면. -->
+          <div data-app-shell-page-surface>
+            <main data-app-shell-main-surface>
+              <div data-app-shell-main-content-layout>
+                <div class="scroll">
+                  <div>
+                    <div class="column" data-thread-user-message-navigation-content>
+                      <div data-thread-find-target data-chatgpt-conversation-selection-target>
+                        <div data-turn-key><div data-conversation-role>Hello</div></div>
+                        <div data-turn-key><div>Hello! How can I help you today?</div></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="column">
+                  <form data-chatgpt-composer data-thread-find-composer data-composer-placement>
+                    <div data-composer-input contenteditable="true"></div>
+                  </form>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
       </div>
     </div>
   </body>

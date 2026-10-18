@@ -25,6 +25,9 @@ interface Shell {
   // 너비를 잴 대화 열과 작성란. 숨긴 채 남은 앞 화면의 것은 재지 않는다(보이는 것만).
   readonly thread: string;
   readonly composer: string;
+  // 화면마다의 상자. 사이트는 페이지 안에서 이동하면 지금 화면의 상자를 숨긴 채 남기고 새 화면의 상자를 그 뒤에 그린다
+  // (로그인한 화면, 2026-10-19). null이면 보이는 요소를 새 요소로 바꿔 그린다(로그인하지 않은 화면의 이동은 보지 않았다).
+  readonly surface: string | null;
   // 문서를 다시 싣는 이동으로 여는 다른 대화의 주소.
   readonly reloadPath: string;
   // 켜기 전 넓은 창의 너비, 좁은 창의 너비(정한 1200px보다 좁아 켜도 같다).
@@ -39,6 +42,7 @@ const signedOut: Shell = {
   fixture: 'chatgpt.html',
   thread: 'ol[data-conversation-transcript]',
   composer: '[data-composer-positioner]',
+  surface: null,
   reloadPath: '/uc/ghi',
   // 대화 열: 1800 − 옆 메뉴 260 − 좌우 여백 64씩. 작성란: 사이트의 최대 너비.
   original: { thread: 1412, composer: 768 },
@@ -52,6 +56,7 @@ const signedIn: Shell = {
   fixture: 'chatgpt-signed-in.html',
   thread: '[data-thread-find-target]',
   composer: 'form[data-chatgpt-composer]',
+  surface: '[data-app-shell-page-surface]',
   reloadPath: '/c/ghi',
   // 둘 다 사이트의 변수 48rem(바깥 상자는 그에 여백 20px씩을 더한 808px).
   original: { thread: 768, composer: 768 },
@@ -90,34 +95,53 @@ async function openChatgpt(
   return { page, errors };
 }
 
-// chatgpt.com의 페이지 안 이동을 흉내 낸다: 문서를 다시 싣지 않고 주소를 바꾸고, 사이트처럼 보이는 대화 열과 작성란을 새
-// 요소로 바꿔 그린다. 새 대화 화면(/)에는 보이는 대화 열이 없다.
-async function navigateInPage(page: Page, shell: Shell, pathname: string) {
+// chatgpt.com의 페이지 안 이동을 흉내 낸다: 문서를 다시 싣지 않고 주소를 바꾼 뒤(이동 신호를 받은 때에는 앞 화면이 아직
+// 보인다) 사이트처럼 새 화면을 그린다. 화면마다의 상자가 있는 화면은 지금 화면의 상자를 숨긴 채 남기고 그 사본을 새 화면으로
+// 뒤에 두고, 없는 화면은 보이는 대화 열과 작성란을 새 요소로 바꾼다. thread가 거짓이면 새 화면에 단서에 맞는 대화 열이 없다
+// (새 대화 화면 /, 또는 사이트가 대화 열을 바꾼 화면).
+async function navigateInPage(
+  page: Page,
+  shell: Shell,
+  pathname: string,
+  { thread = pathname !== '/' }: { thread?: boolean } = {},
+) {
   await page.evaluate(
-    ([to, threadSelector, composerSelector]) => {
+    ([to, threadSelector, composerSelector, surfaceSelector, withThread]) => {
       const visible = (selector: string) =>
         [...document.querySelectorAll(selector)].find(
           (element) => element.getBoundingClientRect().width > 0,
         );
       history.pushState(null, '', to);
+      if (surfaceSelector !== null) {
+        const current = visible(composerSelector)?.closest(surfaceSelector);
+        if (!(current instanceof HTMLElement)) throw new Error('지금 화면의 상자가 없다.');
+        const next = current.cloneNode(true);
+        if (!(next instanceof Element)) throw new Error('상자를 베끼지 못했다.');
+        if (!withThread)
+          for (const element of next.querySelectorAll(threadSelector)) element.remove();
+        current.style.display = 'none';
+        current.after(next);
+        return;
+      }
       const transcript = visible(threadSelector);
-      if (to === '/') transcript?.remove();
-      else transcript?.replaceWith(transcript.cloneNode(true));
+      if (withThread) transcript?.replaceWith(transcript.cloneNode(true));
+      else transcript?.remove();
       const form = visible(composerSelector);
       form?.replaceWith(form.cloneNode(true));
     },
-    [pathname, shell.thread, shell.composer] as const,
+    [pathname, shell.thread, shell.composer, shell.surface, thread] as const,
   );
   expect(new URL(page.url()).pathname).toBe(pathname);
 }
 
-// 사이트가 화면을 바꿔 대화 열이 없어진 것을 흉내 낸다(숨긴 채 남은 앞 화면의 것까지). 돌려준 함수는 뗀 요소를 제자리에
-// 다시 붙인다(요소가 나중에 나타남).
+// 사이트가 지금 화면을 바꿔 대화 열이 없어진 것을 흉내 낸다. 앞 화면이 숨긴 채 남긴 대화 열은 그대로 둔다: 단서에 맞아도
+// 지금 화면의 것이 아니다(결정 0035). 돌려준 함수는 뗀 요소를 제자리에 다시 붙인다(요소가 나중에 나타남).
 async function removeThread(page: Page, shell: Shell) {
   const removed = await page.evaluateHandle((selector) => {
-    const places = [...document.querySelectorAll(selector)].map(
-      (element) => [element, element.parentElement] as const,
-    );
+    const places = [...document.querySelectorAll(selector)]
+      .filter((element) => element.getBoundingClientRect().width > 0)
+      .map((element) => [element, element.parentElement] as const);
+    if (places.length === 0) throw new Error('보이는 대화 열이 없다.');
     for (const [element] of places) element.remove();
     return places;
   }, shell.thread);
@@ -248,7 +272,7 @@ for (const shell of shells) {
   }) => {
     test.setTimeout(90_000);
     const worker = await serviceWorkerOf(context);
-    // 사이트가 화면을 바꿔 대화 화면에 대화 열이 없다.
+    // 사이트가 화면을 바꿔 대화 화면에 대화 열이 없다(로그인한 화면에는 숨긴 채 남은 앞 화면의 대화 열이 있다).
     const { page, errors } = await openChatgpt(context, shell, '/c/abc');
     const restoreThread = await removeThread(page, shell);
     const before = await documentWithoutExtension(page);
@@ -496,6 +520,45 @@ test('COM-6 기대 동작 4 결정 0033 대화 열을 찾지 못해 멈춘 뒤(1
   await page.waitForTimeout(elementTimeoutMs + 3000);
   expect(await problemRecords(worker)).toHaveLength(1);
   expect(await widths(page, signedOut)).toEqual({ thread: null, composer: 1200 });
+  expect(errors).toEqual([]);
+});
+
+test('GPT-2.2 GPT-2.5 COM-6.1 결정 0035 로그인한 화면에서 기존 대화를 오가며 앞 화면이 숨은 채 남아도, 새 화면의 대화 열이 단서에 맞으면 15초가 지나도 기록이 없고 맞지 않으면 15초 뒤 그 기능만 멈춰 되돌리고 찾지 못함으로 기록한다', async ({
+  context,
+  extensionId,
+}) => {
+  test.setTimeout(120_000);
+  const worker = await serviceWorkerOf(context);
+  const { page, errors } = await openChatgpt(context, signedIn, '/c/abc');
+  const enabled = await popupOn(context, extensionId, page);
+  await enabled.feature.check();
+  await enabled.popup.close();
+  await expect.poll(() => widths(page, signedIn)).toEqual({ thread: 1200, composer: 1200 });
+
+  await navigateInPage(page, signedIn, '/c/def');
+  await page.waitForTimeout(elementTimeoutMs + 3000);
+  expect(await problemRecords(worker)).toEqual([]);
+  expect(await widths(page, signedIn)).toEqual({ thread: 1200, composer: 1200 });
+
+  // 사이트가 새 화면의 대화 열을 바꿔 단서에 맞지 않는다. 이동 신호를 받은 때에는 앞 화면(/c/def)의 대화 열이 아직 보인다.
+  await navigateInPage(page, signedIn, '/c/ghi', { thread: false });
+  await expect
+    .poll(() => problemRecords(worker), { timeout: elementTimeoutMs + 10_000 })
+    .toEqual([
+      {
+        featureId: 'chatgpt-width',
+        kind: 'not-found',
+        element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' },
+        at: expect.any(Number),
+      },
+    ]);
+  expect(await widths(page, signedIn)).toEqual({
+    thread: null,
+    composer: signedIn.original.composer,
+  });
+  const missing = await popupOn(context, extensionId, page);
+  await expect(missing.reason).toHaveText('찾지 못함: ChatGPT 대화 열');
+  await missing.popup.close();
   expect(errors).toEqual([]);
 });
 

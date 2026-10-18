@@ -5,7 +5,8 @@ import { page } from './page.ts';
 
 // GPT-2의 페이지 쪽 일을 실행 틀 없이 시작해 본다(결정 0031, 0032, 0034). 시험 문서에 chatgpt.com 구조의 뼈대(2026-10-18에
 // 본 두 화면)를 만든다. 화면마다 찾는 요소는 시험 문서(Vitest의 iframe)의 주소를 history로 바꿔 보고, 끝나면 처음 주소로
-// 되돌린다. 너비가 걸렸는지의 확인은 실제 Chromium의 배치로 잰다.
+// 되돌린다. 너비가 걸렸는지의 확인은 실제 Chromium의 배치로 잰다. 앞 화면이 숨긴 채 남긴 요소를 빼고 지금 화면의 것을 고르는
+// 일은 실행 틀의 찾기와 확인이 한다(dom, 결정 0035. 실제 실행 틀로는 tests/integration/chatgpt-screens.dom.test.ts).
 
 const originalUrl = location.href;
 const cleanups: (() => void)[] = [];
@@ -46,11 +47,8 @@ function layout(width: number) {
 // 로그인한 화면의 뼈대(2026-10-18, 사용자의 Chrome, 결정 0032): 대화 열(찾기 대상)과 작성란(ChatGPT 작성 양식)을 각각 바깥
 // 상자가 묶는다. 바깥 상자는 사이트의 CSS 변수(48rem)에 좌우 안쪽 여백 20px를 더한 최대 너비로 가운데에 놓인다. 사이트처럼
 // 변수와 최대 너비는 클래스 규칙으로 둔다. variable이 거짓이면 사이트가 그 변수를 그만 쓰고 같은 값(808px)을 바로 둔 화면이다
-// (결정 0034). previous면 앞 화면이 숨긴 채 남긴 대화 열과 작성란이 문서 앞쪽에 있다.
-function signedInLayout(
-  width: number,
-  { variable = true, previous = false }: { variable?: boolean; previous?: boolean } = {},
-) {
+// (결정 0034).
+function signedInLayout(width: number, { variable = true }: { variable?: boolean } = {}) {
   const rules = document.createElement('style');
   const maxWidth = variable ? 'calc(var(--thread-content-max-width) + 40px)' : '808px';
   rules.textContent = `.signed-in-column {
@@ -61,33 +59,23 @@ function signedInLayout(
   document.head.append(rules);
   const container = document.createElement('section');
   container.style.cssText = `width: ${String(width)}px; display: flex; flex-direction: column; overflow-x: auto;`;
-  const screen = (parent: Element) => {
-    const column = () => {
-      const bound = document.createElement('div');
-      bound.className = 'signed-in-column';
-      parent.append(bound);
-      return bound;
-    };
-    const threadBound = column();
-    threadBound.setAttribute('data-thread-user-message-navigation-content', '');
-    const target = document.createElement('div');
-    target.setAttribute('data-thread-find-target', '');
-    const turn = document.createElement('div');
-    turn.setAttribute('data-turn-key', '');
-    target.append(turn);
-    threadBound.append(target);
-    const form = document.createElement('form');
-    form.setAttribute('data-chatgpt-composer', '');
-    column().append(form);
-    return { target, form };
+  const column = () => {
+    const bound = document.createElement('div');
+    bound.className = 'signed-in-column';
+    container.append(bound);
+    return bound;
   };
-  if (previous) {
-    const hidden = document.createElement('div');
-    hidden.hidden = true;
-    container.append(hidden);
-    screen(hidden);
-  }
-  const { target, form } = screen(container);
+  const threadBound = column();
+  threadBound.setAttribute('data-thread-user-message-navigation-content', '');
+  const target = document.createElement('div');
+  target.setAttribute('data-thread-find-target', '');
+  const turn = document.createElement('div');
+  turn.setAttribute('data-turn-key', '');
+  target.append(turn);
+  threadBound.append(target);
+  const form = document.createElement('form');
+  form.setAttribute('data-chatgpt-composer', '');
+  column().append(form);
   document.body.append(container);
   cleanups.push(() => {
     container.remove();
@@ -105,8 +93,15 @@ const settings = (value: unknown): Snapshot => ({
   sites: new Map(),
 });
 
+// 받은 확인 하나: 확인할 요소들과 확인 함수, 그만두었는지.
+interface Verification {
+  readonly elements: readonly NamedElement[];
+  readonly check: (current: readonly Element[]) => number | null;
+  stopped: boolean;
+}
+
 // 실행 틀 없이 기능만 시작한다. 찾기는 부른 요소와 그만두었는지를 적고, 그 요소가 문서에 있으면 곧바로 찾았다고 알린다.
-// 확인은 받은 확인 함수와 그만두었는지를 적는다(시험이 그 함수를 부른다).
+// 확인은 받은 것을 적는다(시험이 judge로 한다).
 function start(snapshot: Snapshot) {
   const scope = createScope({ window, onError: () => undefined, isLive: () => true });
   cleanups.push(scope.close);
@@ -114,15 +109,15 @@ function start(snapshot: Snapshot) {
   const find = (element: NamedElement, onFound: (found: Element) => void | Promise<void>) => {
     const search = { id: element.id, stopped: false };
     searches.push(search);
-    const found = element.find(document);
-    if (found !== null) void onFound(found);
+    const [found] = element.candidates(document);
+    if (found !== undefined) void onFound(found);
     return () => {
       search.stopped = true;
     };
   };
-  const verifications: { readonly check: () => NamedElement | null; stopped: boolean }[] = [];
-  const verify = (check: () => NamedElement | null) => {
-    const verification = { check, stopped: false };
+  const verifications: Verification[] = [];
+  const verify = (elements: readonly NamedElement[], check: Verification['check']) => {
+    const verification = { elements, check, stopped: false };
     verifications.push(verification);
     return () => {
       verification.stopped = true;
@@ -130,6 +125,19 @@ function start(snapshot: Snapshot) {
   };
   page.start(snapshot, { window, document, scope, find, verify });
   return { close: scope.close, searches, verifications };
+}
+
+// 실행 틀이 한도 때 하는 것처럼 확인한다: 그 요소들(이 시험 문서에는 하나씩 있다)로 확인 함수를 불러 작용하지 않는 요소의
+// 이름표를 돌려준다. 모두 작용하면 null이다.
+function judge(verification: Verification | undefined): string | null {
+  if (verification === undefined) throw new Error('받은 확인이 없다.');
+  const current = verification.elements.map((element) => {
+    const [found] = element.candidates(document);
+    if (found === undefined) throw new Error(`${element.name}이 문서에 없다.`);
+    return found;
+  });
+  const index = verification.check(current);
+  return index === null ? null : (verification.elements[index]?.id ?? null);
 }
 
 const styles = () => document.querySelectorAll(`style[${pageElementAttribute}="chatgpt-width"]`);
@@ -216,12 +224,14 @@ describe('GPT-2 로그인한 화면의 대화 열·작성란 너비(결정 0032,
 describe('GPT-2 너비가 실제로 걸렸는지 확인(결정 0034)', () => {
   const on = settings({ enabled: true, width: 1200 });
 
-  // 대화 화면에서 시작해, 그 화면의 요소를 모두 찾고 받은 확인을 부른다. 걸리지 않은 요소의 이름표를 돌려준다.
+  // 대화 화면에서 시작해, 그 화면의 요소를 모두 찾고 받은 확인을 한다. 걸리지 않은 요소의 이름표를 돌려준다.
   function verifyConversation(): string | null {
     history.replaceState(null, '', '/c/abc');
     const { verifications } = start(on);
-    expect(verifications).toHaveLength(1);
-    return verifications[0]?.check()?.id ?? null;
+    expect(verifications.map(({ elements }) => elements.map(({ id }) => id))).toEqual([
+      ['chatgpt.thread', 'chatgpt.composer'],
+    ]);
+    return judge(verifications[0]);
   }
 
   it.each([
@@ -252,20 +262,18 @@ describe('GPT-2 너비가 실제로 걸렸는지 확인(결정 0034)', () => {
     history.replaceState(null, '', '/c/abc');
     const { verifications } = start(on);
     const before = { html: document.documentElement.outerHTML, widths: widths() };
-    expect(verifications[0]?.check()).toBeNull();
+    expect(judge(verifications[0])).toBeNull();
     expect({ html: document.documentElement.outerHTML, widths: widths() }).toEqual(before);
-  });
-
-  it('앞 화면이 숨긴 채 남긴 요소가 문서 앞쪽에 있어도 화면에 보이는 것을 잰다', () => {
-    signedInLayout(1500, { previous: true });
-    expect(verifyConversation()).toBeNull();
   });
 
   it('새 대화 화면에서는 작성란만 찾아 확인하고, 있어야 할 요소를 다 찾지 못하면 확인하지 않는다', () => {
     signedInLayout(1500, { variable: false });
     history.replaceState(null, '', '/');
     const newChat = start(on);
-    expect(newChat.verifications[0]?.check()?.id).toBe('chatgpt.composer');
+    expect(newChat.verifications.map(({ elements }) => elements.map(({ id }) => id))).toEqual([
+      ['chatgpt.composer'],
+    ]);
+    expect(judge(newChat.verifications[0])).toBe('chatgpt.composer');
     newChat.close();
 
     for (const element of document.querySelectorAll('[data-thread-find-target]')) element.remove();
