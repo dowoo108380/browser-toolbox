@@ -1,4 +1,4 @@
-import type { BrowserContext, Frame } from '@playwright/test';
+import type { BrowserContext, Frame, Page, Worker } from '@playwright/test';
 import { problemReport } from '../../src/contracts/index.ts';
 import { retireTimeoutMs } from '../../src/platform/index.ts';
 import {
@@ -10,8 +10,10 @@ import {
   openPopup,
   openPopupOn,
   reloadExtension,
+  serviceWorkerOf,
   tabStatusOf,
   test,
+  watchScriptErrors,
 } from './support/extension.ts';
 
 // 확장을 다시 불러온 뒤 열린 탭의 옛 스크립트(결정 0008, N-13).
@@ -167,6 +169,7 @@ for (const { label, origin, secure } of origins) {
     page.on('console', (message) => {
       if (message.type() === 'error') pageErrors.push(message.text());
     });
+    const scriptErrors = await watchScriptErrors(page);
     await page.goto(`${origin}/video.html`);
     const childFrame = page.frames().find((frame) => frame.url().includes('video-only'));
     if (childFrame === undefined) throw new Error('iframe을 찾지 못했다.');
@@ -201,6 +204,9 @@ for (const { label, origin, secure } of origins) {
     expect(await page.evaluate(() => document.querySelector('video')?.playbackRate)).toBe(2);
     expect(await isPlaying(page.mainFrame())).toBe(true);
     expect(pageErrors).toEqual([]);
+    // 물러나는 옛 콘텐츠 스크립트(격리된 세계)도 예외를 내지 않는다. 확장 API가 사라진 뒤 듣기를 풀다 던지면 그 뒤의
+    // 정리(기능 멈춤 등)가 돌지 않는다(2026-10-18, 사용자의 Chrome에서 chrome://extensions의 "오류"로 보였다).
+    expect(scriptErrors.errors()).toEqual([]);
     // 정리 함수가 모든 프레임에서 끝까지 돌았으면 새 판은 문제를 기록하지 않는다. 함수가 페이지에서 예외를 내면
     // 여기에 unexpected가 남는다(quality 067, 2026-10-14 전에는 흔적 없이 지나갔다).
     expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
@@ -215,6 +221,68 @@ for (const { label, origin, secure } of origins) {
     });
   });
 }
+
+// 다시 불러온 뒤 옛 세계에서 확장 API가 사라지는 Chrome의 모습을 그 탭의 모든 프레임의 격리된 세계(콘텐츠 스크립트의 세계)에
+// 흉내 낸다: 연결이 끊기면(chrome.runtime.id가 없어지면) chrome.storage와 chrome.runtime이 없어진다. 사용자의 Chrome에서는
+// 다시 불러온 뒤 옛 세계의 chrome.storage가 없었고(2026-10-18, chrome://extensions의 "오류"), 05단계에서는 chrome.runtime이
+// 없어진 적이 있다. Playwright의 Chromium은 둘을 남기고 id만 없앤다(2026-10-18 실험). 프레임마다 흉내를 걸었는지 돌려준다.
+async function hideExtensionApisOnDisconnect(worker: Worker, page: Page): Promise<unknown[]> {
+  return worker.evaluate(async (url) => {
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((candidate) => candidate.url === url);
+    if (tab?.id === undefined) throw new Error('시험 페이지의 탭을 찾지 못했다.');
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: () => {
+        const extension = chrome;
+        const { runtime, storage } = extension;
+        // chrome-types는 id가 늘 있다고 적지만 끊기면 없어진다(src/platform/messaging.ts의 isExtensionConnected).
+        const disconnected = () => typeof Reflect.get(runtime, 'id') !== 'string';
+        Object.defineProperty(extension, 'storage', {
+          configurable: true,
+          get: () => (disconnected() ? undefined : storage),
+        });
+        Object.defineProperty(extension, 'runtime', {
+          configurable: true,
+          get: () => (disconnected() ? undefined : runtime),
+        });
+        return true;
+      },
+    });
+    return results.map((result): unknown => result.result);
+  }, page.url());
+}
+
+// 옛 실행 틀이 물러남 이벤트를 받고 연결을 다시 확인하는 마지막 때(5초, src/page/runtime.ts의 retireRecheckDelaysMs)보다
+// 조금 더 기다린다.
+const lastRecheckMs = 6000;
+
+test('COM-7.2 결정 0008 다시 불러온 뒤 옛 세계에서 확장 API가 사라져도 옛 실행 틀은 예외 없이 끝까지 물러나고, 그 탭은 새로 고쳐야 쓸 수 있다고 보인다', async ({
+  context,
+  extensionId,
+  profileDirectory,
+}) => {
+  test.setTimeout(60_000);
+  const worker = await serviceWorkerOf(context);
+  const page = await context.newPage();
+  const scriptErrors = await watchScriptErrors(page);
+  await page.goto(`${fixtureOrigin}/video.html`);
+  const popup = await openPopup(context, extensionId);
+  await popup.getByRole('switch', { name: '미디어 배속' }).check();
+  await expect.poll(() => indicatorTexts(page)).toEqual(['1×', '1×']);
+  await popup.close();
+  expect(await hideExtensionApisOnDisconnect(worker, page)).toEqual([true, true]);
+
+  await reloadExtension(profileDirectory, extensionId);
+
+  for (const frame of page.frames()) await expect.poll(() => hostCount(frame)).toBe(0);
+  await page.waitForTimeout(lastRecheckMs);
+  expect(scriptErrors.errors()).toEqual([]);
+  // 옛 실행 틀이 끝까지 물러나 표식을 지웠으므로, 탐침은 실행 틀이 없다고 보고 팝업은 새로 고침을 안내한다.
+  const reopened = await openPopupOn(context, extensionId, page);
+  await expect(reopened.getByText('쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음')).toBeVisible();
+  expect(await problemsAfterRetire(context, extensionId)).toEqual([]);
+});
 
 test('COM-7.2 결정 0008 로딩이 끝나지 않은 문서도 끝나기를 기다리지 않고 정리하며 문제로 기록하지 않는다', async ({
   context,

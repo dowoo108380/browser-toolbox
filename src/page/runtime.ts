@@ -315,19 +315,38 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     },
   });
 
+  // 물러남의 정리. 한 단계가 던져도 나머지를 끝까지 한다. 끊긴 옛 세계에서는 확장 API가 사라져 듣기를 그만두다 던질 수
+  // 있고(2026-10-18, 사용자의 Chrome에서 chrome.storage가 없어짐), 그때 기능의 정리(stopAll)와 표식 지우기가 빠지면 옛 세계가
+  // 반쯤 남는다.
+  const retireSteps: readonly (() => void)[] = [
+    () => {
+      deps.context.document.removeEventListener(retireEventName, onRetireEvent);
+      deps.context.document.removeEventListener('visibilitychange', onVisibilityChange);
+      navigation.removeEventListener('currententrychange', onNavigation);
+      for (const timer of recheckTimers) deps.context.window.clearTimeout(timer);
+      recheckTimers.clear();
+    },
+    () => {
+      unsubscribe();
+    },
+    stopNotices,
+    stopStatus,
+    notices.close,
+    stopAll,
+    () => {
+      Reflect.deleteProperty(globalThis, runtimeMarker);
+    },
+  ];
+
   function retire() {
     if (retired) return;
     retired = true;
-    deps.context.document.removeEventListener(retireEventName, onRetireEvent);
-    deps.context.document.removeEventListener('visibilitychange', onVisibilityChange);
-    navigation.removeEventListener('currententrychange', onNavigation);
-    for (const timer of recheckTimers) deps.context.window.clearTimeout(timer);
-    recheckTimers.clear();
-    unsubscribe();
-    stopNotices();
-    stopStatus();
-    notices.close();
-    stopAll();
-    Reflect.deleteProperty(globalThis, runtimeMarker);
+    for (const step of retireSteps) {
+      try {
+        step();
+      } catch {
+        // 알릴 곳이 없다(서비스 워커와 끊겼다). 페이지로 내지 않고 다음 단계로 간다.
+      }
+    }
   }
 }

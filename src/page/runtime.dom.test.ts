@@ -35,8 +35,17 @@ function snapshot(features: Record<string, unknown>): Snapshot {
   return { features: new Map(Object.entries(features)), sites: new Map() };
 }
 
+// 확장 API가 사라진 옛 세계에서 듣기를 그만두는 함수가 던지는 오류(2026-10-18, 사용자의 Chrome에서 본 것).
+const goneApi = () => new TypeError("Cannot read properties of undefined (reading 'onChanged')");
+
 // topFrame은 이 문서가 탭의 최상위 프레임인지다. 시험이 도는 문서는 Vitest의 iframe이라 실제 값과 상관없이 시험이 정한다.
-function setup(parts: readonly PagePart[], connected = true, topFrame = true) {
+// breaking에 든 듣기는 그만둘 때 던진다(그만둔 횟수는 센다).
+function setup(
+  parts: readonly PagePart[],
+  connected = true,
+  topFrame = true,
+  breaking: readonly ('settings' | 'notices' | 'status')[] = [],
+) {
   let handlers: SettingsReaderHandlers | undefined;
   let subscriptions = 0;
   let unsubscribed = 0;
@@ -57,6 +66,7 @@ function setup(parts: readonly PagePart[], connected = true, topFrame = true) {
       handlers = next;
       return () => {
         unsubscribed += 1;
+        if (breaking.includes('settings')) throw goneApi();
       };
     },
     report: (problem: PageProblem): Promise<Result<null, AppError>> => {
@@ -69,6 +79,7 @@ function setup(parts: readonly PagePart[], connected = true, topFrame = true) {
       noticeListeners += 1;
       return () => {
         noticeListeners -= 1;
+        if (breaking.includes('notices')) throw goneApi();
       };
     },
     listenStatus: (answer: () => PageStatus) => {
@@ -76,6 +87,7 @@ function setup(parts: readonly PagePart[], connected = true, topFrame = true) {
       statusListeners += 1;
       return () => {
         statusListeners -= 1;
+        if (breaking.includes('status')) throw goneApi();
       };
     },
   };
@@ -231,6 +243,47 @@ describe('콘텐츠 스크립트 실행 틀', () => {
     document.dispatchEvent(new Event(retireEventName));
     expect(a.counts.disposed).toBe(1);
     expect(runtime.unsubscribed()).toBe(1);
+  });
+
+  // 듣기를 그만두는 한 단계가 던져도(확장 API가 사라진 옛 세계) 나머지 정리를 끝까지 하고, 예외를 페이지로 내지 않는다.
+  // 페이지의 이벤트 처리에서 난 예외는 창의 error 사건으로 온다(사용자에게는 chrome://extensions의 "오류").
+  describe.each([
+    ['설정 구독', ['settings'] as const],
+    ['작업 결과 알림 듣기', ['notices'] as const],
+    ['상태 묻기 듣기', ['status'] as const],
+    ['셋 모두', ['settings', 'notices', 'status'] as const],
+  ])('COM-7.2 결정 0008 %s을(를) 그만두다 던져도', (_name, breaking) => {
+    const errors: unknown[] = [];
+    const collect = (event: ErrorEvent) => {
+      errors.push(event.error);
+      event.preventDefault();
+    };
+    beforeEach(() => {
+      window.addEventListener('error', collect);
+    });
+    afterEach(() => {
+      window.removeEventListener('error', collect);
+      errors.splice(0);
+    });
+
+    it('기능을 모두 멈추고 나머지 듣기도 그만두며 표식을 지우고, 예외를 내지 않는다', () => {
+      const a = countingPart('a');
+      const runtime = setup([a.part], true, true, breaking);
+      runtime.apply(snapshot({ a: { enabled: true } }));
+      runtime.notice('알림');
+      runtime.deps.isConnected = () => false;
+      document.dispatchEvent(new Event(retireEventName));
+      expect(a.counts.disposed).toBe(1);
+      expect(runtime.unsubscribed()).toBe(1);
+      expect([runtime.noticeListeners(), runtime.statusListeners()]).toEqual([0, 0]);
+      // 페이지 위의 작업 결과 알림도 지웠다(이 세계가 넣은 요소가 남지 않는다).
+      expect(document.querySelectorAll(`[${pageElementAttribute}]`)).toHaveLength(0);
+      expect(Reflect.get(globalThis, Symbol.for(pageRuntimeKey))).toBeUndefined();
+      expect(errors).toEqual([]);
+      // 물러난 뒤의 사건에는 다시 정리하지 않는다.
+      document.dispatchEvent(new Event(retireEventName));
+      expect(runtime.unsubscribed()).toBe(1);
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import { type RequestDefinition, responseSchema, v } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, withTimeout } from '../shared/index.ts';
+import { isExtensionConnected } from './messaging.ts';
 
 // 서비스 워커가 탭의 콘텐츠 스크립트에 보내는 요청(chrome.tabs.sendMessage)과 콘텐츠 스크립트가 그것을 받는 쪽(결정 0006,
 // 0024). 요청과 응답은 contracts의 정의로 검증한다.
@@ -68,6 +69,8 @@ export function listenExtensionRequest<Payload, Value>(
   };
   chrome.runtime.onMessage.addListener(listener);
   return () => {
-    chrome.runtime.onMessage.removeListener(listener);
+    // 연결이 끊긴 옛 세계에서는 chrome.runtime이 없어지기도 하고(05단계 확인), 그 세계에는 메시지가 더 오지 않는다(위
+    // chrome.storage의 그만두기와 같다, storage.ts).
+    if (isExtensionConnected()) chrome.runtime.onMessage.removeListener(listener);
   };
 }

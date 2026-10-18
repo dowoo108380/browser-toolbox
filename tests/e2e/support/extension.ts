@@ -121,6 +121,29 @@ export async function reloadExtension(
   }
 }
 
+// page의 모든 실행 문맥(페이지 자신과 프레임, 그리고 콘텐츠 스크립트의 격리된 세계)에서 처리되지 않은 예외를 page의 CDP
+// 세션(Runtime 도메인)으로 모은다. Playwright의 pageerror는 페이지 자신의 세계만 보므로, 콘텐츠 스크립트의 예외(사용자에게는
+// chrome://extensions의 "오류"로 보인다)는 이것으로 본다. 문맥의 종류(default, isolated)와 첫 줄을 돌려준다.
+export async function watchScriptErrors(page: Page) {
+  const session = await page.context().newCDPSession(page);
+  const kinds = new Map<number, string>();
+  const errors: string[] = [];
+  session.on('Runtime.executionContextCreated', ({ context }) => {
+    const type: unknown = Reflect.get(Object(context.auxData), 'type');
+    kinds.set(context.id, typeof type === 'string' ? type : 'unknown');
+  });
+  session.on('Runtime.exceptionThrown', ({ exceptionDetails }) => {
+    const kind =
+      exceptionDetails.executionContextId === undefined
+        ? 'unknown'
+        : (kinds.get(exceptionDetails.executionContextId) ?? 'unknown');
+    const message = exceptionDetails.exception?.description ?? exceptionDetails.text;
+    errors.push(`${kind}: ${message.split('\n')[0] ?? ''}`);
+  });
+  await session.send('Runtime.enable');
+  return { errors: () => [...errors] };
+}
+
 // 확장의 서비스 워커가 도는지를 page의 CDP 세션(ServiceWorker 도메인)으로 지켜본다. 기다림이 실패하면 받은 상태의
 // 차례 전체를 보인다. 멈추기가 늦은 것과 멈춘 뒤 무엇이 다시 깨운 것을 가리기 위해서다(이슈 #5).
 export async function watchServiceWorker(page: Page) {

@@ -144,6 +144,15 @@ describe('콘텐츠 스크립트가 받기(listenExtensionRequest)', () => {
     stop();
     expect(listeners.size).toBe(0);
   });
+
+  it('COM-7.2 확장을 다시 불러와 연결이 끊긴 뒤(chrome.runtime이 없어지거나 id가 없음) 그만두기는 던지지 않는다', () => {
+    for (const disconnected of [{}, { runtime: {} }]) {
+      fakeRuntime();
+      const stop = listenExtensionRequest(taskNotice, () => ok(null));
+      vi.stubGlobal('chrome', disconnected);
+      expect(stop).not.toThrow();
+    }
+  });
 });
 
 // 시험의 연결(port). 메시지와 끊김을 시험이 보낸다.
