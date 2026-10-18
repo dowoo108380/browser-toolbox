@@ -30,13 +30,12 @@ export function unappliedIndex(
   const measured = measure(width);
   const short = (value: number) => value < width - widthTolerance;
   const narrow = measured.filter(short);
-  const probed = narrow.length === 0 ? null : measure(Math.floor(Math.min(...narrow) / 2));
+  const probed = narrow.length === 0 ? measured : measure(Math.floor(Math.min(...narrow) / 2));
   const index = measured.findIndex((value, at) => {
-    if (short(value)) {
-      const after = probed?.[at];
-      return !(typeof after === 'number' && after < value - widthTolerance);
-    }
-    return value > width + widthTolerance;
+    if (!short(value)) return value > width + widthTolerance;
+    // 다시 잰 너비가 1px 넘게 줄지 않았으면 규칙이 그 요소의 너비를 정하지 않는다.
+    const after = probed[at] ?? value;
+    return after >= value - widthTolerance;
   });
   return index === -1 ? null : index;
 }
