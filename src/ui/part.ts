@@ -8,7 +8,8 @@ import { type Snapshot, settingsOf } from '../storage/index.ts';
 // 조각이 받는 것.
 interface UiPartProps<S extends ToggleSettings> {
   readonly feature: ToggleFeature<S>;
-  // 읽기 도우미가 받아들인 그 기능의 설정(저장된 값). 기능이 꺼져 있어도 값을 정할 수 있다.
+  // 읽기 도우미가 받아들인 그 기능의 설정(저장된 값). 기능이 꺼져 있어도 값을 정할 수 있다. 이 조각이 보낸 저장은 늦게
+  // 담긴다(응답과 바뀜 알림이 늦게 온다). 그래서 보낼지는 이 값이 아니라 마지막으로 보낸 값과 견준다(아키텍처 4장).
   readonly settings: S;
   // 서비스 워커가 깨어나기 전에는 조작을 막는다(N-12).
   readonly disabled: boolean;

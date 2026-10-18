@@ -65,6 +65,22 @@ async function show(
       });
       return event.defaultPrevented;
     },
+    // 저장 응답을 붙잡는다. 그동안 저장된 값은 다시 그리기 전까지 그대로다. 돌려준 함수는 index번째 저장에 saved로 답하고,
+    // 그 결과를 받은 조각의 처리까지 끝낸다.
+    holdSaves: () => {
+      const answers: ((saved: boolean) => void)[] = [];
+      save.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            answers.push(resolve);
+          }),
+      );
+      return (index: number, saved: boolean) =>
+        act(async () => {
+          answers[index]?.(saved);
+          await Promise.resolve();
+        });
+    },
     error: () => container.querySelector('.error')?.textContent ?? null,
     describedBy: () => input().getAttribute('aria-describedby'),
   };
@@ -133,6 +149,46 @@ describe('GPT-2 팝업의 너비 칸(결정 0030)', () => {
     expect(await field.escape()).toBe(true);
     expect(field.input().value).toBe('1200');
     expect(field.save).not.toHaveBeenCalled();
+  });
+
+  it('COM-3 기대 동작 3 저장 응답을 기다리는 동안 바꿨다가 되돌리면 되돌린 값도 저장해, 마지막으로 정한 값이 남는다', async () => {
+    const field = await show(stored(1200));
+    const answer = field.holdSaves();
+    await field.type('1500');
+    await field.commit();
+    await field.type('1200');
+    await field.commit();
+    expect(field.save.mock.calls).toEqual([[{ width: 1500 }], [{ width: 1200 }]]);
+    expect(field.input().value).toBe('1200');
+
+    // 앞 저장이 먼저 끝나 저장된 값이 잠깐 1500이 되어도 칸은 마지막으로 정한 값을 보인다.
+    await answer(0, true);
+    await field.redraw(stored(1500));
+    expect(field.input().value).toBe('1200');
+    // 마지막으로 정한 값과 같은 값은 다시 보내지 않는다.
+    await field.type('1200');
+    await field.commit();
+    expect(field.save).toHaveBeenCalledTimes(2);
+
+    await answer(1, true);
+    await field.redraw(stored(1200));
+    expect(field.input().value).toBe('1200');
+    // 저장이 끝난 뒤 다른 화면이 바꾼 값은 따른다.
+    await field.redraw(stored(1800));
+    expect(field.input().value).toBe('1800');
+  });
+
+  it('COM-3 기대 동작 3 앞 저장이 실패해도 그 뒤에 정한 값을 보이고, 마지막 저장이 실패하면 저장된 값으로 돌아간다', async () => {
+    const field = await show(stored(1200));
+    const answer = field.holdSaves();
+    await field.type('1500');
+    await field.commit();
+    await field.type('1600');
+    await field.commit();
+    await answer(0, false);
+    expect(field.input().value).toBe('1600');
+    await answer(1, false);
+    expect(field.input().value).toBe('1200');
   });
 
   it('COM-3 기대 동작 3 저장하지 못하면 저장된 값으로 돌아간다', async () => {
