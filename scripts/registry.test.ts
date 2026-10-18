@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type FeatureDefinition, defineFeature, v } from '../src/contracts/index.ts';
-import { contentBundles, contentSource, popupSource, swSource, syncGenerated } from './registry.ts';
+import {
+  assertUniqueFeatureIds,
+  contentBundles,
+  contentSource,
+  popupSource,
+  swSource,
+  syncGenerated,
+} from './registry.ts';
 
 // 결정 0004: 빌드가 기능 목록에서 진입점별 등록 목록을 만든다. 그 생성 규칙(어느 기능의 어느 자리 파일을 넣는가)을 본다.
 // 자리 파일이 있는지는 실제 폴더를 보므로 시험마다 임시 폴더에 기능 폴더를 만든다.
@@ -154,6 +161,21 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
     expect(source).toContain('export const uiParts: readonly FeatureUiPart[] = [chatgptWidth];');
     expect(source).not.toContain('mediaSpeed');
     expect(source).not.toContain('tabUrlCopy');
+  });
+
+  it('이슈 #3 기능 목록에 같은 id의 기능이 둘이면 등록 목록을 만들지 않고 그 id를 알린다', async () => {
+    const root = rootWith({ 'media-speed': ['feature.ts', 'page.ts'] });
+    const twice = [
+      toggle('media-speed', { sites: 'all', frames: 'all' }),
+      toggle('media-speed', { sites: 'chatgpt', frames: 'top' }),
+    ];
+    await expect(syncGenerated(twice, root, false)).rejects.toThrow('media-speed');
+    expect(() => {
+      assertUniqueFeatureIds(twice);
+    }).toThrow('기능 id가 겹친다: media-speed');
+    expect(() => {
+      assertUniqueFeatureIds([twice[0], action('tab-url-copy')].filter((f) => f !== undefined));
+    }).not.toThrow();
   });
 
   it('넣을 기능이 없으면 빈 목록을 만든다(타입은 가져온다)', () => {

@@ -22,6 +22,19 @@ const header = [
   '// 기능을 더하거나 뺀 뒤 `pnpm generate`를 실행한다.',
 ];
 
+// 기능 목록의 기능 id는 모두 다르다. 설정(features[id]), 사이트 항목(sites[호스트][id]), 실행 틀과 팝업이 id로 기능을 가리고,
+// 읽기 도우미의 settingsOf는 같은 id의 정의가 하나뿐이라는 전제로 값을 그 기능의 타입으로 넘긴다(이슈 #3). 겹치면 등록
+// 목록을 만들거나 빌드하기 전에 멈춘다(quality 066).
+export function assertUniqueFeatureIds(features: readonly FeatureDefinition[]): void {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const { id } of features) {
+    if (seen.has(id)) repeated.add(id);
+    seen.add(id);
+  }
+  if (repeated.size > 0) throw new Error(`기능 id가 겹친다: ${[...repeated].join(', ')}`);
+}
+
 // 콘텐츠 스크립트 묶음(결정 0029). 공통 묶음(content-common)은 늘 있고, 사이트 묶음(content-<사이트>)은 그 사이트 전용
 // 기능이 있을 때만 있다.
 export function contentBundles(features: readonly FeatureDefinition[]): readonly PageBundle[] {
@@ -113,6 +126,7 @@ export async function syncGenerated(
   root: string,
   write: boolean,
 ): Promise<string[]> {
+  assertUniqueFeatureIds(features);
   // 만들 파일과 그 내용. null이면 없어야 하는 파일이다(그 사이트 전용 기능을 모두 지운 사이트 묶음).
   const bundles = contentBundles(features);
   const files = new Map<string, string | null>([

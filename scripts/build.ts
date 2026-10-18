@@ -12,7 +12,7 @@ import { type BuildOptions, type Plugin, build } from 'esbuild';
 import { features as productFeatures } from '../src/features/list.ts';
 import { pageScriptBudgetBytes } from './budgets.ts';
 import { createManifest, minimumChromeVersion } from './manifest.ts';
-import { contentBundles, syncGenerated } from './registry.ts';
+import { assertUniqueFeatureIds, contentBundles, syncGenerated } from './registry.ts';
 
 // dist/에 압축 해제된 확장을 만든다(결정 0002, 아키텍처 10장).
 // --fixture이면 시험 빌드를 dist-fixture/에 만든다(결정 0025): 진입점이 가져오는 기능 목록과 서비스 워커·콘텐츠
@@ -61,6 +61,8 @@ if (stale.length > 0) {
     `등록 목록이 기능 목록과 맞지 않는다(${stale.join(', ')}). pnpm generate를 실행한다.`,
   );
 }
+// 시험 빌드의 목록(제품에 시험 기능을 덧붙임)도 id가 겹치지 않아야 한다(이슈 #3). 제품 목록은 위에서 본다.
+assertUniqueFeatureIds(features);
 
 const packageJson = readPackageJson();
 rmSync(outdir, { recursive: true, force: true });
