@@ -47,6 +47,22 @@ describe('chatgpt.com의 이름 붙은 요소(결정 0031)', () => {
   });
 });
 
+// 2026-10-18에 로그인한 화면(사용자의 Chrome)에서 본 구조의 뼈대(결정 0032, 이슈 #6). 값을 보지 않은 속성은 비워 둔다.
+describe('로그인한 chatgpt.com의 이름 붙은 요소(결정 0032)', () => {
+  it('이슈 #6 대화 열은 메시지 차례를 담는 찾기 대상이고, 작성란은 ChatGPT 작성 양식이다', () => {
+    const bound = element('div', { 'data-thread-user-message-navigation-content': '' });
+    const target = element('div', { 'data-thread-find-target': '' }, bound);
+    element('div', { 'data-turn-key': '' }, target);
+    expect(thread.find(document)).toBe(target);
+    const form = element(
+      'form',
+      { 'data-chatgpt-composer': '', 'data-thread-find-composer': '' },
+      element('div', {}),
+    );
+    expect(composer.find(document)).toBe(form);
+  });
+});
+
 describe('chatgpt.com의 사이트 안 이동 신호(결정 0031)', () => {
   it('Navigation API의 currententrychange를 알리고, 범위가 닫히면 그만 듣는다', () => {
     const scope = createScope({ window, onError: () => undefined, isLive: () => true });

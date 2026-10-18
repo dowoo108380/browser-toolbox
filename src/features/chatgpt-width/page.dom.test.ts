@@ -43,6 +43,48 @@ function layout(width: number) {
   };
 }
 
+// 로그인한 화면의 뼈대(2026-10-18, 사용자의 Chrome, 결정 0032): 대화 열(찾기 대상)과 작성란(ChatGPT 작성 양식)을 각각 바깥
+// 상자가 묶는다. 바깥 상자는 사이트의 CSS 변수(48rem)에 좌우 안쪽 여백 20px를 더한 최대 너비로 가운데에 놓인다. 사이트처럼
+// 변수와 최대 너비는 클래스 규칙으로 둔다.
+function signedInLayout(width: number) {
+  const rules = document.createElement('style');
+  rules.textContent = `.signed-in-column {
+    --thread-content-max-width: 48rem;
+    box-sizing: border-box; display: flex; flex-direction: column; width: 100%;
+    max-width: calc(var(--thread-content-max-width) + 40px); margin-inline: auto; padding-inline: 20px;
+  }`;
+  document.head.append(rules);
+  const container = document.createElement('section');
+  container.style.cssText = `width: ${String(width)}px; display: flex; flex-direction: column; overflow-x: auto;`;
+  const column = () => {
+    const bound = document.createElement('div');
+    bound.className = 'signed-in-column';
+    container.append(bound);
+    return bound;
+  };
+  const threadBound = column();
+  threadBound.setAttribute('data-thread-user-message-navigation-content', '');
+  const target = document.createElement('div');
+  target.setAttribute('data-thread-find-target', '');
+  const turn = document.createElement('div');
+  turn.setAttribute('data-turn-key', '');
+  target.append(turn);
+  threadBound.append(target);
+  const form = document.createElement('form');
+  form.setAttribute('data-chatgpt-composer', '');
+  column().append(form);
+  document.body.append(container);
+  cleanups.push(() => {
+    container.remove();
+    rules.remove();
+  });
+  const widthOf = (element: Element) => Math.round(element.getBoundingClientRect().width);
+  return {
+    container,
+    widths: () => ({ thread: widthOf(target), composer: widthOf(form) }),
+  };
+}
+
 const settings = (value: unknown): Snapshot => ({
   features: new Map([['chatgpt-width', value]]),
   sites: new Map(),
@@ -121,5 +163,26 @@ describe('GPT-2 대화 열·작성란 너비', () => {
     close();
     history.pushState(null, '', '/');
     expect(searches).toHaveLength(3);
+  });
+});
+
+describe('GPT-2 로그인한 화면의 대화 열·작성란 너비(결정 0032, 이슈 #6)', () => {
+  it('GPT-2.1 켜면 로그인한 화면의 대화 열과 작성란도 정한 너비이고, 끄면 문서가 켜기 전과 같다', () => {
+    const { widths } = signedInLayout(1500);
+    expect(widths()).toEqual({ thread: 768, composer: 768 });
+    const before = document.documentElement.outerHTML;
+    const { close } = start(settings({ enabled: true, width: 1000 }));
+    expect(widths()).toEqual({ thread: 1000, composer: 1000 });
+    close();
+    expect(widths()).toEqual({ thread: 768, composer: 768 });
+    expect(document.documentElement.outerHTML).toBe(before);
+  });
+
+  it('GPT-2.3 담는 상자가 정한 너비보다 좁으면 그 상자에 맞추고 넘치지 않는다', () => {
+    const { container, widths } = signedInLayout(700);
+    start(settings({ enabled: true, width: 1200 }));
+    // 바깥 상자의 좌우 안쪽 여백(20px씩)을 뺀 너비다.
+    expect(widths()).toEqual({ thread: 660, composer: 660 });
+    expect(container.scrollWidth).toBe(container.clientWidth);
   });
 });

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { composer, expectedElements, thread } from './index.ts';
+import { composer, contentWidthCss, expectedElements, thread } from './index.ts';
+
+describe('chatgpt.com의 대화 열·작성란 너비 규칙(결정 0031, 0032)', () => {
+  it('GPT-2.1 GPT-2.3 로그인한 화면은 사이트의 열 너비 변수를, 로그인하지 않은 화면은 담는 상자를 채우되 그 값을 넘지 않는 가운데 열을 쓴다', () => {
+    expect(contentWidthCss(1000).split('\n')).toEqual([
+      '* { --thread-content-max-width: 1000px !important; }',
+      'ol[data-conversation-transcript], [data-composer-positioner] { box-sizing: border-box !important; width: 100% !important; max-width: 1000px !important; margin-inline: auto !important; }',
+    ]);
+  });
+});
 
 describe('chatgpt.com의 화면마다 있어야 할 요소(결정 0031)', () => {
   const at = (pathname: string) => expectedElements({ pathname }).map((element) => element.id);

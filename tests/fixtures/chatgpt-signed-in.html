@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>ChatGPT(본뜬 시험 페이지, 로그인한 화면)</title>
+    <!--
+      chatgpt.com의 로그인한 대화 화면을 본뜬 시험 페이지(GPT-2, 결정 0032, quality 105, 이슈 #6).
+
+      본뜬 날: 2026-10-18.
+      출처: 로그인한 화면, 사용자의 Chrome(155, Windows). 새 채팅(/), 기존 대화(/c/<id>), 프로젝트 안의 대화(/g/<이름>/c/<id>).
+      요소 종류, 속성 이름, 계산된 너비·최대 너비·배치만 돌려주는 스크립트로 봤다. 화면의 글, 대화 제목, 프로젝트 이름,
+      속성의 값은 보지도 옮기지도 않았다. 그래서 이 문서의 글은 모두 지어 넣은 것이고, 값을 모르는 속성(스크롤 구역의 역할과
+      이름 등)은 넣지 않았다.
+
+      옮긴 것: 대화 열 [data-thread-find-target](메시지 차례 [data-turn-key]를 담음)과 작성란 form[data-chatgpt-composer]를
+      각각 바깥 상자가 묶는다. 바깥 상자는 사이트의 CSS 변수 --thread-content-max-width(48rem)에 좌우 안쪽 여백 20px를 더한
+      최대 너비(808px)로 가운데에 놓인다. 대화 열의 바깥 상자에는 [data-thread-user-message-navigation-content]가 있고 작성란의
+      바깥 상자에는 속성이 없다. 앞 화면은 숨긴 채 문서에 남아 대화 열과 작성란이 둘씩 있다(보이는 것은 하나). 실제 화면의
+      클래스는 뜻 없는 원자 클래스라 옮기지 않고 같은 계산된 스타일을 아래 style에 적었다. 옆 메뉴는 260px로 줄였다.
+
+      로그인하지 않은 화면은 tests/fixtures/chatgpt.html이다. 확장 전체 시험(tests/e2e/chatgpt-width.spec.ts)이
+      https://chatgpt.com/ 아래의 요청을 이 문서로 답한다. 실행 코드는 두지 않는다(tests/lint/fixtures.test.ts). 새 채팅 화면,
+      페이지 안 이동, 대화 열이 없어지거나 나중에 나타나는 것은 시험이 흉내 낸다.
+    -->
+    <style>
+      body {
+        margin: 0;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+      }
+      [data-app-shell-workspace-row] {
+        display: flex;
+        height: 100vh;
+      }
+      nav {
+        flex: 0 0 260px;
+      }
+      main[data-app-shell-main-surface] {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      [data-app-shell-main-content-layout] {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .scroll {
+        flex: 1;
+        display: flex;
+        overflow: hidden auto;
+      }
+      .scroll > div {
+        flex: 1;
+        display: flex;
+        container-type: inline-size;
+      }
+      /* 사이트가 이 변수로 대화 열과 작성란의 최대 너비를 정한다(실제로는 원자 클래스가 그 상자에 둔다). */
+      .column {
+        --thread-content-max-width: 48rem;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: calc(var(--thread-content-max-width) + 40px);
+        margin-inline: auto;
+        padding-inline: 20px;
+      }
+      [data-thread-find-target] {
+        display: flex;
+        flex-direction: column;
+      }
+      form[data-chatgpt-composer] {
+        display: flex;
+        flex-direction: column;
+      }
+      [data-composer-input] {
+        min-height: 2.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div data-app-shell-workspace-row>
+        <nav>New chat</nav>
+        <main data-app-shell-main-surface>
+          <!-- 앞 화면: 숨긴 채 남아 있다. -->
+          <div hidden>
+            <div class="column" data-thread-user-message-navigation-content>
+              <div data-thread-find-target data-chatgpt-conversation-selection-target>
+                <div data-turn-key>Earlier message</div>
+              </div>
+            </div>
+            <div class="column">
+              <form data-chatgpt-composer data-thread-find-composer data-composer-placement>
+                <div data-composer-input></div>
+              </form>
+            </div>
+          </div>
+          <div data-app-shell-main-content-layout>
+            <div class="scroll">
+              <div>
+                <div class="column" data-thread-user-message-navigation-content>
+                  <div data-thread-find-target data-chatgpt-conversation-selection-target>
+                    <div data-turn-key><div data-conversation-role>Hello</div></div>
+                    <div data-turn-key><div>Hello! How can I help you today?</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="column">
+              <form data-chatgpt-composer data-thread-find-composer data-composer-placement>
+                <div data-composer-input contenteditable="true"></div>
+              </form>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
