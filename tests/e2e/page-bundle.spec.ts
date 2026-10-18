@@ -23,3 +23,15 @@ test('결정 0027 콘텐츠 스크립트 묶음에는 페이지 쪽 일이 있�
     expect(content, `콘텐츠 스크립트 묶음의 ${id}`).toContain(`"${id}"`);
   }
 });
+
+test('결정 0029 사이트 전용 기능은 그 사이트의 묶음에만 들고, 사이트 묶음은 모든 사이트의 기능도 담는다', () => {
+  const common = bundle('content-common.js');
+  const chatgpt = bundle('content-chatgpt.js');
+  expect(common).not.toContain('"chatgpt-width"');
+  expect(chatgpt).toContain('"chatgpt-width"');
+  expect(chatgpt).toContain('"media-speed"');
+  // 시험 빌드가 공통 묶음에만 덧붙인 시험 기능과 페이지에 작용하지 않는 기능은 사이트 묶음에 없다.
+  for (const { id } of [fixtureTask, fixtureOther, fixtureElementFeature]) {
+    expect(chatgpt, `ChatGPT 묶음의 ${id}`).not.toContain(`"${id}"`);
+  }
+});

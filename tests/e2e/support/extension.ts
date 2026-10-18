@@ -8,6 +8,7 @@ import {
   chromium,
 } from '@playwright/test';
 import { tabStatus } from '../../../src/contracts/index.ts';
+import { pageElementAttribute } from '../../../src/dom/index.ts';
 import { connectBrowserCdp } from './browser-cdp.ts';
 
 // 빌드한 확장을 올린 Chromium(R-01). 테스트마다 새 프로필에서 시작한다(quality 104).
@@ -236,4 +237,24 @@ export async function indicatorTexts(page: Page): Promise<string[]> {
 
 export function hostCount(frame: Frame | Page): Promise<number> {
   return frame.locator('browser-toolbox-ui').count();
+}
+
+// 서비스 워커가 남긴 문제 기록(COM-5). 없으면 빈 목록이다.
+export function problemRecords(worker: Worker): Promise<unknown[]> {
+  return worker.evaluate(async () => {
+    const { problems: records }: Record<string, unknown> =
+      await chrome.storage.local.get('problems');
+    const list: unknown[] = Array.isArray(records) ? records : [];
+    return list;
+  });
+}
+
+// 확장이 페이지에 넣은 요소(표식이 있는 화면 틀과 페이지 스타일)를 뺀 문서. 기능이 되돌린 뒤 켜기 전과 같은지 본다.
+export function documentWithoutExtension(page: Page): Promise<string> {
+  return page.evaluate((attribute) => {
+    const copy = document.documentElement.cloneNode(true);
+    if (!(copy instanceof Element)) throw new Error('문서 루트를 복제하지 못했다.');
+    for (const element of copy.querySelectorAll(`[${attribute}]`)) element.remove();
+    return copy.outerHTML;
+  }, pageElementAttribute);
 }

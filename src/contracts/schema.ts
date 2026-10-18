@@ -22,6 +22,7 @@ export {
   array,
   boolean,
   literal,
+  maxValue,
   minValue,
   null,
   nullable,

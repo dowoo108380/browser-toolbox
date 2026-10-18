@@ -1,5 +1,5 @@
-import type { BrowserContext, Frame, Page, Worker } from '@playwright/test';
-import { elementTimeoutMs, pageElementAttribute } from '../../src/dom/index.ts';
+import type { BrowserContext, Frame, Page } from '@playwright/test';
+import { elementTimeoutMs } from '../../src/dom/index.ts';
 import {
   appliedAttribute,
   fixtureElementFeature,
@@ -7,10 +7,12 @@ import {
   waitingAttribute,
 } from '../extension/fixture-elements.ts';
 import {
+  documentWithoutExtension,
   expect,
   fixtureOrigin,
   indicatorTexts,
   openPopupOn,
+  problemRecords as problems,
   serviceWorkerOf,
   test,
 } from './support/extension.ts';
@@ -24,25 +26,6 @@ import {
 test.use({ extensionBuild: 'fixture' });
 
 const targetSelector = '[role="region"][aria-label="시험 대상 영역"]';
-
-// 확장이 페이지에 넣은 요소(배속 표시창 등)를 뺀 문서. 찾지 못한 기능이 되돌린 뒤 켜기 전과 같은지 본다.
-function documentWithoutExtension(page: Page): Promise<string> {
-  return page.evaluate((attribute) => {
-    const copy = document.documentElement.cloneNode(true);
-    if (!(copy instanceof Element)) throw new Error('문서 루트를 복제하지 못했다.');
-    for (const element of copy.querySelectorAll(`[${attribute}]`)) element.remove();
-    return copy.outerHTML;
-  }, pageElementAttribute);
-}
-
-function problems(worker: Worker): Promise<unknown[]> {
-  return worker.evaluate(async () => {
-    const { problems: records }: Record<string, unknown> =
-      await chrome.storage.local.get('problems');
-    const list: unknown[] = Array.isArray(records) ? records : [];
-    return list;
-  });
-}
 
 // page를 지금 탭으로 둔 팝업에서 그 범주의 스위치를 고른다.
 async function switchOn(popup: Page, category: string, name: string) {

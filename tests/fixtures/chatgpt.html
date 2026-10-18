@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>ChatGPT(본뜬 시험 페이지)</title>
+    <!--
+      chatgpt.com의 대화 화면을 본뜬 시험 페이지(GPT-2, 결정 0031, quality 105).
+
+      본뜬 날: 2026-10-18.
+      출처: 로그인하지 않은 https://chatgpt.com/ (새 대화)와 https://chatgpt.com/uc/<id> (대화, 시험 메시지 하나를 보냄).
+      Claude 데스크톱 앱의 내장 브라우저(Chromium), 영어 화면, 창 너비 700·1024·2200px에서 DOM과 계산된 스타일을 읽었다.
+
+      옮긴 것: 확장이 기대는 단서(요소 종류, data- 속성)와 너비에 관한 계산된 스타일(옆 메뉴 260px, 대화 구역의 좌우 안쪽
+      여백 64px, 대화 열은 최대 너비 없이 구역을 채움, 작성란 바닥의 좌우 안쪽 여백 12px, 작성란 상자의 최대 너비 768px과
+      가운데 자리, 양식의 세 칸). 실제 화면의 클래스는 뜻 없는 원자 클래스(x1hmns74 등)라 옮기지 않고 같은 계산된 스타일을
+      아래 style에 적었다. 글(메시지)과 그 밖의 요소는 줄이거나 바꿨다. 로그인한 화면은 보지 않았다(수동 절차
+      tests/manual/chatgpt-width.md).
+
+      확장 전체 시험(tests/e2e/chatgpt-width.spec.ts)이 https://chatgpt.com/ 아래의 요청을 이 문서로 답한다. 실행 코드는 두지
+      않는다(tests/lint/fixtures.test.ts). 새 대화 화면, 페이지 안 이동(주소를 바꾸고 화면을 새 요소로 다시 그림), 대화 열이
+      없어지거나 나중에 나타나는 것은 시험이 흉내 낸다.
+    -->
+    <style>
+      body {
+        margin: 0;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+      }
+      main[data-app-shell] {
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+      nav {
+        flex: 0 0 260px;
+      }
+      [data-desktop-visual-viewport] {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: clip;
+      }
+      [role='region'][data-swipable-detail-body] {
+        flex: 1;
+        display: flex;
+        overflow: hidden auto;
+      }
+      section[data-conversation-id] {
+        flex: 1;
+        display: flex;
+        max-width: 100%;
+        padding-inline: 64px;
+      }
+      [data-mobile-thread] {
+        flex: 1;
+        display: grid;
+      }
+      [data-mobile-thread-content] {
+        display: flex;
+      }
+      ol[data-conversation-transcript] {
+        flex: 1;
+        display: grid;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      li[data-message-role='user'] {
+        justify-self: end;
+      }
+      [data-swipable-detail-footer] {
+        padding-inline: 12px;
+      }
+      [data-composer-positioner] {
+        max-width: 768px;
+        margin-inline: auto;
+      }
+      form {
+        display: grid;
+        grid-template-columns: 36px 1fr 80px;
+        padding-inline: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="web-mobile-root">
+      <main aria-label="ChatGPT" data-app-shell>
+        <nav aria-label="Chat history">New chat</nav>
+        <div data-desktop-visual-viewport>
+          <div role="region" aria-label="Conversation" data-swipable-detail-body tabindex="0">
+            <section aria-label="Conversation" data-conversation-id="abc">
+              <div data-mobile-thread>
+                <div data-mobile-thread-content>
+                  <ol aria-label="Conversation" data-conversation-transcript>
+                    <li data-message-role="user">Hello</li>
+                    <li data-message-role="assistant">Hello! How can I help you today?</li>
+                  </ol>
+                </div>
+              </div>
+            </section>
+          </div>
+          <div data-swipable-detail-footer>
+            <div data-composer-dock>
+              <div data-composer-positioner>
+                <form method="post">
+                  <button type="button">+</button>
+                  <textarea aria-label="Chat with ChatGPT"></textarea>
+                  <button type="button">Send</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
