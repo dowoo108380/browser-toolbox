@@ -20,6 +20,7 @@ import { unavailableReason } from './availability.ts';
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
 import { FeatureItem } from './feature-item.tsx';
+import type { FeatureUiPart } from './part.ts';
 import { SearchBox, SearchResults } from './feature-search.tsx';
 import { isSearchShortcut, searchFeatures } from './search.ts';
 import { strings } from './strings.ts';
@@ -33,6 +34,8 @@ import { TaskStatus } from './task-status.tsx';
 // 거절할 수 있는 Chrome API는 그것을 감싼 platform 함수가 결과로 바꾼다(아키텍처 7장 "오류", quality 067).
 interface PopupProps {
   readonly features: readonly FeatureDefinition[];
+  // 기능의 화면 조각(결정 0030). 그 기능 항목에 붙여 그린다.
+  readonly uiParts: readonly FeatureUiPart[];
   readonly subscribe: (handlers: SettingsReaderHandlers) => () => void;
   // 서비스 워커가 남긴 설정 복구 알림을 받는다(결정 0016).
   readonly watchRepairs: (handlers: RepairNoticeHandlers) => () => void;
@@ -91,6 +94,7 @@ function received(view: TaskView, record: TaskRecord | null): TaskView {
 
 export function PopupApp({
   features,
+  uiParts,
   subscribe,
   watchRepairs,
   wake,
@@ -310,10 +314,15 @@ export function PopupApp({
     };
   }, [wake]);
 
-  // 화면은 저장된 값을 보인다. 저장에 실패하면 알리고 스위치를 저장된 값으로 되돌린다(COM-3 기대 동작 3).
-  const toggle = async (featureId: string, enabled: boolean) => {
-    const result = await update(featureId, { enabled });
+  // 화면은 저장된 값을 보인다. 저장에 실패하면 알리고, 스위치와 화면 조각은 저장된 값으로 돌아간다(COM-3 기대 동작 3).
+  // 거절하지 않고 저장했는지를 돌려준다.
+  const save = async (
+    featureId: string,
+    patch: Readonly<Record<string, unknown>>,
+  ): Promise<boolean> => {
+    const result = await update(featureId, patch);
     setNotice(result.ok ? null : { message: result.error.message });
+    return result.ok;
   };
 
   // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
@@ -334,10 +343,11 @@ export function PopupApp({
     drawnTask === task &&
     (feature.content === null || tabState !== undefined);
 
-  // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치, 실행은 단추다.
+  // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치(와 그 기능의 화면 조각), 실행은 단추다.
   const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
     switch (feature.kind) {
-      case 'toggle':
+      case 'toggle': {
+        const part = uiParts.find((candidate) => candidate.featureId === feature.id);
         return (
           <FeatureItem
             key={feature.id}
@@ -345,11 +355,20 @@ export function PopupApp({
             enabled={settingsOf(settings, feature).enabled}
             disabled={!awake}
             onToggle={(enabled) => {
-              void toggle(feature.id, enabled);
+              void save(feature.id, { enabled });
             }}
             unavailable={unavailableReason(feature, tabState ?? null)}
+            controls={
+              part === undefined
+                ? null
+                : part.render(settings, {
+                    disabled: !awake,
+                    save: (patch) => save(feature.id, patch),
+                  })
+            }
           />
         );
+      }
       case 'action':
         return (
           <ActionItem

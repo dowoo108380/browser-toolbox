@@ -118,6 +118,38 @@ body {
   opacity: 0.8;
 }
 
+/* 기능의 화면 조각(결정 0030): 설명 아래에 이름표와 조작, 그 아래에 안내와 이유. 색은 바꾸지 않는다(대비는 본문과 같다). */
+.feature .controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  margin: 6px 0 0 24px;
+}
+
+.feature .controls label {
+  flex: none;
+}
+
+.feature .controls input {
+  width: 7em;
+  padding: 2px 6px;
+  font: inherit;
+}
+
+.feature .controls p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.feature .controls .hint {
+  opacity: 0.8;
+}
+
+.feature .controls .error {
+  font-weight: 600;
+}
+
 /* 실행 기능: 기능 이름이 적힌 단추(결정 0024). 막혔으면(aria-disabled) 누를 수 없음을 모양으로도 보인다. */
 .feature .action {
   padding: 2px 10px;

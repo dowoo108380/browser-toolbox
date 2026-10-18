@@ -85,6 +85,27 @@ export function swSource(features: readonly FeatureDefinition[], root: string): 
   return lines.join('\n');
 }
 
+// 팝업이 기능 항목에 붙여 그릴 화면 조각(결정 0030). 켜고 끄기 기능 가운데 ui.tsx가 있는 것의 ui다.
+export function popupSource(features: readonly FeatureDefinition[], root: string): string {
+  const parts = features.filter(
+    (feature) =>
+      feature.kind === 'toggle' &&
+      existsSync(path.join(root, 'src', 'features', feature.id, 'ui.tsx')),
+  );
+  const lines = [
+    ...header,
+    "import type { FeatureUiPart } from '../../ui/index.ts';",
+    ...parts.map(
+      (feature) =>
+        `import { ui as ${camelCase(feature.id)} } from '../../features/${feature.id}/ui.tsx';`,
+    ),
+    '',
+    `export const uiParts: readonly FeatureUiPart[] = [${parts.map((feature) => camelCase(feature.id)).join(', ')}];`,
+    '',
+  ];
+  return lines.join('\n');
+}
+
 // 등록 목록을 기능 목록에 맞춘다. write가 거짓이면 쓰지 않고 맞지 않는 파일만 돌려준다.
 // 서식 검사와 어긋나지 않도록 Prettier로 정리한 결과를 쓴다.
 export async function syncGenerated(
@@ -100,6 +121,7 @@ export async function syncGenerated(
       bundles.includes(bundle) ? contentSource(features, root, bundle) : null,
     ]),
     [path.join(generatedDirectory, 'sw.ts'), swSource(features, root)],
+    [path.join(generatedDirectory, 'popup.ts'), popupSource(features, root)],
   ]);
   const stale: string[] = [];
   for (const [file, source] of files) {

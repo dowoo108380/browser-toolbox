@@ -65,6 +65,25 @@ test('quality 023 024 팝업은 범주·기능 항목·쓸 수 없는 이유·�
   await expectNoViolations(ready, '쓸 수 있는 탭');
 });
 
+test('quality 023 024 결정 0030 팝업은 기능의 화면 조각(ChatGPT 너비의 숫자 칸)과 그 이유, 다른 사이트에서의 이유를 보일 때 접근성 위반이 없다', async ({
+  context,
+  extensionId,
+}) => {
+  const fixture = await context.newPage();
+  await fixture.goto(`${fixtureOrigin}/blank.html`);
+  const popup = await openPopupOn(context, extensionId, fixture);
+  await popup.getByRole('tab', { name: 'ChatGPT' }).click();
+  const field = popup.getByRole('spinbutton', { name: '최대 너비(px)' });
+  await expect(field).toBeEnabled();
+  await expect(popup.getByText('쓸 수 없음: chatgpt.com에서만 쓸 수 있음')).toBeVisible();
+  await expectNoViolations(popup, '숫자 칸, 다른 사이트의 이유');
+
+  await field.fill('500');
+  await field.press('Enter');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expectNoViolations(popup, '숫자 칸의 범위 밖 이유');
+});
+
 test.describe('실행 기능(시험 빌드, 결정 0025)', () => {
   test.use({ extensionBuild: 'fixture' });
 

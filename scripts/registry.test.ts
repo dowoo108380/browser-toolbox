@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type FeatureDefinition, defineFeature, v } from '../src/contracts/index.ts';
-import { contentBundles, contentSource, swSource, syncGenerated } from './registry.ts';
+import { contentBundles, contentSource, popupSource, swSource, syncGenerated } from './registry.ts';
 
 // 결정 0004: 빌드가 기능 목록에서 진입점별 등록 목록을 만든다. 그 생성 규칙(어느 기능의 어느 자리 파일을 넣는가)을 본다.
 // 자리 파일이 있는지는 실제 폴더를 보므로 시험마다 임시 폴더에 기능 폴더를 만든다.
@@ -104,6 +104,7 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
     expect(await syncGenerated(features, root, true)).toEqual([
       path.join('src', 'entries', 'generated', 'content-common.ts'),
       path.join('src', 'entries', 'generated', 'sw.ts'),
+      path.join('src', 'entries', 'generated', 'popup.ts'),
     ]);
     const leftover = path.join(root, 'src', 'entries', 'generated', 'content-chatgpt.ts');
     writeFileSync(leftover, '');
@@ -131,6 +132,28 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
     expect(source).toContain('export const taskParts: readonly TaskPart[] = [subtitleExport];');
     expect(source).not.toContain('tabUrlCopy');
     expect(source).not.toContain('toggleWithBackground');
+  });
+
+  it('결정 0030 팝업의 등록 목록에는 켜고 끄기 기능 가운데 ui.tsx가 있는 것의 화면 조각만 넣는다', () => {
+    const root = rootWith({
+      'chatgpt-width': ['feature.ts', 'page.ts', 'ui.tsx'],
+      'media-speed': ['feature.ts', 'page.ts'],
+      'tab-url-copy': ['feature.ts', 'ui.tsx'],
+    });
+    const source = popupSource(
+      [
+        toggle('chatgpt-width', { sites: 'chatgpt', frames: 'top' }),
+        toggle('media-speed', { sites: 'all', frames: 'all' }),
+        action('tab-url-copy'),
+      ],
+      root,
+    );
+    expect(source).toContain(
+      "import { ui as chatgptWidth } from '../../features/chatgpt-width/ui.tsx';",
+    );
+    expect(source).toContain('export const uiParts: readonly FeatureUiPart[] = [chatgptWidth];');
+    expect(source).not.toContain('mediaSpeed');
+    expect(source).not.toContain('tabUrlCopy');
   });
 
   it('넣을 기능이 없으면 빈 목록을 만든다(타입은 가져온다)', () => {

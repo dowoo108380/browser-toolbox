@@ -1,4 +1,5 @@
 import { render } from 'preact';
+import { useState } from 'preact/hooks';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -18,6 +19,7 @@ import type {
   TaskRecord,
   TaskWatchHandlers,
 } from '../storage/index.ts';
+import { type FeatureUiPart, defineUiPart } from './part.ts';
 import { PopupApp, keepAwakeIntervalMs } from './popup-app.tsx';
 
 // 팝업 부품(COM-2, COM-3, N-12). 저장소와 서비스 워커는 가짜로 바꿔 끼운다.
@@ -98,6 +100,7 @@ async function renderedOnly() {
 
 interface Options {
   readonly features?: readonly FeatureDefinition[];
+  readonly uiParts?: readonly FeatureUiPart[];
   readonly wake?: () => Promise<Result<unknown, AppError>>;
   readonly update?: () => Promise<Result<unknown, AppError>>;
   // 지난번 범주를 읽는 함수. 없으면 남긴 범주가 없다.
@@ -113,6 +116,7 @@ interface Options {
 
 async function show({
   features = [feature],
+  uiParts = [],
   wake = () => Promise.resolve(ok(null)),
   update,
   readRemembered = () => Promise.resolve(null),
@@ -169,6 +173,7 @@ async function show({
     render(
       <PopupApp
         features={features}
+        uiParts={uiParts}
         subscribe={subscribe}
         watchRepairs={() => () => undefined}
         wake={wakes}
@@ -927,6 +932,104 @@ describe('COM-3 기대 동작 3 저장에 실패하면 화면은 저장된 값�
   });
 });
 
+describe('결정 0030 기능의 화면 조각', () => {
+  const sized = defineFeature({
+    id: 'sized',
+    requirements: [],
+    name: '크기 기능',
+    description: '크기를 정한다',
+    category: 'media',
+    kind: 'toggle',
+    content: null,
+    permissions: [],
+    settings: {
+      schema: v.object({ enabled: v.boolean(), size: v.int() }),
+      defaults: { enabled: false, size: 3 },
+    },
+  });
+  // 저장된 크기를 보이고, 누르면 크기 5를 저장하며 저장했는지를 보이는 조각.
+  const sizedPart = defineUiPart(sized, ({ settings, disabled, save }) => {
+    const [saved, setSaved] = useState<boolean | null>(null);
+    return (
+      <div class="controls">
+        <span class="size">{settings.size}</span>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            void save({ size: 5 }).then(setSaved);
+          }}
+        >
+          5로
+        </button>
+        <span class="saved">{String(saved)}</span>
+      </div>
+    );
+  });
+  const text = (selector: string) => container.querySelector(selector)?.textContent;
+  const button = () => {
+    const found = container.querySelector<HTMLButtonElement>('.controls button');
+    if (found === null) throw new Error('조각의 단추가 없다.');
+    return found;
+  };
+
+  it('그 기능 항목의 설명 아래에 그 기능의 저장된 설정(없으면 기본값)으로 그린다', async () => {
+    const popup = await show({ features: [sized, feature], uiParts: [sizedPart] });
+    const item = container.querySelector('[data-feature="sized"]')?.closest('li');
+    expect(item?.querySelector('.description + .controls')).not.toBeNull();
+    expect(text('.size')).toBe('3');
+    // 조각이 없는 기능에는 아무것도 붙지 않는다.
+    expect(container.querySelectorAll('.controls')).toHaveLength(1);
+    await popup.apply({
+      features: new Map([['sized', { enabled: false, size: 8 }]]),
+      sites: new Map(),
+    });
+    expect(text('.size')).toBe('8');
+  });
+
+  it('N-12 서비스 워커가 깨어나기 전에는 조각의 조작도 막는다', async () => {
+    let wake: (value: Result<unknown, AppError>) => void = () => undefined;
+    const popup = await show({
+      features: [sized],
+      uiParts: [sizedPart],
+      wake: () => new Promise((resolve) => (wake = resolve)),
+    });
+    expect(button().disabled).toBe(true);
+    await act(() => {
+      wake(ok(null));
+    });
+    await popup.awake();
+    expect(button().disabled).toBe(false);
+  });
+
+  it('COM-3 기대 동작 3 저장은 그 기능의 설정 바꾸기로 가고, 저장했는지를 조각에 돌려주며, 실패하면 알린다', async () => {
+    let result: Result<unknown, AppError> = ok(null);
+    const popup = await show({
+      features: [sized],
+      uiParts: [sizedPart],
+      update: () => Promise.resolve(result),
+    });
+    await popup.awake();
+    await act(() => {
+      button().click();
+    });
+    expect(popup.updates).toHaveBeenLastCalledWith('sized', { size: 5 });
+    await vi.waitFor(() => {
+      expect(text('.saved')).toBe('true');
+    });
+    expect(popup.status()).toBeUndefined();
+
+    result = err(saveFailed);
+    await act(() => {
+      button().click();
+    });
+    await vi.waitFor(() => {
+      expect(text('.saved')).toBe('false');
+    });
+    expect(popup.status()).toBe(saveFailed.message);
+  });
+});
+
 describe('N-12 서비스 워커가 깨어난 뒤에만 조작한다', () => {
   it('깨우기가 늦으면 응답이 올 때까지 스위치를 쓸 수 없다', async () => {
     let woken: (result: Result<unknown, AppError>) => void = () => undefined;
@@ -986,6 +1089,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
       render(
         <PopupApp
           features={[feature, second]}
+          uiParts={[]}
           subscribe={(handlers) => {
             reader = handlers;
             subscribe(handlers);

@@ -143,6 +143,54 @@ test('GPT-2.1 GPT-2.4 COM-1.3 켜면 대화 열과 작성란의 최대 너비가
   expect(errors).toEqual([]);
 });
 
+test('GPT-2.1 COM-2.5 결정 0030 팝업의 숫자 칸으로 키보드만 써서 너비를 정하고, 범위 밖의 값은 저장하지 않으며 Esc로 저장된 값에 돌아간다', async ({
+  context,
+  extensionId,
+}) => {
+  const worker = await serviceWorkerOf(context);
+  const { page } = await openChatgpt(context, '/c/abc');
+  const { popup, feature } = await popupOn(context, extensionId, page);
+  await feature.check();
+  await expect.poll(() => widths(page)).toEqual({ thread: 1200, composer: 1200 });
+
+  // 스위치 다음의 조작이 숫자 칸이고, 저장된 값(처음 1200)을 보인다.
+  const field = popup.getByRole('spinbutton', { name: '최대 너비(px)' });
+  await feature.focus();
+  await popup.keyboard.press('Tab');
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue('1200');
+
+  await popup.keyboard.press('Control+A');
+  await popup.keyboard.type('1300');
+  await popup.keyboard.press('Enter');
+  await expect.poll(() => widths(page)).toEqual({ thread: 1300, composer: 1300 });
+  // ↑는 한 단계(10px) 넓힌다.
+  await popup.keyboard.press('ArrowUp');
+  await expect.poll(() => widths(page)).toEqual({ thread: 1310, composer: 1310 });
+  const storedWidth = () =>
+    worker.evaluate(async () => {
+      const { settings }: Record<string, unknown> = await chrome.storage.local.get('settings');
+      return settings;
+    });
+  await expect
+    .poll(storedWidth)
+    .toMatchObject({ features: { 'chatgpt-width': { enabled: true, width: 1310 } } });
+
+  // 범위 밖이면 저장하지 않고 이유를 보이며, Esc로 저장된 값에 돌아간다.
+  await popup.keyboard.press('Control+A');
+  await popup.keyboard.type('500');
+  await popup.keyboard.press('Enter');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(popup.locator('.controls .error')).toBeVisible();
+  await popup.keyboard.press('Escape');
+  await expect(field).toHaveValue('1310');
+  await expect(field).toHaveAttribute('aria-invalid', 'false');
+  expect(await widths(page)).toEqual({ thread: 1310, composer: 1310 });
+  expect(await storedWidth()).toMatchObject({
+    features: { 'chatgpt-width': { enabled: true, width: 1310 } },
+  });
+});
+
 test('GPT-2.2 다른 대화로 가거나 새 대화를 열어도(문서를 다시 싣든 안 싣든) 정한 너비가 그대로다', async ({
   context,
   extensionId,

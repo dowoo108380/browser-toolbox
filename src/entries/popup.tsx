@@ -25,6 +25,7 @@ import {
   watchTask,
 } from '../storage/index.ts';
 import { PopupApp } from '../ui/index.ts';
+import { uiParts } from './generated/popup.ts';
 
 const request = chromeRequester();
 const store = chromeLocalStore();
@@ -36,6 +37,7 @@ if (root === null) throw new Error('팝업 문서에 #root가 없다.');
 render(
   <PopupApp
     features={features}
+    uiParts={uiParts}
     subscribe={(handlers) =>
       startSettingsReader(
         { store, request, format: settingsFormat, specs: featuresWithSettings(features) },

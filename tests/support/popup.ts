@@ -26,7 +26,7 @@ import {
   watchRepairNotice,
   watchTask,
 } from '../../src/storage/index.ts';
-import { PopupApp } from '../../src/ui/index.ts';
+import { type FeatureUiPart, PopupApp } from '../../src/ui/index.ts';
 
 // 실제 모듈끼리 연결한 시험(tests/integration)이 팝업을 실제 진입점(src/entries/popup.tsx)과 같게 조립해 그린다.
 // 가짜는 Chrome 경계(저장소, 메시지 통로)뿐이다. 이 폴더는 src 밖이라 tsconfig.json의 JSX 설정(Preact)이 걸리지
@@ -45,6 +45,8 @@ export interface TestPopupOptions {
   readonly currentTab?: typeof currentTabId;
   // 팝업의 연결(결정 0024). 없으면 아무것도 하지 않는다.
   readonly announceTab?: (tabId: number) => PopupAnnouncement;
+  // 기능의 화면 조각(결정 0030). 없으면 없다.
+  readonly uiParts?: readonly FeatureUiPart[];
 }
 
 export async function renderTestPopup(
@@ -57,12 +59,14 @@ export async function renderTestPopup(
     session = createFakeStore(),
     currentTab = () => Promise.resolve(ok(1)),
     announceTab = () => ({ renew: () => undefined, close: () => undefined }),
+    uiParts = [],
   }: TestPopupOptions,
 ): Promise<void> {
   await act(() => {
     render(
       h(PopupApp, {
         features,
+        uiParts,
         subscribe: (handlers) =>
           startSettingsReader(
             { store, request, format: settingsFormat, specs: featuresWithSettings(features) },

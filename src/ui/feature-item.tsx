@@ -1,9 +1,10 @@
+import type { ComponentChild } from 'preact';
 import type { ToggleFeature } from '../contracts/index.ts';
 import { strings } from './strings.ts';
 
 // 팝업의 기능 항목 하나(결정 0023): 이름, 지금 상태, 설명, 지금 탭에서 쓸 수 없거나 동작하지 않으면 그 이유(쓸 수 없음,
-// 찾지 못함, 결정 0026). 켜고 끄기 종류는 스위치이고 이름은 기능 이름이다. 이유가 있어도 스위치는 막지 않는다. 설정은 지금
-// 탭이 아니라 모든 탭에 대한 것이다.
+// 찾지 못함, 결정 0026), 그 기능의 화면 조각이 있으면 그 조작(결정 0030). 켜고 끄기 종류는 스위치이고 이름은 기능 이름이다.
+// 이유가 있어도 스위치는 막지 않는다. 설정은 지금 탭이 아니라 모든 탭에 대한 것이다.
 // 상태 글자는 눈으로 보는 사람을 위한 것이다. 스위치가 켜짐 여부를 스스로 알리므로 보조 기술에는 감춘다.
 
 interface FeatureItemProps {
@@ -14,6 +15,8 @@ interface FeatureItemProps {
   readonly onToggle: (enabled: boolean) => void;
   // 지금 탭에서 쓸 수 없거나 동작하지 않는 이유. 없거나 모르면 null이다.
   readonly unavailable: string | null;
+  // 그 기능의 화면 조각이 그린 조작. 없으면 null이다.
+  readonly controls: ComponentChild;
 }
 
 export function FeatureItem({
@@ -22,6 +25,7 @@ export function FeatureItem({
   disabled,
   onToggle,
   unavailable,
+  controls,
 }: FeatureItemProps) {
   const descriptionId = `feature-description-${feature.id}`;
   const reasonId = `feature-unavailable-${feature.id}`;
@@ -54,6 +58,7 @@ export function FeatureItem({
           {unavailable}
         </p>
       )}
+      {controls}
     </li>
   );
 }

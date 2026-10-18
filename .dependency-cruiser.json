@@ -147,11 +147,11 @@
     },
     {
       "name": "preact-only-in-extension-pages",
-      "comment": "Preact는 확장 화면에만 쓴다. 웹 페이지에 실리는 스크립트에 넣지 않는다(결정 0007).",
+      "comment": "Preact는 확장 화면(ui, 팝업 진입점, 기능의 화면 조각 ui.tsx와 그 DOM 시험)에만 쓴다. 웹 페이지에 실리는 스크립트에 넣지 않는다(결정 0007, 0030).",
       "severity": "error",
       "from": {
         "path": "^src/",
-        "pathNot": "^src/(ui/|entries/popup\\.tsx$|features/[^/]+/ui\\.tsx$)"
+        "pathNot": "^src/(ui/|entries/popup\\.tsx$|features/[^/]+/ui(\\.dom\\.test)?\\.tsx$)"
       },
       "to": { "path": "node_modules/preact/" }
     },
