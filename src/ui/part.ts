@@ -13,9 +13,9 @@ interface UiPartProps<S extends ToggleSettings> {
   readonly settings: S;
   // 서비스 워커가 깨어나기 전에는 조작을 막는다(N-12).
   readonly disabled: boolean;
-  // 값을 정한다. 팝업은 칸에 보이는 값과 다를 때만 그 기능의 설정 바꾸기를 보내고, 실패하면 알림 줄에 이유를 보인다. 조각은
-  // settings를 보이면 된다. 정한 값이 저장되어 보일 때까지와 실패 뒤 저장된 값으로 돌아가는 것은 팝업이 맞춘다(COM-3 기대
-  // 동작 3).
+  // 값을 정한다. 팝업은 칸에 보이는 값과 다를 때(앞 저장이 저장되었는지 알 수 없으면 같아도, 결정 0036) 그 기능의 설정
+  // 바꾸기를 보내고, 실패하면 알림 줄에 이유를 보인다. 조각은 settings를 보이면 된다. 정한 값이 저장되어 보일 때까지와 실패
+  // 뒤 저장된 값으로 돌아가는 것은 팝업이 맞춘다(COM-3 기대 동작 3).
   readonly choose: (patch: Partial<Omit<S, 'enabled'>>) => void;
 }
 
