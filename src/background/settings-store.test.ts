@@ -39,6 +39,8 @@ function fakeClock(start = t) {
 }
 
 interface SetupOptions {
+  // 참이면 설정 읽기가 늘 실패한다.
+  readonly failReads?: boolean;
   // 참이면 설정 저장이 늘 실패한다(COM-3.3).
   readonly failWrites?: boolean;
   // 참이면 복구 알림을 남기지 못한다(결정 0016).
@@ -48,7 +50,12 @@ interface SetupOptions {
 
 function setup(
   initial?: unknown,
-  { failWrites = false, failNotice = false, format = settingsFormat }: SetupOptions = {},
+  {
+    failReads = false,
+    failWrites = false,
+    failNotice = false,
+    format = settingsFormat,
+  }: SetupOptions = {},
 ) {
   const fake = createFakeStore(initial === undefined ? {} : { [settingsKey]: initial });
   const problems: Problem[] = [];
@@ -61,6 +68,10 @@ function setup(
   const settings = createSettingsStore({
     store: {
       ...fake,
+      get: async (key) => {
+        if (failReads) throw new Error('read');
+        return fake.get(key);
+      },
       set: async (values) => {
         if (failWrites) throw new Error('quota');
         events.push('write');
@@ -211,6 +222,30 @@ describe('설정 바꾸기', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('platform');
     expect(store.peek(settingsKey)).toEqual(stored(5));
+  });
+
+  it('결정 0036 unexpected가 아닌 실패로 답하는 길에서는 설정을 쓰지 않는다(팝업은 저장하지 않음으로 본다)', async () => {
+    const cases = [
+      ['모르는 기능', setup(stored(5)), 'nothing', { enabled: true }],
+      ['틀린 값', setup(stored(5)), 'sample', { step: 'fast' }],
+      ['읽지 못함', setup(stored(5), { failReads: true }), 'sample', { enabled: true }],
+      ['더 새 형식', setup({ version: 2, settings: {} }), 'other', { enabled: true }],
+      [
+        '복구 알림을 남기지 못함',
+        setup(stored(5, { sample: { enabled: 'no' } }), { failNotice: true }),
+        'other',
+        { enabled: true },
+      ],
+      ['쓰지 못함', setup(stored(5), { failWrites: true }), 'other', { enabled: true }],
+    ] as const;
+    for (const [name, { settings, written }, featureId, patch] of cases) {
+      const result = await settings.updateFeature(featureId, patch);
+      expect({
+        name,
+        failed: !result.ok && result.error.kind !== 'unexpected',
+        written,
+      }).toEqual({ name, failed: true, written: [] });
+    }
   });
 
   it('COM-3.8 더 새 형식이면 거절하고 저장된 값을 바꾸지 않는다', async () => {

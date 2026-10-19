@@ -1208,6 +1208,26 @@ describe('결정 0030 기능의 화면 조각', () => {
     }
   });
 
+  it('결정 0036 알 수 없게 끝난 저장이 나중에 담기면 칸은 그 값을 보이고, 알림 줄의 실패는 그 뒤에 보낸 저장이 될 때까지 남는다(담긴 것이 그 저장인지 가를 수 없다)', async () => {
+    let result: Saved = err(noAnswer);
+    const popup = await show({
+      features: [sized],
+      uiParts: [sizedPart],
+      update: () => Promise.resolve(result),
+    });
+    await popup.awake();
+    await sizeTo(5);
+    await settle();
+    await popup.apply(sizedSettings(5), 2);
+    expect(text('.size')).toBe('5');
+    expect(popup.status()).toBe(noAnswer.message);
+    result = ok({ revision: 3 });
+    await sizeTo(5);
+    await settle();
+    expect(popup.updates).toHaveBeenCalledTimes(2);
+    expect(popup.status()).toBeUndefined();
+  });
+
   it('결정 0036 결정 0037 조각이 그려져 있지 않은 동안 저장이 실패로 끝나도 기억에 담겨, 다시 그린 조각은 저장된 값을 보이고 알 수 없게 끝났을 때만 같은 값을 보낸다', async () => {
     for (const { failure, name, resend } of failures) {
       const answers: ((value: Saved) => void)[] = [];
