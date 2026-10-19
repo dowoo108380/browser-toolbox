@@ -6,9 +6,13 @@ import { chatgptWidth } from '../../src/features/chatgpt-width/feature.ts';
 import { ui } from '../../src/features/chatgpt-width/ui.tsx';
 import { mediaSpeed } from '../../src/features/media-speed/feature.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
-import type { KeyValueStore } from '../../src/platform/index.ts';
+import { type KeyValueStore, type Requester, chromeRequester } from '../../src/platform/index.ts';
 import { settingsFormat, settingsKey } from '../../src/storage/index.ts';
-import { startTestBackground } from '../support/background.ts';
+import {
+  type TestBackgroundOptions,
+  startTestBackground,
+  startTestBackgroundOnRuntime,
+} from '../support/background.ts';
 import { renderTestPopup, switchOf } from '../support/popup.ts';
 
 // 팝업에서 GPT-2의 너비를 정하는 길(결정 0030)을 실제 모듈끼리 연결해 본다. 팝업, GPT-2의 숫자 칸, 서비스 워커(라우터,
@@ -19,6 +23,8 @@ import { renderTestPopup, switchOf } from '../support/popup.ts';
 // 서비스 워커의 시계가 시작하는 시각(ms).
 const startTime = 1_790_000_000_000;
 const features = [mediaSpeed, chatgptWidth];
+// 실제 요청 도우미의 기본 제한 시간(아키텍처 7장 "비동기, 제한 시간, 취소").
+const requestTimeoutMs = 5000;
 
 const containers: HTMLElement[] = [];
 
@@ -27,6 +33,8 @@ afterEach(() => {
     render(null, container);
     container.remove();
   }
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 // 마이크로태스크를 몇 차례 흘려 보낸다(붙잡지 않은 응답과 알림이 팝업에 닿는다).
@@ -44,14 +52,20 @@ const ways: readonly { readonly way: Way; readonly name: string }[] = [
 ];
 
 // 팝업의 설정 바꾸기에서 붙잡을 것: 서비스 워커에 닿는 것('delivery'), 서비스 워커는 곧바로 저장하고 그 응답만('response'),
-// 붙잡지 않음('none'). settings는 처음 저장된 설정이다(없으면 서비스 워커가 기본 설정을 쓴다).
-async function openPopup(hold: 'delivery' | 'response' | 'none', settings?: unknown) {
+// 붙잡지 않음('none'). settings는 처음 저장된 설정이다(없으면 서비스 워커가 기본 설정을 쓴다). via는 팝업이 요청을 보내는
+// 길이다: 요청 도우미를 흉내 낸 함수('test'), 실제 요청 도우미와 그것이 부르는 chrome.runtime의 가짜('chrome', 제한 시간과
+// 응답 검증까지 실제 코드).
+async function openPopup(
+  hold: 'delivery' | 'response' | 'none',
+  settings?: unknown,
+  via: 'test' | 'chrome' = 'test',
+) {
   const store = createFakeStore(settings === undefined ? {} : { [settingsKey]: settings });
   // 붙잡은 설정 바꾸기(또는 그 응답). 놓으면 받은 차례대로 서비스 워커에 닿는다(응답이 팝업에 간다).
   const held: (() => void)[] = [];
   // 다른 화면이 보내는 설정 바꾸기는 붙잡지 않는다.
   let fromOtherScreen = false;
-  const request = startTestBackground({
+  const background: TestBackgroundOptions = {
     store,
     features,
     startTime,
@@ -73,7 +87,14 @@ async function openPopup(hold: 'delivery' | 'response' | 'none', settings?: unkn
           }),
       );
     },
-  });
+  };
+  let request: Requester;
+  if (via === 'chrome') {
+    startTestBackgroundOnRuntime(background);
+    request = chromeRequester();
+  } else {
+    request = startTestBackground(background);
+  }
   // 팝업이 듣는 저장소. 붙잡기 시작하면 바뀜 알림을 온 차례대로 모아 두었다가 하나씩 놓는다.
   let holdingNotices = false;
   const notices: (() => void)[] = [];
@@ -157,6 +178,13 @@ async function openPopup(hold: 'delivery' | 'response' | 'none', settings?: unkn
         store.replace(settingsKey, 'broken');
       }),
     heldCount: () => held.length,
+    // 팝업의 알림 줄.
+    status: () => container.querySelector('[role=status]')?.textContent,
+    // 실제 요청 도우미의 제한 시간이 지나게 가짜 시계를 돌린다(시험이 vi.useFakeTimers로 setTimeout을 바꿔 둔다).
+    timeOut: () =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(requestTimeoutMs);
+      }),
     // 붙잡은 설정 바꾸기(또는 응답) 가운데 먼저 온 것을 놓는다.
     release: () =>
       act(() => {
@@ -367,6 +395,36 @@ describe('GPT-2 팝업의 너비 칸과 늦은 저장(결정 0030)', () => {
     await settle();
     expect(popup.field().value).toBe('1500');
   });
+
+  // 실제 요청 도우미의 제한 시간(5초)은 가짜 시계로 넘긴다. setTimeout만 바꾸므로 20초마다 깨우기는 실제 시계 그대로이고,
+  // Preact가 효과를 부르는 때(그리기 뒤 setTimeout)는 act가 흘려 보내거나 vi.waitFor가 시계를 돌릴 때다. 이 시험이 보는
+  // 칸의 값과 알림 줄은 효과 없이 그려진다.
+  for (const way of [null, ...ways]) {
+    const name = way === null ? '' : `${way.name}도 `;
+    it(`COM-3 기대 동작 3 결정 0036 저장의 응답이 실제 요청 도우미의 제한 시간을 넘기면 저장했는지 알 수 없다고 알리고 ${name}칸은 저장된 값을 보이며, 그 값을 다시 정하면 보내 앞 저장이 늦게 저장되어도 마지막으로 정한 값이 남는다`, async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const popup = await openPopup('delivery', undefined, 'chrome');
+      await popup.choose('1500');
+      expect(popup.heldCount()).toBe(1);
+      if (way !== null) await popup.leave(way.way);
+      // 서비스 워커는 1500을 받아 두고(붙잡음) 아직 저장하지 않았다. 요청 도우미는 제한 시간이 지나 응답 없음으로 끝낸다.
+      await popup.timeOut();
+      if (way !== null) await popup.back(way.way);
+      expect(popup.status()).toBe('확장의 응답이 없다. 잠시 뒤 다시 한다.');
+      expect(popup.field().value).toBe('1200');
+
+      // 보이는 값과 같은 1200도 보낸다. 앞의 1500이 아직 저장될 수 있기 때문이다.
+      await popup.choose('1200');
+      expect(popup.heldCount()).toBe(2);
+      await popup.release();
+      await settle();
+      expect(popup.storedWidth()).toBe(1500);
+      await popup.release();
+      await settle();
+      expect(popup.storedWidth()).toBe(1200);
+      expect(popup.field().value).toBe('1200');
+    });
+  }
 
   it('COM-3 기대 동작 3 결정 0036 손상 전에 보낸 저장이 서비스 워커가 고쳐 쓴 뒤에 저장되어도, 그사이 보이는 기본값과 같은 값을 정하면 보내 마지막으로 정한 값이 남는다', async () => {
     const popup = await openPopup('delivery');

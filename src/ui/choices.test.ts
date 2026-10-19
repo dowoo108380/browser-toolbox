@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { type Sent, accepted, answered, chose, chosenValues, noChoices } from './choices.ts';
+import {
+  type Ending,
+  type Sent,
+  accepted,
+  answered,
+  chose,
+  chosenValues,
+  noChoices,
+} from './choices.ts';
 
 // 화면 조각이 정한 값과 그 저장의 기억(결정 0036, 0037). 팝업 없이 너비 칸 하나를 흉내 낸다: 읽기 도우미가 받아들인
-// 너비와 그 세대 번호, 칸이 정한 값, 저장의 응답(저장한 값의 세대 번호, 못 했으면 null)은 시험이 정한 차례로 온다.
+// 너비와 그 세대 번호, 칸이 정한 값, 저장의 응답(그 저장이 끝난 방법: 저장한 값의 세대 번호, 'unwritten', 'unknown')은
+// 시험이 정한 차례로 온다.
 
 const featureId = 'chatgpt-width';
 
@@ -22,10 +31,10 @@ function field(width = 1200, revision: number | null = 1) {
       return true;
     },
     // index번째로 보낸 저장의 응답이 온다.
-    answer: (index: number, written: number | null) => {
+    answer: (index: number, ending: Ending) => {
       const which = sent[index];
       if (which === undefined) throw new Error(`${String(index)}번째 저장이 없다.`);
-      choices = answered(choices, which, written);
+      choices = answered(choices, which, ending);
     },
     // 읽기 도우미가 저장된 너비(없으면 기본값)와 그 세대 번호를 받아들였다(null이면 기본값으로 대신 씀).
     accept: (next: number | undefined, at: number | null) => {
@@ -125,9 +134,9 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
     const width = field(1200, 1);
     width.choose(1500);
     width.choose(1600);
-    width.answer(0, null);
+    width.answer(0, 'unwritten');
     expect(width.shown()).toBe(1600);
-    width.answer(1, null);
+    width.answer(1, 'unwritten');
     expect(width.shown()).toBe(1200);
     expect(width.choose(1200)).toBe(false);
   });
@@ -137,7 +146,7 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
     width.choose(1500);
     width.choose(1600);
     width.answer(0, 2);
-    width.answer(1, null);
+    width.answer(1, 'unwritten');
     expect(width.shown()).toBe(1500);
     width.accept(1500, 2);
     expect(width.shown()).toBe(1500);
@@ -187,7 +196,7 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
     width.accept(1200, 100);
     // 잊은 1500이 고쳐 쓴 값 뒤에 담길 수 있어, 보이는 1200과 같아도 보낸다. 실패하면 그대로다.
     expect(width.choose(1200)).toBe(true);
-    width.answer(1, null);
+    width.answer(1, 'unwritten');
     expect(width.shown()).toBe(1200);
     expect(width.choose(1200)).toBe(true);
     width.answer(2, 101);
@@ -234,7 +243,7 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
 
     const failed = field(1200, null);
     failed.choose(1500);
-    failed.answer(0, null);
+    failed.answer(0, 'unwritten');
     expect(failed.shown()).toBe(1200);
   });
 
@@ -271,5 +280,138 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
     );
     choices = accepted(choices, 3);
     expect(chosenValues(choices, 'a')).toEqual(new Map());
+  });
+
+  it('결정 0036 알 수 없게 끝난 저장 뒤에는 칸이 저장된 값을 보이고, 그 값을 다시 정해도 보내며, 그 뒤에 보낸 저장이 되면 다시 보이는 값과 견준다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.answer(0, 'unknown');
+    expect(width.shown()).toBe(1200);
+    // 앞의 1500이 나중에 저장될 수 있어 보이는 1200과 같아도 보낸다. 그 저장이 실패하거나 알 수 없게 끝나도 그대로다.
+    expect(width.choose(1200)).toBe(true);
+    width.answer(1, 'unwritten');
+    expect(width.choose(1200)).toBe(true);
+    width.answer(2, 'unknown');
+    expect(width.choose(1200)).toBe(true);
+    width.answer(3, 2);
+    width.accept(1200, 2);
+    expect(width.choose(1200)).toBe(false);
+    expect(width.sent()).toEqual([
+      { width: 1500 },
+      { width: 1200 },
+      { width: 1200 },
+      { width: 1200 },
+    ]);
+  });
+
+  it('결정 0036 저장하지 않음으로 끝난 저장 뒤에는 보이는 값과 같은 값을 보내지 않는다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.answer(0, 'unwritten');
+    expect(width.shown()).toBe(1200);
+    expect(width.choose(1200)).toBe(false);
+  });
+
+  it('결정 0036 알 수 없게 끝난 저장이 나중에 담기면 칸은 그 값을 보이고, 그 뒤에 보낸 저장이 될 때까지는 같은 값도 보낸다(담긴 것이 그 저장인지 가를 수 없다)', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.answer(0, 'unknown');
+    width.accept(1500, 2);
+    expect(width.shown()).toBe(1500);
+    expect(width.choose(1500)).toBe(true);
+    width.answer(1, 3);
+    width.accept(1500, 3);
+    expect(width.choose(1500)).toBe(false);
+  });
+
+  it('결정 0036 응답보다 바뀜 알림이 먼저 와 담긴 뒤 알 수 없게 끝나면 칸은 저장된 값(그 저장의 값)을 보인다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.accept(1500, 2);
+    expect(width.shown()).toBe(1500);
+    width.answer(0, 'unknown');
+    expect(width.shown()).toBe(1500);
+    expect(width.choose(1500)).toBe(true);
+  });
+
+  it('결정 0036 알 수 없게 끝난 저장보다 뒤에 보낸 저장이 되면, 두 응답이 어느 차례로 와도 그 뒤로는 보이는 값과 견준다', () => {
+    for (const unknownFirst of [true, false]) {
+      const width = field(1200, 1);
+      width.choose(1500);
+      width.choose(1300);
+      if (unknownFirst) width.answer(0, 'unknown');
+      width.answer(1, 3);
+      if (!unknownFirst) width.answer(0, 'unknown');
+      // 1500은 1300보다 먼저 저장되었거나 끝내 저장되지 않는다. 칸은 1300이 담길 때까지 그 값이다.
+      expect(width.shown()).toBe(1300);
+      width.accept(1300, 3);
+      expect(width.choose(1300)).toBe(false);
+    }
+  });
+
+  it('결정 0036 알 수 없게 끝난 저장보다 앞에 보낸 저장의 성공이 늦게 와도 알 수 없음은 남는다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.choose(1300);
+    // 뒤 저장(1300)이 먼저 알 수 없게 끝나고, 앞 저장(1500)의 성공이 늦게 온다.
+    width.answer(1, 'unknown');
+    width.answer(0, 2);
+    expect(width.shown()).toBe(1500);
+    width.accept(1500, 2);
+    // 1300이 아직 저장될 수 있어 보이는 1500과 같아도 보낸다.
+    expect(width.choose(1500)).toBe(true);
+  });
+
+  it('결정 0036 알 수 없게 끝난 저장이 있던 항목은 기본값으로 대신 써 잊은 뒤에도, 그 뒤에 보낸 저장이 될 때까지 같은 값을 보낸다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.answer(0, 'unknown');
+    width.accept(undefined, null);
+    width.accept(1200, 2);
+    expect(width.choose(1200)).toBe(true);
+    width.answer(1, 3);
+    width.accept(1200, 3);
+    expect(width.choose(1200)).toBe(false);
+  });
+
+  it('결정 0036 잊은 저장의 응답은 알 수 없음이나 저장하지 않음으로 와도 버리고, 잊을 때 정한 늘 보내기는 그 뒤에 보낸 저장이 될 때까지 남는다', () => {
+    for (const ending of ['unknown', 'unwritten'] as const) {
+      const width = field(1200, 1);
+      width.choose(1500);
+      width.accept(undefined, null);
+      width.accept(1200, 2);
+      width.answer(0, ending);
+      expect(width.shown()).toBe(1200);
+      expect(width.choose(1200)).toBe(true);
+      width.answer(1, 3);
+      width.accept(1200, 3);
+      expect(width.choose(1200)).toBe(false);
+    }
+  });
+
+  it('결정 0036 기본값으로 대신 쓰는 동안 보낸 저장이 알 수 없게 끝나면 칸은 저장된 값을 보이고 같은 값도 보낸다', () => {
+    const width = field(1200, null);
+    width.choose(1500);
+    width.answer(0, 'unknown');
+    expect(width.shown()).toBe(1200);
+    width.accept(1200, 5);
+    expect(width.choose(1200)).toBe(true);
+  });
+
+  it('결정 0036 함께 정한 항목이 알 수 없게 끝나면 모두 늘 보내고, 그 뒤에 보낸 저장에 든 항목만 다시 보이는 값과 견준다', () => {
+    let choices = accepted(noChoices, 1);
+    const stored = { enabled: true, width: 1200, size: 3 };
+    const both = chose(choices, 'a', stored, { width: 1500, size: 4 });
+    if (both === null) throw new Error('보내야 한다.');
+    choices = answered(both.choices, both.sent, 'unknown');
+    const width = chose(choices, 'a', stored, { width: 1200 });
+    if (width === null) throw new Error('보내야 한다.');
+    expect(chose(choices, 'a', stored, { size: 3 })).not.toBeNull();
+    choices = answered(width.choices, width.sent, 2);
+    choices = accepted(choices, 2);
+    expect(chose(choices, 'a', stored, { width: 1200 })).toBeNull();
+    expect(chose(choices, 'a', stored, { size: 3 })).not.toBeNull();
+    // 다른 기능은 흔들리지 않는다.
+    expect(chose(choices, 'b', stored, { size: 3 })).toBeNull();
   });
 });

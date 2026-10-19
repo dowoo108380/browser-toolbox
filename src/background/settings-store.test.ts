@@ -472,7 +472,9 @@ describe('세대 번호: 쓰는 쪽이 만든 값을 읽는 쪽에 넣는다(결
         request: (definition) => {
           const parsed = v.safeParse(definition.value, null);
           return Promise.resolve(
-            parsed.success ? ok(parsed.output) : err(appError('unexpected', '응답 형식')),
+            parsed.success
+              ? ok(parsed.output)
+              : err({ ...appError('unexpected', '응답 형식'), answered: false }),
           );
         },
         format: settingsFormat,

@@ -1,5 +1,6 @@
 export { type KeyValueStore, chromeLocalStore, chromeSessionStore } from './storage.ts';
 export {
+  type RequestError,
   type Requester,
   type Sender,
   chromeRequester,

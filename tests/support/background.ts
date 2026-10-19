@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import {
   type FeatureDefinition,
   type PageStatus,
@@ -21,8 +22,9 @@ import { appError, err } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
 
 // 실제 모듈끼리 연결한 시험(tests/integration)이 실제 서비스 워커(startBackground)를 시작한다. 가짜는 Chrome 경계뿐이다:
-// 저장소(받은 것), 메시지 통로(돌려주는 요청 함수), 시계(startTime에서 시작해 기다린 만큼만 간다), 탭(받지 않으면 모든 탭이 있다),
-// 작업 id(차례로 task-1, task-2, …). 설치 이벤트와 옛 스크립트 정리는 하지 않는다. 테스트에서만 가져온다.
+// 저장소(받은 것), 메시지 통로(돌려주는 요청 함수, 또는 실제 요청 도우미가 부르는 chrome.runtime), 시계(startTime에서 시작해
+// 기다린 만큼만 간다), 탭(받지 않으면 모든 탭이 있다), 작업 id(차례로 task-1, task-2, …). 설치 이벤트와 옛 스크립트 정리는
+// 하지 않는다. 테스트에서만 가져온다.
 
 export interface TestBackgroundOptions {
   readonly store: KeyValueStore;
@@ -50,8 +52,33 @@ export interface TestBackgroundOptions {
 }
 
 // 확장 화면과 콘텐츠 스크립트가 쓰는 요청 함수를 돌려준다. chromeRequester처럼 메시지를 구조화 복제로 건네고,
-// 응답을 그 요청의 정의로 검증한다.
+// 응답을 그 요청의 정의로 검증한다. 서비스 워커가 실패로 답한 것만 answered다.
 export function startTestBackground(options: TestBackgroundOptions): Requester {
+  const send = startBackgroundWith(options);
+  return async (definition, payload) => {
+    const response = await send({ type: definition.type, payload });
+    const parsed = v.safeParse(responseSchema(definition.value), response);
+    if (!parsed.success) {
+      return err({ ...appError('unexpected', '확장의 응답 형식이 맞지 않는다.'), answered: false });
+    }
+    return parsed.output.ok ? parsed.output : err({ ...parsed.output.error, answered: true });
+  };
+}
+
+const testExtensionId = 'abcdefghijklmnopabcdefghijklmnop';
+
+// 실제 요청 도우미(chromeRequester)가 시험의 서비스 워커에 닿게 chrome.runtime(id, sendMessage)을 바꿔 끼운다
+// (vi.stubGlobal. 시험이 끝나면 vi.unstubAllGlobals로 되돌린다). 요청 도우미의 제한 시간과 응답 검증까지 실제 코드로 본다.
+export function startTestBackgroundOnRuntime(options: TestBackgroundOptions): void {
+  const send = startBackgroundWith(options);
+  vi.stubGlobal('chrome', { runtime: { id: testExtensionId, sendMessage: send } });
+}
+
+// 서비스 워커를 시작하고, 메시지를 그 서비스 워커에 건네는 함수를 돌려준다. 메시지와 응답은 구조화 복제로 건네고, 닿는
+// 때는 options.deliver가 정한다.
+function startBackgroundWith(
+  options: TestBackgroundOptions,
+): (message: unknown) => Promise<unknown> {
   let handle: ((message: unknown, sender: Sender) => Promise<unknown>) | undefined;
   const clock = { time: options.startTime };
   let taskCount = 0;
@@ -87,16 +114,12 @@ export function startTestBackground(options: TestBackgroundOptions): Requester {
       (() => Promise.resolve({ delivery: 'delivered', value: { unmet: [] } } as const)),
   });
   const deliver = options.deliver ?? ((_type, send) => send());
-  return async (definition, payload) => {
+  return (message) => {
     const send = async (): Promise<unknown> => {
       if (handle === undefined) throw new Error('서비스 워커가 요청을 듣지 않는다.');
-      const message = structuredClone({ type: definition.type, payload });
-      return structuredClone(await handle(message, { kind: 'extension' }));
+      return structuredClone(await handle(structuredClone(message), { kind: 'extension' }));
     };
-    const response = await deliver(definition.type, send);
-    const parsed = v.safeParse(responseSchema(definition.value), response);
-    return parsed.success
-      ? parsed.output
-      : err(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
+    const type: unknown = Reflect.get(Object(message), 'type');
+    return deliver(typeof type === 'string' ? type : '', send);
   };
 }

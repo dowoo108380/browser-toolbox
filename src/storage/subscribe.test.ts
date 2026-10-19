@@ -27,9 +27,12 @@ function setup<Store extends Pick<KeyValueStore, 'get' | 'onChanged'>>(
   const request: Requester = async (definition) => {
     ensureCount += 1;
     const result = await onEnsureReady();
-    if (!result.ok) return result;
+    // 서비스 워커가 그 실패로 답한 것처럼 돌려준다.
+    if (!result.ok) return err({ ...result.error, answered: true });
     const parsed = v.safeParse(definition.value, result.value);
-    return parsed.success ? ok(parsed.output) : err(appError('unexpected', '응답 형식'));
+    return parsed.success
+      ? ok(parsed.output)
+      : err({ ...appError('unexpected', '응답 형식'), answered: false });
   };
   const stop = startSettingsReader(
     { store, request, format, specs },
@@ -286,11 +289,15 @@ describe('COM-7 그만둔 뒤에는 읽지도 알리지도 않는다', () => {
       new Promise((resolve) => {
         answer = (result) => {
           if (!result.ok) {
-            resolve(result);
+            resolve(err({ ...result.error, answered: true }));
             return;
           }
           const parsed = v.safeParse(definition.value, result.value);
-          resolve(parsed.success ? ok(parsed.output) : err(appError('unexpected', '응답 형식')));
+          resolve(
+            parsed.success
+              ? ok(parsed.output)
+              : err({ ...appError('unexpected', '응답 형식'), answered: false }),
+          );
         };
       });
     const stop = startSettingsReader(

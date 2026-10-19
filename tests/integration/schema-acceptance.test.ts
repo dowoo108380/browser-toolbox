@@ -774,15 +774,22 @@ describe('메시지의 받아들임과 거절', () => {
       [
         ['성공', { ok: true, value: null }, { ok: true, value: null }],
         ['성공의 모르는 키', { ok: true, value: null, x: 1 }, { ok: true, value: null }],
+        // 서비스 워커가 실패로 답했다(결정 0036).
         [
           '실패',
           { ok: false, error: { kind: 'timeout', message: '넘었다.' } },
-          { ok: false, error: { kind: 'timeout', message: '넘었다.' } },
+          { ok: false, error: { kind: 'timeout', message: '넘었다.', answered: true } },
         ],
         [
           '실패의 모르는 키',
           { ok: false, error: { kind: 'limit', message: 'm', x: 1 } },
-          { ok: false, error: { kind: 'limit', message: 'm' } },
+          { ok: false, error: { kind: 'limit', message: 'm', answered: true } },
+        ],
+        // 받는 쪽은 답했는지를 정하지 못한다. 요청 도우미가 정한다.
+        [
+          '실패에 답하지 않았다고 적음',
+          { ok: false, error: { kind: 'limit', message: 'm', answered: false } },
+          { ok: false, error: { kind: 'limit', message: 'm', answered: true } },
         ],
         ['성공에 값 없음', { ok: true }, 'unexpected'],
         ['성공 표시가 글자', { ok: 'true', value: null }, 'unexpected'],

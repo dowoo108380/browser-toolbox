@@ -172,6 +172,7 @@ export function createSettingsStore(deps: {
         };
         const written = await write(next, { stored: loaded.value.raw, normalized: base });
         if (!written.ok) return written;
+        // 쓴 뒤에는 실패를 돌려주지 않는다. 실패로 답하면 저장하지 않은 것이라는 settings.update의 계약이다(결정 0036).
         recordRepairs(normalized.value.repairs);
         return ok({ revision: next.revision });
       }),

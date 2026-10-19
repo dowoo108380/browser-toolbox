@@ -12,22 +12,33 @@ const defaultTimeoutMs = 5000;
 // 다시 불러온 뒤 17–18ms에 봤다). 그래서 요청이 그렇게 실패하면 이만큼 기다린 뒤 연결을 다시 확인한다.
 export const disconnectSettleMs = 500;
 
+// 요청의 실패. answered는 받는 쪽(서비스 워커)이 이 실패로 답했는지다. 답하지 않았으면(시간 초과, 응답 형식이 어긋남,
+// 보내지 못함, 연결이 끊김) 받는 쪽이 그 요청을 처리했는지 알 수 없다. 오류 종류로는 가를 수 없다. 받는 쪽도 timeout,
+// platform, unexpected로 답하기 때문이다. 실패로 답한 요청을 처리했는지는 요청마다의 계약이 정한다(예: settings.update,
+// 결정 0036).
+export interface RequestError extends AppError {
+  readonly answered: boolean;
+}
+
 export type Requester = <Payload, Value>(
   definition: RequestDefinition<string, Payload, Value>,
   payload: Payload,
-) => Promise<Result<Value, AppError>>;
+) => Promise<Result<Value, RequestError>>;
 
 // 확장과 연결이 끊긴 옛 스크립트에서 확장 API를 부르면 이 문구의 오류가 난다(R-04).
 function isDisconnected(error: unknown): boolean {
   return error instanceof Error && error.message.includes('Extension context invalidated');
 }
 
+// 이쪽에서 만든 실패(받는 쪽이 답하지 않음).
+const unanswered = (error: AppError) => err({ ...error, answered: false });
+
 const disconnected = () =>
-  err(appError('disconnected', '확장이 다시 로드되었다. 이 페이지를 새로 고친다.'));
+  unanswered(appError('disconnected', '확장이 다시 로드되었다. 이 페이지를 새로 고친다.'));
 
 // 실패한 요청의 결과. 그 사이 확장과 연결이 끊겼으면 무엇이 실패했든 끊김이다. 실행 틀은 끊김을 받으면 문제를
 // 알리지 않고 물러난다(결정 0008의 셋째 방법).
-const failure = (error: AppError) => (isExtensionConnected() ? err(error) : disconnected());
+const failure = (error: AppError) => (isExtensionConnected() ? unanswered(error) : disconnected());
 
 // 거절이나 응답 없이 끝남은 다시 불러오는 순간에도 오므로(disconnectSettleMs) 끊긴 것으로 바뀔 틈을 둔 뒤 판단한다.
 // 실패의 모양(거절 문구, 응답 값)으로 가리지 않는다. 연결된 채면 실제 실패다(서비스 워커만 멈춘 경우 등).
@@ -53,8 +64,10 @@ export function chromeRequester(timeoutMs: number = defaultTimeoutMs): Requester
         return failure(appError('timeout', '확장의 응답이 없다. 잠시 뒤 다시 한다.'));
       }
       const parsed = v.safeParse(responseSchema(definition.value), response.value);
-      if (parsed.success) return parsed.output;
-      return await failureAfterSettle(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
+      if (!parsed.success) {
+        return await failureAfterSettle(appError('unexpected', '확장의 응답 형식이 맞지 않는다.'));
+      }
+      return parsed.output.ok ? parsed.output : err({ ...parsed.output.error, answered: true });
     } catch (error) {
       if (isDisconnected(error)) return disconnected();
       return failureAfterSettle(appError('platform', '확장에 요청을 보내지 못했다.'));

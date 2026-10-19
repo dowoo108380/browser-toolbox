@@ -5,7 +5,7 @@ import { type TaskPart, defineTaskPart } from '../../src/background/index.ts';
 import { type ActionFeature, defineFeature, taskStart, v } from '../../src/contracts/index.ts';
 import { type FakeStore, createFakeStore } from '../../src/platform/fake.ts';
 import type { KeyValueStore } from '../../src/platform/index.ts';
-import { type AppError, appError, err, ok } from '../../src/shared/index.ts';
+import { appError, err, ok } from '../../src/shared/index.ts';
 import { type TaskOutcome, tasksKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
 import { renderTestPopup } from '../support/popup.ts';
@@ -348,7 +348,10 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
     expect(popup.button('copy').getAttribute('aria-disabled')).toBe('true');
     const direct = await extension.request(taskStart, { featureId: 'copy', tabId: 1 });
     expect(direct).toEqual(
-      err<AppError>(appError('unavailable', '이 탭에서 자막 저장 진행 중이다. 끝난 뒤 다시 한다.')),
+      err({
+        ...appError('unavailable', '이 탭에서 자막 저장 진행 중이다. 끝난 뒤 다시 한다.'),
+        answered: true,
+      }),
     );
     expect(records(extension.session)).toEqual({
       '1': { id: 'task-1', featureId: 'save', status: 'running' },

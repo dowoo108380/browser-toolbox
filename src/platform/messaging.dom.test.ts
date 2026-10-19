@@ -72,6 +72,41 @@ describe('요청 보내기(chromeRequester)', () => {
     if (!result.ok) expect(result.error.kind).toBe('timeout');
   });
 
+  it('결정 0036 받는 쪽이 실패로 답한 것만 answered이고, 이쪽에서 만든 실패는 오류 종류가 같아도 answered가 아니다', async () => {
+    vi.useFakeTimers();
+    const answer = (kind: string) => () =>
+      Promise.resolve({ ok: false, error: { kind, message: '받는 쪽의 실패' } });
+    const cases: readonly (readonly [string, () => Promise<unknown>, string, boolean])[] = [
+      ['platform으로 답함', answer('platform'), 'platform', true],
+      ['timeout으로 답함', answer('timeout'), 'timeout', true],
+      ['unexpected로 답함', answer('unexpected'), 'unexpected', true],
+      ['제한 시간 안에 답이 없음', () => new Promise(() => undefined), 'timeout', false],
+      ['응답 형식이 틀림', () => Promise.resolve({ ok: true, value: 3 }), 'unexpected', false],
+      ['응답 없이 끝남', () => Promise.resolve(undefined), 'unexpected', false],
+      [
+        '보내지 못함',
+        () => Promise.reject(new Error('Could not establish connection.')),
+        'platform',
+        false,
+      ],
+    ];
+    for (const [name, send, kind, answered] of cases) {
+      fakeChrome(send);
+      const pending = chromeRequester()(storageEnsureReady, {});
+      await vi.advanceTimersByTimeAsync(5000 + disconnectSettleMs);
+      expect({ name, result: await pending }).toMatchObject({
+        name,
+        result: { ok: false, error: { kind, answered } },
+      });
+    }
+    // 연결이 끊긴 옛 스크립트(보내지 않음).
+    vi.stubGlobal('chrome', {});
+    expect(await chromeRequester()(storageEnsureReady, {})).toMatchObject({
+      ok: false,
+      error: { kind: 'disconnected', answered: false },
+    });
+  });
+
   it('보내다 예외가 나면 결과 값(platform)으로 돌려주고 던지지 않는다', async () => {
     fakeChrome(() => Promise.reject(new Error('Could not establish connection.')));
     const result = await chromeRequester()(storageEnsureReady, {});

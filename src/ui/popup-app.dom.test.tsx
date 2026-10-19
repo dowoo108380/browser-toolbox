@@ -8,6 +8,7 @@ import {
   defineFeature,
   v,
 } from '../contracts/index.ts';
+import type { RequestError } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type {
   RepairNotice,
@@ -44,7 +45,13 @@ const feature = defineFeature({
 });
 
 const off: Snapshot = { features: new Map([['sample', { enabled: false }]]), sites: new Map() };
-const saveFailed = appError('platform', '설정을 저장하지 못했다. 저장된 설정은 바뀌지 않았다.');
+// 설정 바꾸기의 결과. 실패에는 서비스 워커가 그 실패로 답했는지가 있다(결정 0036).
+type Saved = Result<{ readonly revision: number }, RequestError>;
+// 서비스 워커가 저장하지 못했다고 답한 실패.
+const saveFailed: RequestError = {
+  ...appError('platform', '설정을 저장하지 못했다. 저장된 설정은 바뀌지 않았다.'),
+  answered: true,
+};
 
 // 범주가 여럿인 기능 목록. YouTube 범주에는 기능이 없다.
 function toggleFeature(id: string, category: Category, name: string): FeatureDefinition {
@@ -101,7 +108,7 @@ interface Options {
   readonly features?: readonly FeatureDefinition[];
   readonly uiParts?: readonly FeatureUiPart[];
   readonly wake?: () => Promise<Result<unknown, AppError>>;
-  readonly update?: () => Promise<Result<{ readonly revision: number }, AppError>>;
+  readonly update?: () => Promise<Saved>;
   // 지난번 범주를 읽는 함수. 없으면 남긴 범주가 없다.
   readonly readRemembered?: () => Promise<Category | null>;
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
@@ -1010,7 +1017,7 @@ describe('결정 0030 기능의 화면 조각', () => {
   });
 
   it('COM-3 기대 동작 3 결정 0037 정한 값은 보이는 값과 다를 때만 그 기능의 설정 바꾸기로 보내고, 보이는 설정이 그 저장을 담을 때까지 보이며, 실패하면 알리고 저장된 값으로 돌아간다', async () => {
-    let result: Result<{ readonly revision: number }, AppError> = ok({ revision: 7 });
+    let result: Saved = ok({ revision: 7 });
     const popup = await show({
       features: [sized],
       uiParts: [sizedPart],
@@ -1039,7 +1046,7 @@ describe('결정 0030 기능의 화면 조각', () => {
   });
 
   it('COM-3 기대 동작 3 결정 0037 조각이 사라졌다 다시 그려져도(다른 범주로 갔다 돌아옴) 팝업이 정한 값과 보낸 저장을 기억해, 응답을 기다리는 값을 보이고 되돌린 값도 보낸다', async () => {
-    const answers: ((value: Result<{ readonly revision: number }, AppError>) => void)[] = [];
+    const answers: ((value: Saved) => void)[] = [];
     const popup = await show({
       features: [sized, toggleFeature('hide', 'page', '숨김 기능')],
       uiParts: [sizedPart],
@@ -1072,7 +1079,7 @@ describe('결정 0030 기능의 화면 조각', () => {
   });
 
   it('결정 0037 다시 그리기 전에 잇달아 정하거나 응답이 와도 앞의 바꿈 위에서 판단한다', async () => {
-    const answers: ((value: Result<{ readonly revision: number }, AppError>) => void)[] = [];
+    const answers: ((value: Saved) => void)[] = [];
     const popup = await show({
       features: [sized],
       uiParts: [sizedPart],
@@ -1123,7 +1130,7 @@ describe('결정 0030 기능의 화면 조각', () => {
   });
 
   it('결정 0036 결정 0037 조각이 그려져 있지 않은 동안 기본값으로 대신 쓰게 되어도 응답을 기다리던 저장을 잊고, 그 늦은 응답은 버린다', async () => {
-    const answers: ((value: Result<{ readonly revision: number }, AppError>) => void)[] = [];
+    const answers: ((value: Saved) => void)[] = [];
     const popup = await show({
       features: [sized, toggleFeature('hide', 'page', '숨김 기능')],
       uiParts: [sizedPart],
@@ -1149,6 +1156,86 @@ describe('결정 0030 기능의 화면 조각', () => {
       popup.tab('미디어').click();
     });
     expect(text('.size')).toBe('3');
+  });
+
+  // 저장이 실패로 끝난 방법(결정 0036): 서비스 워커가 저장하지 않았다고 답함, 답을 받지 못함, 처리기가 예상하지 못한 오류로 끝남.
+  const noAnswer: RequestError = {
+    ...appError('timeout', '확장의 응답이 없다. 잠시 뒤 다시 한다.'),
+    answered: false,
+  };
+  const crashed: RequestError = {
+    ...appError('unexpected', '확장 안에서 예상하지 못한 오류가 났다.'),
+    answered: true,
+  };
+  const failures = [
+    { failure: saveFailed, name: '저장하지 않았다고 답함', resend: false },
+    { failure: noAnswer, name: '답을 받지 못함', resend: true },
+    { failure: crashed, name: '예상하지 못한 오류로 답함', resend: true },
+  ] as const;
+
+  it('COM-3 기대 동작 3 결정 0036 저장이 실패하면 알리고 저장된 값을 보이며, 서비스 워커가 저장하지 않았다고 답했으면 같은 값을 보내지 않고, 답을 받지 못했거나 예상하지 못한 오류로 끝났으면 그 뒤에 보낸 저장이 될 때까지 보낸다', async () => {
+    for (const { failure, name, resend } of failures) {
+      let result: Saved = err(failure);
+      const popup = await show({
+        features: [sized],
+        uiParts: [sizedPart],
+        update: () => Promise.resolve(result),
+      });
+      await popup.awake();
+      await sizeTo(5);
+      await settle();
+      expect({ name, size: text('.size'), status: popup.status() }).toEqual({
+        name,
+        size: '3',
+        status: failure.message,
+      });
+      result = ok({ revision: 2 });
+      await sizeTo(3);
+      expect({ name, sent: popup.updates.mock.calls.length }).toEqual({
+        name,
+        sent: resend ? 2 : 1,
+      });
+      if (resend) {
+        await settle();
+        await popup.apply(sizedSettings(3), 2);
+        await sizeTo(3);
+        expect(popup.updates).toHaveBeenCalledTimes(2);
+      }
+      render(null, container);
+    }
+  });
+
+  it('결정 0036 결정 0037 조각이 그려져 있지 않은 동안 저장이 실패로 끝나도 기억에 담겨, 다시 그린 조각은 저장된 값을 보이고 알 수 없게 끝났을 때만 같은 값을 보낸다', async () => {
+    for (const { failure, name, resend } of failures) {
+      const answers: ((value: Saved) => void)[] = [];
+      const popup = await show({
+        features: [sized, toggleFeature('hide', 'page', '숨김 기능')],
+        uiParts: [sizedPart],
+        update: () =>
+          new Promise((resolve) => {
+            answers.push(resolve);
+          }),
+      });
+      await popup.awake();
+      await sizeTo(5);
+      await act(() => {
+        popup.tab('페이지').click();
+      });
+      await act(async () => {
+        answers[0]?.(err(failure));
+        for (let step = 0; step < 5; step += 1) await Promise.resolve();
+      });
+      await act(() => {
+        popup.tab('미디어').click();
+      });
+      expect({ name, size: text('.size') }).toEqual({ name, size: '3' });
+      await sizeTo(3);
+      expect({ name, sent: popup.updates.mock.calls.length }).toEqual({
+        name,
+        sent: resend ? 2 : 1,
+      });
+      render(null, container);
+    }
   });
 });
 

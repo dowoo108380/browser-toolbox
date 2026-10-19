@@ -6,7 +6,7 @@ import type {
   TabStatus,
   ToggleFeature,
 } from '../contracts/index.ts';
-import type { PopupAnnouncement } from '../platform/index.ts';
+import type { PopupAnnouncement, RequestError } from '../platform/index.ts';
 import { type AppError, type Result, appError, err } from '../shared/index.ts';
 import {
   type RepairNotice,
@@ -25,7 +25,15 @@ import { ActionItem } from './action-item.tsx';
 import { unavailableReason } from './availability.ts';
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
-import { type Choices, accepted, answered, chose, chosenValues, noChoices } from './choices.ts';
+import {
+  type Choices,
+  type Ending,
+  accepted,
+  answered,
+  chose,
+  chosenValues,
+  noChoices,
+} from './choices.ts';
 import { FeatureItem } from './feature-item.tsx';
 import type { FeatureUiPart } from './part.ts';
 import { SearchBox, SearchResults } from './feature-search.tsx';
@@ -48,11 +56,11 @@ interface PopupProps {
   readonly watchRepairs: (handlers: RepairNoticeHandlers) => () => void;
   // 서비스 워커를 깨운다. 응답이 오면 깨어 있는 것이다.
   readonly wake: () => Promise<Result<unknown, AppError>>;
-  // 설정을 바꾼다. 저장하면 저장한 값의 세대 번호(revision)를 준다.
+  // 설정을 바꾼다. 저장하면 저장한 값의 세대 번호(revision)를 준다. 실패에는 서비스 워커가 그 실패로 답했는지가 있다.
   readonly update: (
     featureId: string,
     patch: Readonly<Record<string, unknown>>,
-  ) => Promise<Result<{ readonly revision: number }, AppError>>;
+  ) => Promise<Result<{ readonly revision: number }, RequestError>>;
   // 사용자가 본 복구 알림(stamp)을 확인했다고 서비스 워커에 알린다.
   readonly dismissRepair: (stamp: number) => Promise<Result<unknown, AppError>>;
   // 지난번에 고른 범주. 없거나 읽지 못하면 null이다(결정 0023).
@@ -338,14 +346,17 @@ export function PopupApp({
   }, [wake]);
 
   // 화면은 저장된 값을 보인다. 저장에 실패하면 알리고, 스위치와 화면 조각은 저장된 값으로 돌아간다(COM-3 기대 동작 3).
-  // 거절하지 않고, 저장했으면 저장한 값의 세대 번호를, 못 했으면 null을 돌려준다.
+  // 거절하지 않고, 그 저장이 끝난 방법을 돌려준다(결정 0036). 서비스 워커가 unexpected가 아닌 실패로 답했으면 저장하지 않은
+  // 것이다(settings.update의 계약). 답을 받지 못했거나(시간 초과, 응답 형식이 어긋남, 보내지 못함, 연결이 끊김) 처리기가 예상하지
+  // 못한 오류로 끝났으면(unexpected) 어디까지 했는지 모르므로 알 수 없다.
   const save = async (
     featureId: string,
     patch: Readonly<Record<string, unknown>>,
-  ): Promise<number | null> => {
+  ): Promise<Ending> => {
     const result = await update(featureId, patch);
     setNotice(result.ok ? null : { message: result.error.message });
-    return result.ok ? result.value.revision : null;
+    if (result.ok) return result.value.revision;
+    return result.error.answered && result.error.kind !== 'unexpected' ? 'unwritten' : 'unknown';
   };
 
   // 화면 조각이 그 기능의 값을 정했다. 칸에 보이는 값과 다르면 저장을 보내고, 응답은 조각이 그려져 있지 않아도 기억에
@@ -358,8 +369,8 @@ export function PopupApp({
     const chosen = chose(latestChoices.current, feature.id, settingsOf(settings, feature), patch);
     if (chosen === null) return;
     setChoices(chosen.choices);
-    void save(feature.id, patch).then((written) => {
-      setChoices(answered(latestChoices.current, chosen.sent, written));
+    void save(feature.id, patch).then((ending) => {
+      setChoices(answered(latestChoices.current, chosen.sent, ending));
     });
   };
 

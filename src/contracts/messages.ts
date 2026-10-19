@@ -31,6 +31,9 @@ export function responseSchema<Value>(value: v.Schema<Value>) {
   ]);
 }
 
+// 기능 하나의 설정을 바꾼다. 저장하면 저장한 값의 세대 번호로 답한다. unexpected가 아닌 실패로 답하면 저장하지 않은 것이다:
+// 쓰기는 마지막 한 번이고(결정 0011) 그런 실패는 그 전이나 그 쓰기에서만 돌려준다. unexpected(처리기가 예상하지 못한 오류로
+// 끝남)는 어디까지 했는지 모르므로 저장했을 수도 있다(팝업은 알 수 없음으로 본다, 결정 0036).
 export const settingsUpdate = defineRequest({
   type: 'settings.update',
   // 바꿀 필드만 보낸다. 두 화면이 같은 기능의 다른 필드를 함께 바꿔도 둘 다 남는다(COM-3.6).
