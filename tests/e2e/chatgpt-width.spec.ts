@@ -365,6 +365,55 @@ test('GPT-2.1 COM-2.5 결정 0030 팝업의 숫자 칸으로 키보드만 써서
   });
 });
 
+test('결정 0037 숫자 칸에 쓰다가 다른 범주나 검색 칸을 누르거나 Ctrl+K를 누르면 칸이 없어지기 전에 쓴 값을 정해 저장하고, 돌아오면 그 값이다', async ({
+  context,
+  extensionId,
+}) => {
+  // 칸이 없어지기 전에 Chromium이 change를 내는지(초점이 옮겨 가는 때) 실제 입력으로 본다. 팝업은 범주를 바꾸거나 검색하면
+  // 너비 칸을 없앴다가 돌아오면 다시 만든다.
+  const worker = await serviceWorkerOf(context);
+  const { page } = await openChatgpt(context, signedOut, '/c/abc');
+  const { popup } = await popupOn(context, extensionId, page);
+  const field = popup.getByRole('spinbutton', { name: '최대 너비(px)' });
+  const search = popup.getByRole('combobox', { name: '기능 검색' });
+  const storedWidth = () =>
+    worker.evaluate(async () => {
+      const { settings }: Record<string, unknown> = await chrome.storage.local.get('settings');
+      return settings;
+    });
+  const write = async (text: string) => {
+    await field.focus();
+    await popup.keyboard.press('Control+A');
+    await popup.keyboard.type(text);
+  };
+  const saved = (width: number) =>
+    expect.poll(storedWidth).toMatchObject({ features: { 'chatgpt-width': { width } } });
+
+  await write('1400');
+  await popup.getByRole('tab', { name: '미디어' }).click();
+  await expect(field).toHaveCount(0);
+  await saved(1400);
+  await popup.getByRole('tab', { name: 'ChatGPT' }).click();
+  await expect(field).toHaveValue('1400');
+
+  await write('1500');
+  await search.click();
+  await popup.keyboard.type('너비');
+  await expect(field).toHaveCount(0);
+  await saved(1500);
+  await popup.keyboard.press('Escape');
+  await expect(field).toHaveValue('1500');
+
+  await write('1600');
+  await popup.keyboard.press('Control+KeyK');
+  await expect(search).toBeFocused();
+  await popup.keyboard.type('너비');
+  await expect(field).toHaveCount(0);
+  await saved(1600);
+  await popup.keyboard.press('Escape');
+  await expect(field).toHaveValue('1600');
+});
+
 test('결정 0031 대화 열이 없는 대화 화면에서 15초가 되기 전에 새 대화로 가면 대화 열을 찾지 않아 찾지 못함이 되지 않는다', async ({
   context,
   extensionId,

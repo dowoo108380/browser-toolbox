@@ -9,6 +9,7 @@
     "src/storage/**/*.ts",
     "src/features/*/core/**/*.ts",
     "src/page/lifecycle.ts",
+    "src/ui/choices.ts",
     "!src/**/*.test.ts",
     "!src/**/index.ts"
   ],

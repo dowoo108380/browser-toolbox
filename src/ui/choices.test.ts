@@ -1,0 +1,194 @@
+import { describe, expect, it } from 'vitest';
+import { type Sent, accepted, answered, chose, chosenValues, noChoices } from './choices.ts';
+
+// 화면 조각이 정한 값과 그 저장의 기억(결정 0036, 0037). 팝업 없이 너비 칸 하나를 흉내 낸다: 읽기 도우미가 받아들인
+// 너비와 그 세대 번호, 칸이 정한 값, 저장의 응답(저장한 값의 세대 번호, 못 했으면 null)은 시험이 정한 차례로 온다.
+
+const featureId = 'chatgpt-width';
+
+function field(width = 1200, revision: number | null = 1) {
+  let choices = accepted(noChoices, revision);
+  let stored = { enabled: true, width };
+  const sent: Sent[] = [];
+  return {
+    // 칸에 보이는 너비.
+    shown: () => chosenValues(choices, featureId).get('width') ?? stored.width,
+    // 너비를 정한다. 저장을 보냈으면 참이다.
+    choose: (next: number) => {
+      const result = chose(choices, featureId, stored, { width: next });
+      if (result === null) return false;
+      choices = result.choices;
+      sent.push(result.sent);
+      return true;
+    },
+    // index번째로 보낸 저장의 응답이 온다.
+    answer: (index: number, written: number | null) => {
+      const which = sent[index];
+      if (which === undefined) throw new Error(`${String(index)}번째 저장이 없다.`);
+      choices = answered(choices, which, written);
+    },
+    // 읽기 도우미가 저장된 너비(없으면 기본값)와 그 세대 번호를 받아들였다(null이면 기본값으로 대신 씀).
+    accept: (next: number | undefined, at: number | null) => {
+      stored = { enabled: true, width: next ?? 1200 };
+      choices = accepted(choices, at);
+    },
+    sent: () => sent.map(({ patch }) => patch),
+  };
+}
+
+describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', () => {
+  it('보이는 값과 다른 값만 보내고, 응답을 기다리는 동안과 보이는 설정이 그 저장을 담기 전까지 정한 값을 보인다', () => {
+    const width = field(1200, 1);
+    expect(width.choose(1200)).toBe(false);
+    expect(width.choose(1500)).toBe(true);
+    expect(width.shown()).toBe(1500);
+    // 정한 값과 같은 값은 다시 보내지 않는다.
+    expect(width.choose(1500)).toBe(false);
+    width.answer(0, 2);
+    expect(width.shown()).toBe(1500);
+    width.accept(1500, 2);
+    expect(width.shown()).toBe(1500);
+    expect(width.choose(1500)).toBe(false);
+    // 저장이 담긴 뒤 다른 화면이 바꾼 값은 따른다.
+    width.accept(1800, 3);
+    expect(width.shown()).toBe(1800);
+    expect(width.sent()).toEqual([{ width: 1500 }]);
+  });
+
+  it('COM-3 기대 동작 3 저장 응답을 기다리는 동안 바꿨다가 되돌리면 되돌린 값도 보내고, 앞 저장이 먼저 담겨도 마지막으로 정한 값을 보인다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    expect(width.choose(1200)).toBe(true);
+    expect(width.shown()).toBe(1200);
+
+    width.answer(0, 2);
+    width.accept(1500, 2);
+    expect(width.shown()).toBe(1200);
+    expect(width.choose(1200)).toBe(false);
+
+    // 마지막 응답이 와도 보이는 설정(세대 2)이 마지막 저장(세대 3)을 담기 전에는 정한 값이다.
+    width.answer(1, 3);
+    expect(width.shown()).toBe(1200);
+    width.accept(1200, 3);
+    expect(width.shown()).toBe(1200);
+    width.accept(1800, 4);
+    expect(width.shown()).toBe(1800);
+    expect(width.sent()).toEqual([{ width: 1500 }, { width: 1200 }]);
+  });
+
+  it('COM-3 기대 동작 3 저장이 바뀜 알림까지 온 뒤 응답이 늦는 사이 다른 화면이 바꾸면, 마지막 응답 때 최신 저장값을 보이고 앞에 정한 값을 다시 정하면 보낸다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.accept(1500, 2);
+    width.accept(1800, 3);
+    expect(width.shown()).toBe(1500);
+
+    width.answer(0, 2);
+    expect(width.shown()).toBe(1800);
+    expect(width.choose(1500)).toBe(true);
+  });
+
+  it('COM-3 기대 동작 3 저장 응답이 바뀜 알림보다 먼저 오면 그 알림까지 정한 값을 보이고, 그보다 먼저 쓰인 다른 화면의 값에는 흔들리지 않는다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    // 다른 화면이 1800을 먼저 썼고(세대 2) 이 칸의 저장이 그 뒤에 저장되었다(세대 3).
+    width.answer(0, 3);
+    expect(width.shown()).toBe(1500);
+    width.accept(1800, 2);
+    expect(width.shown()).toBe(1500);
+    // 그사이 보이는 설정과 같은 값으로 되돌려도 보낸다.
+    expect(width.choose(1800)).toBe(true);
+    width.answer(1, 4);
+    width.accept(1500, 3);
+    expect(width.shown()).toBe(1800);
+    width.accept(1800, 4);
+    expect(width.shown()).toBe(1800);
+    expect(width.choose(1800)).toBe(false);
+  });
+
+  it('응답의 차례가 바뀌어도(뒤 저장의 응답이 먼저) 세대 번호가 가장 큰 저장이 담길 때까지 그 값을 보인다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.choose(1300);
+    width.answer(1, 3);
+    width.answer(0, 2);
+    expect(width.shown()).toBe(1300);
+    width.accept(1500, 2);
+    expect(width.shown()).toBe(1300);
+    width.accept(1300, 3);
+    expect(width.shown()).toBe(1300);
+    width.accept(1800, 4);
+    expect(width.shown()).toBe(1800);
+  });
+
+  it('COM-3 기대 동작 3 앞 저장이 실패해도 그 뒤에 정한 값을 보이고, 마지막 저장이 실패하면 저장된 값으로 돌아간다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.choose(1600);
+    width.answer(0, null);
+    expect(width.shown()).toBe(1600);
+    width.answer(1, null);
+    expect(width.shown()).toBe(1200);
+    expect(width.choose(1200)).toBe(false);
+  });
+
+  it('COM-3 기대 동작 3 마지막 저장이 실패하면, 앞 저장이 아직 담기지 않았을 때는 그 값으로, 담겼으면 저장된 값으로 돌아간다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.choose(1600);
+    width.answer(0, 2);
+    width.answer(1, null);
+    expect(width.shown()).toBe(1500);
+    width.accept(1500, 2);
+    expect(width.shown()).toBe(1500);
+    width.accept(1700, 3);
+    expect(width.shown()).toBe(1700);
+  });
+
+  it('기본값으로 대신 쓰는 동안(세대 번호 없음)은 저장된 값을 보이고, 그 뒤 고쳐 쓴 값의 세대 번호가 앞 저장보다 작아도 따른다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.answer(0, 2);
+    expect(width.shown()).toBe(1500);
+    width.accept(undefined, null);
+    expect(width.shown()).toBe(1200);
+    // 시계가 뒤로 간 채 고쳐 쓴 값(세대 1).
+    width.accept(1300, 1);
+    expect(width.shown()).toBe(1300);
+  });
+
+  it('기능과 설정 항목마다 따로 센다. 정한 값 가운데 하나라도 보이는 값과 다르면 함께 보낸다', () => {
+    let choices = accepted(noChoices, 1);
+    const stored = { enabled: true, width: 1200, size: 3 };
+    const first = chose(choices, 'a', stored, { width: 1500 });
+    if (first === null) throw new Error('보내야 한다.');
+    choices = first.choices;
+    expect(chosenValues(choices, 'a')).toEqual(new Map([['width', 1500]]));
+    // 다른 기능과 다른 설정 항목은 저장된 값을 보인다.
+    expect(chosenValues(choices, 'b')).toEqual(new Map());
+    expect(chose(choices, 'b', stored, { width: 1200 })).toBeNull();
+
+    // 같은 값(width)과 다른 값(size)을 함께 정하면 둘 다 보낸다.
+    const both = chose(choices, 'a', stored, { width: 1500, size: 4 });
+    expect(both?.sent).toEqual({ featureId: 'a', patch: { width: 1500, size: 4 } });
+    if (both === null) throw new Error('보내야 한다.');
+    choices = answered(both.choices, first.sent, 2);
+    expect(chosenValues(choices, 'a')).toEqual(
+      new Map([
+        ['width', 1500],
+        ['size', 4],
+      ]),
+    );
+    choices = answered(choices, both.sent, 3);
+    choices = accepted(choices, 2);
+    // 세대 2는 첫 저장(width)만 담았다. 둘째 저장(세대 3)의 두 값은 아직 보인다.
+    expect(chosenValues(choices, 'a')).toEqual(
+      new Map([
+        ['width', 1500],
+        ['size', 4],
+      ]),
+    );
+    choices = accepted(choices, 3);
+    expect(chosenValues(choices, 'a')).toEqual(new Map());
+  });
+});

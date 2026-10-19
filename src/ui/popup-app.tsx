@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ActionFeature, Category, FeatureDefinition, TabStatus } from '../contracts/index.ts';
+import type {
+  ActionFeature,
+  Category,
+  FeatureDefinition,
+  TabStatus,
+  ToggleFeature,
+} from '../contracts/index.ts';
 import type { PopupAnnouncement } from '../platform/index.ts';
 import { type AppError, type Result, appError, err } from '../shared/index.ts';
 import {
@@ -19,6 +25,7 @@ import { ActionItem } from './action-item.tsx';
 import { unavailableReason } from './availability.ts';
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
+import { type Choices, accepted, answered, chose, chosenValues, noChoices } from './choices.ts';
 import { FeatureItem } from './feature-item.tsx';
 import type { FeatureUiPart } from './part.ts';
 import { SearchBox, SearchResults } from './feature-search.tsx';
@@ -68,12 +75,6 @@ interface PopupProps {
   readonly announceTab: (tabId: number) => PopupAnnouncement;
 }
 
-// 읽기 도우미가 받아들인 설정과 그 세대 번호(결정 0036). 화면 조각이 자기 저장이 담겼는지 가른다.
-interface Stored {
-  readonly snapshot: Snapshot;
-  readonly revision: number | null;
-}
-
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
 // 팝업이 열려 있는 동안 그보다 짧은 간격으로 깨워, 오래 열어 둔 뒤 누르자마자 닫혀도 요청이 닿게 한다(N-12, R-23).
 export const keepAwakeIntervalMs = 20_000;
@@ -117,7 +118,7 @@ export function PopupApp({
   taskSeen,
   announceTab,
 }: PopupProps) {
-  const [stored, setStored] = useState<Stored | null>(null);
+  const [stored, setStored] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   // 서비스 워커가 깨어났는지(첫 깨우기의 응답을 받았는지). 그 전에는 스위치를 쓸 수 없다.
   // 깨어나는 중에 보낸 요청은 팝업이 곧바로 닫히면 닿지 않기 때문이다(N-12, R-23).
@@ -273,11 +274,23 @@ export function PopupApp({
     };
   }, []);
 
+  // 화면 조각이 정한 값과 보낸 저장의 기억(결정 0036, 0037). 조각은 범주를 바꾸거나 검색하면 사라졌다 다시 그려지므로 조각
+  // 안이 아니라 팝업이 열려 있는 동안 여기에 둔다. 응답과 알림은 앞의 바꿈을 그리기 전에 잇달아 올 수 있어, 바꿀 때는 늘 ref의
+  // 지금 값에서 시작하고 그리는 것은 상태로 둔다. ref와 상태 바꾸기 함수는 그리기마다 같은 것이라 처음 그릴 때 만든 처리기가
+  // 불러도 맞다.
+  const [choices, setChoicesState] = useState<Choices>(noChoices);
+  const latestChoices = useRef(choices);
+  const setChoices = (next: Choices) => {
+    latestChoices.current = next;
+    setChoicesState(next);
+  };
+
   useEffect(
     () =>
       subscribe({
         apply: (snapshot, revision) => {
-          setStored({ snapshot, revision });
+          setStored(snapshot);
+          setChoices(accepted(latestChoices.current, revision));
         },
         corrupt: (scope) => {
           setSeenRepair((previous) => mergeRepairs(previous, scope));
@@ -335,6 +348,21 @@ export function PopupApp({
     return result.ok ? result.value.revision : null;
   };
 
+  // 화면 조각이 그 기능의 값을 정했다. 칸에 보이는 값과 다르면 저장을 보내고, 응답은 조각이 그려져 있지 않아도 기억에
+  // 담는다(결정 0037).
+  const choose = (
+    feature: ToggleFeature,
+    settings: Snapshot,
+    patch: Readonly<Record<string, unknown>>,
+  ) => {
+    const chosen = chose(latestChoices.current, feature.id, settingsOf(settings, feature), patch);
+    if (chosen === null) return;
+    setChoices(chosen.choices);
+    void save(feature.id, patch).then((written) => {
+      setChoices(answered(latestChoices.current, chosen.sent, written));
+    });
+  };
+
   // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
   const run = async (feature: ActionFeature) => {
     if (tabId === null) return;
@@ -354,7 +382,7 @@ export function PopupApp({
     (feature.content === null || tabState !== undefined);
 
   // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치(와 그 기능의 화면 조각), 실행은 단추다.
-  const itemOf = (feature: FeatureDefinition, { snapshot: settings, revision }: Stored) => {
+  const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
     switch (feature.kind) {
       case 'toggle': {
         const part = uiParts.find((candidate) => candidate.featureId === feature.id);
@@ -372,9 +400,11 @@ export function PopupApp({
               part === undefined
                 ? null
                 : part.render(settings, {
-                    revision,
+                    chosen: chosenValues(choices, feature.id),
                     disabled: !awake,
-                    save: (patch) => save(feature.id, patch),
+                    choose: (patch) => {
+                      choose(feature, settings, patch);
+                    },
                   })
             }
           />

@@ -1,5 +1,4 @@
 import { render } from 'preact';
-import { useState } from 'preact/hooks';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -949,49 +948,50 @@ describe('결정 0030 기능의 화면 조각', () => {
       defaults: { enabled: false, size: 3 },
     },
   });
-  // 저장된 크기와 그 세대 번호를 보이고, 누르면 크기 5를 저장하며 저장한 세대 번호(못 했으면 null)를 보이는 조각.
-  const sizedPart = defineUiPart(sized, ({ settings, revision, disabled, save }) => {
-    const [saved, setSaved] = useState<number | null | undefined>(undefined);
-    return (
-      <div class="controls">
-        <span class="size">{settings.size}</span>
-        <span class="revision">{String(revision)}</span>
+  // 보일 크기를 보이고, 누르면 그 크기를 정하는 단추 둘(3, 5)이 있는 조각.
+  const sizedPart = defineUiPart(sized, ({ settings, disabled, choose }) => (
+    <div class="controls">
+      <span class="size">{settings.size}</span>
+      {[3, 5].map((size) => (
         <button
           type="button"
+          key={size}
+          data-size={size}
           disabled={disabled}
           onClick={() => {
-            void save({ size: 5 }).then(setSaved);
+            choose({ size });
           }}
         >
-          5로
+          {size}로
         </button>
-        <span class="saved">{String(saved)}</span>
-      </div>
-    );
-  });
+      ))}
+    </div>
+  ));
   const text = (selector: string) => container.querySelector(selector)?.textContent;
-  const button = () => {
-    const found = container.querySelector<HTMLButtonElement>('.controls button');
-    if (found === null) throw new Error('조각의 단추가 없다.');
-    return found;
-  };
+  const sizeTo = (size: number) =>
+    act(() => {
+      const found = container.querySelector<HTMLButtonElement>(
+        `.controls [data-size="${String(size)}"]`,
+      );
+      if (found === null) throw new Error('조각의 단추가 없다.');
+      found.click();
+    });
+  const sizedSettings = (size: number): Snapshot => ({
+    features: new Map([['sized', { enabled: false, size }]]),
+    sites: new Map(),
+  });
 
   it('그 기능 항목의 설명 아래에 그 기능의 저장된 설정(없으면 기본값)으로 그린다', async () => {
     const popup = await show({ features: [sized, feature], uiParts: [sizedPart] });
     const item = container.querySelector('[data-feature="sized"]')?.closest('li');
     expect(item?.querySelector('.description + .controls')).not.toBeNull();
     expect(text('.size')).toBe('3');
-    expect(text('.revision')).toBe('1');
     // 조각이 없는 기능에는 아무것도 붙지 않는다.
     expect(container.querySelectorAll('.controls')).toHaveLength(1);
-    // 결정 0036 읽기 도우미가 받아들인 설정의 세대 번호도 함께 준다(기본값으로 대신 쓰면 null).
-    await popup.apply(
-      { features: new Map([['sized', { enabled: false, size: 8 }]]), sites: new Map() },
-      9,
-    );
-    expect([text('.size'), text('.revision')]).toEqual(['8', '9']);
+    await popup.apply(sizedSettings(8), 9);
+    expect(text('.size')).toBe('8');
     await popup.apply({ features: new Map(), sites: new Map() }, null);
-    expect([text('.size'), text('.revision')]).toEqual(['3', 'null']);
+    expect(text('.size')).toBe('3');
   });
 
   it('N-12 서비스 워커가 깨어나기 전에는 조각의 조작도 막는다', async () => {
@@ -1001,15 +1001,15 @@ describe('결정 0030 기능의 화면 조각', () => {
       uiParts: [sizedPart],
       wake: () => new Promise((resolve) => (wake = resolve)),
     });
-    expect(button().disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('.controls button')?.disabled).toBe(true);
     await act(() => {
       wake(ok(null));
     });
     await popup.awake();
-    expect(button().disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('.controls button')?.disabled).toBe(false);
   });
 
-  it('COM-3 기대 동작 3 결정 0036 저장은 그 기능의 설정 바꾸기로 가고, 저장한 세대 번호(못 했으면 null)를 조각에 돌려주며, 실패하면 알린다', async () => {
+  it('COM-3 기대 동작 3 결정 0037 정한 값은 보이는 값과 다를 때만 그 기능의 설정 바꾸기로 보내고, 보이는 설정이 그 저장을 담을 때까지 보이며, 실패하면 알리고 저장된 값으로 돌아간다', async () => {
     let result: Result<{ readonly revision: number }, AppError> = ok({ revision: 7 });
     const popup = await show({
       features: [sized],
@@ -1017,23 +1017,108 @@ describe('결정 0030 기능의 화면 조각', () => {
       update: () => Promise.resolve(result),
     });
     await popup.awake();
-    await act(() => {
-      button().click();
-    });
-    expect(popup.updates).toHaveBeenLastCalledWith('sized', { size: 5 });
-    await vi.waitFor(() => {
-      expect(text('.saved')).toBe('7');
-    });
+    await sizeTo(3);
+    expect(popup.updates).not.toHaveBeenCalled();
+    await sizeTo(5);
+    expect(popup.updates.mock.calls).toEqual([['sized', { size: 5 }]]);
+    await settle();
+    // 저장했지만(세대 7) 보이는 설정(세대 1)이 아직 담지 않았다.
+    expect(text('.size')).toBe('5');
     expect(popup.status()).toBeUndefined();
+    await sizeTo(5);
+    expect(popup.updates).toHaveBeenCalledTimes(1);
+    await popup.apply(sizedSettings(5), 7);
+    expect(text('.size')).toBe('5');
 
     result = err(saveFailed);
-    await act(() => {
-      button().click();
-    });
-    await vi.waitFor(() => {
-      expect(text('.saved')).toBe('null');
-    });
+    await sizeTo(3);
+    expect(popup.updates).toHaveBeenLastCalledWith('sized', { size: 3 });
+    await settle();
     expect(popup.status()).toBe(saveFailed.message);
+    expect(text('.size')).toBe('5');
+  });
+
+  it('COM-3 기대 동작 3 결정 0037 조각이 사라졌다 다시 그려져도(다른 범주로 갔다 돌아옴) 팝업이 정한 값과 보낸 저장을 기억해, 응답을 기다리는 값을 보이고 되돌린 값도 보낸다', async () => {
+    const answers: ((value: Result<{ readonly revision: number }, AppError>) => void)[] = [];
+    const popup = await show({
+      features: [sized, toggleFeature('hide', 'page', '숨김 기능')],
+      uiParts: [sizedPart],
+      update: () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        }),
+    });
+    await popup.awake();
+    await sizeTo(5);
+    await act(() => {
+      popup.tab('페이지').click();
+    });
+    expect(container.querySelector('.controls')).toBeNull();
+    // 칸이 없는 동안 온 응답도 기억에 담긴다.
+    await act(() => {
+      answers[0]?.(ok({ revision: 2 }));
+    });
+    await act(() => {
+      popup.tab('미디어').click();
+    });
+    expect(text('.size')).toBe('5');
+    await sizeTo(3);
+    expect(popup.updates.mock.calls).toEqual([
+      ['sized', { size: 5 }],
+      ['sized', { size: 3 }],
+    ]);
+    expect(text('.size')).toBe('3');
+  });
+
+  it('결정 0037 다시 그리기 전에 잇달아 정하거나 응답이 와도 앞의 바꿈 위에서 판단한다', async () => {
+    const answers: ((value: Result<{ readonly revision: number }, AppError>) => void)[] = [];
+    const popup = await show({
+      features: [sized],
+      uiParts: [sizedPart],
+      update: () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        }),
+    });
+    await popup.awake();
+    // act는 끝날 때 한 번 그린다. 두 번째 단추는 첫 번째로 정한 값(5)이 그려지기 전에 눌린다.
+    const button = (size: number) =>
+      container.querySelector<HTMLButtonElement>(`.controls [data-size="${String(size)}"]`);
+    await act(() => {
+      button(5)?.click();
+      button(3)?.click();
+    });
+    expect(popup.updates.mock.calls).toEqual([
+      ['sized', { size: 5 }],
+      ['sized', { size: 3 }],
+    ]);
+    await act(async () => {
+      answers[0]?.(ok({ revision: 2 }));
+      answers[1]?.(ok({ revision: 3 }));
+      for (let step = 0; step < 5; step += 1) await Promise.resolve();
+    });
+    // 두 응답이 모두 담겼다. 보이는 설정이 마지막 저장(세대 3)을 담으면 그 뒤로는 저장된 값을 따른다.
+    expect(text('.size')).toBe('3');
+    await popup.apply(sizedSettings(3), 3);
+    await popup.apply(sizedSettings(8), 4);
+    expect(text('.size')).toBe('8');
+  });
+
+  it('결정 0036 읽기 도우미가 기본값으로 대신 쓰면(세대 번호 없음) 저장한 것을 잊고 저장된 값을 보인다', async () => {
+    const popup = await show({
+      features: [sized],
+      uiParts: [sizedPart],
+      update: () => Promise.resolve(ok({ revision: 2 })),
+    });
+    await popup.awake();
+    await sizeTo(5);
+    await settle();
+    expect(text('.size')).toBe('5');
+    await popup.apply({ features: new Map(), sites: new Map() }, null);
+    expect(text('.size')).toBe('3');
+    // 시계가 뒤로 간 채 고쳐 쓴 값(세대 1)도 따른다.
+    await popup.apply(sizedSettings(4), 1);
+    expect(text('.size')).toBe('4');
   });
 });
 

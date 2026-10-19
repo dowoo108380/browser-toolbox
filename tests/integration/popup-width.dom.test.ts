@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { settingsUpdate } from '../../src/contracts/index.ts';
 import { chatgptWidth } from '../../src/features/chatgpt-width/feature.ts';
 import { ui } from '../../src/features/chatgpt-width/ui.tsx';
+import { mediaSpeed } from '../../src/features/media-speed/feature.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import type { KeyValueStore } from '../../src/platform/index.ts';
 import { settingsKey } from '../../src/storage/index.ts';
@@ -13,7 +14,11 @@ import { renderTestPopup, switchOf } from '../support/popup.ts';
 // 팝업에서 GPT-2의 너비를 정하는 길(결정 0030)을 실제 모듈끼리 연결해 본다. 팝업, GPT-2의 숫자 칸, 서비스 워커(라우터,
 // 설정 쓰기), 읽기 도우미는 실제 코드이고, 가짜는 저장소와 메시지 통로뿐이다. 통로가 설정 바꾸기나 그 응답을, 팝업이 듣는
 // 저장소가 바뀜 알림을 붙잡아, 저장의 응답과 바뀜 알림이 늦거나 다른 차례로 오는 동안의 조작을 본다. 다른 화면(다른 팝업,
-// 설정 페이지)의 저장은 같은 서비스 워커에 붙잡지 않고 보낸다.
+// 설정 페이지)의 저장은 같은 서비스 워커에 붙잡지 않고 보낸다. 기능은 실제 팝업처럼 미디어와 ChatGPT 범주에 하나씩 있다.
+
+// 서비스 워커의 시계가 시작하는 시각(ms).
+const startTime = 1_790_000_000_000;
+const features = [mediaSpeed, chatgptWidth];
 
 const containers: HTMLElement[] = [];
 
@@ -31,6 +36,13 @@ async function settle() {
   });
 }
 
+// 팝업이 너비 칸을 없앴다가 다시 만드는 길: 다른 범주로 갔다 돌아옴, 검색했다 지움.
+type Way = 'category' | 'search';
+const ways: readonly { readonly way: Way; readonly name: string }[] = [
+  { way: 'category', name: '다른 범주로 갔다 돌아와' },
+  { way: 'search', name: '검색했다 지워' },
+];
+
 // 팝업의 설정 바꾸기에서 붙잡을 것: 서비스 워커에 닿는 것('delivery'), 서비스 워커는 곧바로 저장하고 그 응답만('response'),
 // 붙잡지 않음('none').
 async function openPopup(hold: 'delivery' | 'response' | 'none') {
@@ -41,8 +53,8 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
   let fromOtherScreen = false;
   const request = startTestBackground({
     store,
-    features: [chatgptWidth],
-    startTime: 1_790_000_000_000,
+    features,
+    startTime,
     deliver: (type, send) => {
       if (type !== settingsUpdate.type || fromOtherScreen || hold === 'none') return send();
       if (hold === 'delivery') {
@@ -83,7 +95,7 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
   await renderTestPopup(container, {
     store: popupStore,
     request,
-    features: [chatgptWidth],
+    features,
     uiParts: [ui],
   });
   const field = () => {
@@ -91,6 +103,20 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
     if (found === null) throw new Error('너비 칸이 없다.');
     return found;
   };
+  const tab = (name: string) => {
+    const found = [...container.querySelectorAll<HTMLElement>('[role=tab]')].find(
+      (element) => element.textContent === name,
+    );
+    if (found === undefined) throw new Error(`범주 ${name}이 없다.`);
+    return found;
+  };
+  const search = (query: string) =>
+    act(() => {
+      const input = container.querySelector<HTMLInputElement>('[role=combobox]');
+      if (input === null) throw new Error('검색 칸이 없다.');
+      input.value = query;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
   // 범주를 그리고 서비스 워커가 깨어나 칸을 쓸 수 있을 때까지 기다린다(결정 0023, N-12).
   await vi.waitFor(() => {
     expect(switchOf(container, chatgptWidth.id)).not.toBeNull();
@@ -105,6 +131,26 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
         field().dispatchEvent(new Event('input', { bubbles: true }));
         field().dispatchEvent(new Event('change', { bubbles: true }));
       }),
+    // 다른 범주로 가거나 검색해 팝업이 너비 칸을 없애게 하고(leave), 돌아와 다시 만들게 한다(back).
+    leave: async (way: Way) => {
+      if (way === 'category') {
+        await act(() => {
+          tab('미디어').click();
+        });
+      } else {
+        await search('너비');
+      }
+      expect(container.querySelector('#chatgpt-width-width')).toBeNull();
+    },
+    back: async (way: Way) => {
+      if (way === 'category') {
+        await act(() => {
+          tab('ChatGPT').click();
+        });
+      } else {
+        await search('');
+      }
+    },
     heldCount: () => held.length,
     // 붙잡은 설정 바꾸기(또는 응답) 가운데 먼저 온 것을 놓는다.
     release: () =>
@@ -135,9 +181,9 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
       const settings = store.peek(settingsKey);
       if (typeof settings !== 'object' || settings === null || !('features' in settings))
         return null;
-      const { features } = settings;
-      if (typeof features !== 'object' || features === null) return null;
-      const item: unknown = Reflect.get(features, chatgptWidth.id);
+      const { features: items } = settings;
+      if (typeof items !== 'object' || items === null) return null;
+      const item: unknown = Reflect.get(items, chatgptWidth.id);
       return typeof item === 'object' && item !== null && 'width' in item ? item.width : null;
     },
   };
@@ -221,4 +267,50 @@ describe('GPT-2 팝업의 너비 칸과 늦은 저장(결정 0030)', () => {
     await popup.releaseNotice();
     expect(popup.field().value).toBe('1800');
   });
+
+  for (const { way, name } of ways) {
+    it(`COM-3 기대 동작 3 결정 0037 저장을 붙잡은 채 ${name} 너비 칸이 다시 만들어져도 정한 값을 보이고, 되돌린 값도 저장해 마지막으로 정한 값이 남는다`, async () => {
+      const popup = await openPopup('delivery');
+      await popup.choose('1500');
+      const before = popup.field();
+      await popup.leave(way);
+      await popup.back(way);
+      expect(popup.field()).not.toBe(before);
+      expect(popup.field().value).toBe('1500');
+
+      await popup.choose('1200');
+      expect(popup.heldCount()).toBe(2);
+      await popup.release();
+      await popup.release();
+      await vi.waitFor(() => {
+        expect(popup.storedWidth()).toBe(1200);
+      });
+      expect(popup.field().value).toBe('1200');
+    });
+
+    it(`COM-3 기대 동작 3 결정 0037 너비 칸이 없는 동안 저장 응답이 오고 바뀜 알림이 늦으면, ${name} 다시 만든 칸이 그 저장의 값을 보이고 되돌린 값도 저장한다`, async () => {
+      const popup = await openPopup('response');
+      popup.holdNotices();
+      await popup.choose('1500');
+      await vi.waitFor(() => {
+        expect(popup.heldCount()).toBe(1);
+      });
+      await popup.leave(way);
+      await popup.release();
+      await settle();
+      await popup.back(way);
+      // 저장은 끝났고 팝업이 보는 저장된 값은 아직 1200이다.
+      expect(popup.storedWidth()).toBe(1500);
+      expect(popup.field().value).toBe('1500');
+
+      await popup.choose('1200');
+      await vi.waitFor(() => {
+        expect(popup.heldCount()).toBe(1);
+      });
+      expect(popup.storedWidth()).toBe(1200);
+      await popup.release();
+      while (popup.heldNotices() > 0) await popup.releaseNotice();
+      expect(popup.field().value).toBe('1200');
+    });
+  }
 });
