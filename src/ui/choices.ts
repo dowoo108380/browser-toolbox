@@ -5,42 +5,50 @@
 //   저장의 값을 보이고, 보낼지는 그 보이는 값과 견준다. 담겼는지는 세대 번호(revision)로 가른다. 서비스 워커는 쓸 때마다 앞
 //   값보다 크게 정하므로, 보이는 설정의 세대 번호가 그 저장의 것보다 작지 않으면 그 저장(이나 그 뒤의 저장)을 담은 것이다
 //   (결정 0011, 0036).
+// - 읽기 도우미가 기본값으로 대신 쓰면(설정 전체의 손상) 그때까지 보낸 저장을 모두 잊는다. 서비스 워커가 고쳐 쓴 값의 세대
+//   번호는 시계를 따라 정해져 앞의 저장보다 작을 수 있어, 그 전의 세대 번호와 견줄 수 없기 때문이다(결정 0011, 0036).
 // - 설정 항목(기능 하나의 설정 키 하나)마다 따로 센다.
 
 // 설정 항목 하나의 기억.
 interface Item {
-  // 응답을 기다리는 저장의 수.
+  // 응답을 기다리는 저장의 수(마지막으로 잊은 뒤에 보낸 것만).
   readonly pending: number;
   // 마지막으로 정해 보낸 값. 응답을 기다리는 동안 칸에 보인다.
   readonly last: unknown;
   // 저장한 것 가운데 세대 번호가 가장 큰 것. 서비스 워커는 들어온 차례로 저장하므로 마지막에 저장된 이 항목의 값이다.
   readonly written: { readonly revision: number; readonly value: unknown } | null;
+  // 잊은 저장이 고쳐 쓴 값 뒤에 담길 수 있다(잊을 때 아직 담기지 않았음). 그동안 정한 값은 칸에 보이는 값과 같아도 보낸다.
+  // 그 뒤에 보낸 저장이 저장되면 거짓이 된다. 서비스 워커는 들어온 차례로 저장하므로 잊은 저장은 모두 그 전에 저장되었다.
+  readonly unsure: boolean;
 }
 
 export interface Choices {
   // 읽기 도우미가 받아들인 설정의 세대 번호. 받기 전이거나 기본값으로 대신 쓰면 null이다.
   readonly revision: number | null;
+  // 보낸 저장을 잊은 횟수. 저장은 보낸 때의 것을 들고 가고, 응답이 올 때 다르면(그사이 잊음) 그 응답을 버린다.
+  readonly round: number;
   // 기능 id → 설정 키 → 그 항목의 기억.
   readonly items: ReadonlyMap<string, ReadonlyMap<string, Item>>;
 }
 
-export const noChoices: Choices = { revision: null, items: new Map() };
+export const noChoices: Choices = { revision: null, round: 0, items: new Map() };
 
 // 보낸 저장 하나. 응답이 오면 answered에 넘긴다.
 export interface Sent {
   readonly featureId: string;
   readonly patch: Readonly<Record<string, unknown>>;
+  readonly round: number;
 }
 
-const empty: Item = { pending: 0, last: undefined, written: null };
+const empty: Item = { pending: 0, last: undefined, written: null, unsure: false };
 
 // 그 항목의 칸에 저장된 값 대신 보일 값. 응답을 기다리는 동안은 마지막으로 정해 보낸 값이고, 모두 끝났지만 보이는 설정이
 // 마지막 저장을 아직 담지 않았으면 그 저장의 값이다. 둘 다 아니면 null(저장된 값을 보인다). 기본값으로 대신 쓰는 동안(세대
-// 번호 없음)은 저장된 값이다.
+// 번호 없음) 저장한 것은 잊은 뒤에 보낸 것이라 아직 담기지 않았다.
 function unsettled(item: Item, revision: number | null): { readonly value: unknown } | null {
   if (item.pending > 0) return { value: item.last };
   const { written } = item;
-  if (written === null || revision === null || revision >= written.revision) return null;
+  if (written === null || (revision !== null && revision >= written.revision)) return null;
   return { value: written.value };
 }
 
@@ -54,21 +62,31 @@ export function chosenValues(choices: Choices, featureId: string): ReadonlyMap<s
   return values;
 }
 
-// 읽기 도우미가 설정을 받아들였다(그 값의 세대 번호). 기본값으로 대신 쓰면(설정 전체의 손상) 저장한 것을 잊는다. 고쳐 쓴 값의
-// 세대 번호는 시계를 따라 정해져 그보다 작을 수 있다(결정 0011).
+// 읽기 도우미가 설정을 받아들였다(그 값의 세대 번호). 기본값으로 대신 쓰면 보낸 저장을 모두 잊는다: 응답을 기다리는 수와
+// 저장한 것을 비우고, 그 응답은 버린다. 칸은 저장된 값(기본값, 그 뒤 고쳐 쓴 값)을 보인다. 잊은 저장이 고쳐 쓴 값 뒤에 담길
+// 수도 있으므로(서비스 워커가 손상을 읽은 뒤에 저장함), 잊을 때 아직 담기지 않은 저장이 있던 항목은 다음 저장이 될 때까지
+// 정한 값을 늘 보낸다. 담기면 그 바뀜 알림으로 칸이 그 값을 보인다.
 export function accepted(choices: Choices, revision: number | null): Choices {
   if (revision !== null) return { ...choices, revision };
   const items = new Map(
     [...choices.items].map(([featureId, featureItems]) => [
       featureId,
-      new Map([...featureItems].map(([key, item]) => [key, { ...item, written: null }])),
+      new Map(
+        [...featureItems].map(([key, item]) => [
+          key,
+          {
+            ...empty,
+            unsure: item.unsure || unsettled(item, choices.revision) !== null,
+          },
+        ]),
+      ),
     ]),
   );
-  return { revision, items };
+  return { revision, round: choices.round + 1, items };
 }
 
-// 조각이 그 기능의 값을 정했다. stored는 그 기능의 저장된 설정이다. 정한 값이 모두 칸에 보이는 값과 같으면 보내지 않으므로
-// null을, 아니면 보낸 뒤의 기억과 보낼 저장을 돌려준다.
+// 조각이 그 기능의 값을 정했다. stored는 그 기능의 저장된 설정이다. 정한 값이 모두 칸에 보이는 값과 같고 잊은 저장이 담길
+// 수도 없으면 보내지 않으므로 null을, 아니면 보낸 뒤의 기억과 보낼 저장을 돌려준다.
 export function chose(
   choices: Choices,
   featureId: string,
@@ -78,9 +96,10 @@ export function chose(
   const featureItems = choices.items.get(featureId) ?? new Map<string, Item>();
   const entries = Object.entries(patch);
   const changed = entries.some(([key, value]) => {
-    const shown = unsettled(featureItems.get(key) ?? empty, choices.revision);
+    const item = featureItems.get(key) ?? empty;
+    const shown = unsettled(item, choices.revision);
     const current: unknown = shown === null ? Reflect.get(stored, key) : shown.value;
-    return !Object.is(value, current);
+    return item.unsure || !Object.is(value, current);
   });
   if (!changed) return null;
   const nextItems = new Map(featureItems);
@@ -90,13 +109,14 @@ export function chose(
   }
   return {
     choices: { ...choices, items: new Map(choices.items).set(featureId, nextItems) },
-    sent: { featureId, patch },
+    sent: { featureId, patch, round: choices.round },
   };
 }
 
 // 보낸 저장의 응답이 왔다. written은 저장한 값의 세대 번호이고, 저장하지 못했으면 null이다. 응답의 차례가 바뀌어도 세대
-// 번호가 가장 큰 저장을 남긴다.
+// 번호가 가장 큰 저장을 남긴다. 보낸 뒤에 잊었으면 그 응답은 버린다(기다리는 수는 잊을 때 비웠다).
 export function answered(choices: Choices, sent: Sent, written: number | null): Choices {
+  if (sent.round !== choices.round) return choices;
   const featureItems = choices.items.get(sent.featureId) ?? new Map<string, Item>();
   const nextItems = new Map(featureItems);
   for (const [key, value] of Object.entries(sent.patch)) {
@@ -108,6 +128,7 @@ export function answered(choices: Choices, sent: Sent, written: number | null): 
         written !== null && (item.written === null || written > item.written.revision)
           ? { revision: written, value }
           : item.written,
+      unsure: item.unsure && written === null,
     });
   }
   return { ...choices, items: new Map(choices.items).set(sent.featureId, nextItems) };

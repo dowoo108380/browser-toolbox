@@ -7,7 +7,7 @@ import { ui } from '../../src/features/chatgpt-width/ui.tsx';
 import { mediaSpeed } from '../../src/features/media-speed/feature.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import type { KeyValueStore } from '../../src/platform/index.ts';
-import { settingsKey } from '../../src/storage/index.ts';
+import { settingsFormat, settingsKey } from '../../src/storage/index.ts';
 import { startTestBackground } from '../support/background.ts';
 import { renderTestPopup, switchOf } from '../support/popup.ts';
 
@@ -44,9 +44,9 @@ const ways: readonly { readonly way: Way; readonly name: string }[] = [
 ];
 
 // 팝업의 설정 바꾸기에서 붙잡을 것: 서비스 워커에 닿는 것('delivery'), 서비스 워커는 곧바로 저장하고 그 응답만('response'),
-// 붙잡지 않음('none').
-async function openPopup(hold: 'delivery' | 'response' | 'none') {
-  const store = createFakeStore();
+// 붙잡지 않음('none'). settings는 처음 저장된 설정이다(없으면 서비스 워커가 기본 설정을 쓴다).
+async function openPopup(hold: 'delivery' | 'response' | 'none', settings?: unknown) {
+  const store = createFakeStore(settings === undefined ? {} : { [settingsKey]: settings });
   // 붙잡은 설정 바꾸기(또는 그 응답). 놓으면 받은 차례대로 서비스 워커에 닿는다(응답이 팝업에 간다).
   const held: (() => void)[] = [];
   // 다른 화면이 보내는 설정 바꾸기는 붙잡지 않는다.
@@ -151,6 +151,11 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
         await search('');
       }
     },
+    // 저장소 밖에서 설정 전체를 손상시킨다(개발자 도구로 고친 값). 팝업의 읽기 도우미가 보고 서비스 워커에 고쳐 쓰게 한다.
+    corrupt: () =>
+      act(() => {
+        store.replace(settingsKey, 'broken');
+      }),
     heldCount: () => held.length,
     // 붙잡은 설정 바꾸기(또는 응답) 가운데 먼저 온 것을 놓는다.
     release: () =>
@@ -184,7 +189,15 @@ async function openPopup(hold: 'delivery' | 'response' | 'none') {
       const { features: items } = settings;
       if (typeof items !== 'object' || items === null) return null;
       const item: unknown = Reflect.get(items, chatgptWidth.id);
+      // 항목이 없으면 기본값이다.
+      if (item === undefined) return chatgptWidth.settings.defaults.width;
       return typeof item === 'object' && item !== null && 'width' in item ? item.width : null;
+    },
+    storedRevision: (): unknown => {
+      const settings = store.peek(settingsKey);
+      return typeof settings === 'object' && settings !== null && 'revision' in settings
+        ? settings.revision
+        : null;
     },
   };
 }
@@ -313,4 +326,72 @@ describe('GPT-2 팝업의 너비 칸과 늦은 저장(결정 0030)', () => {
       expect(popup.field().value).toBe('1200');
     });
   }
+
+  it('COM-3 기대 동작 3 결정 0036 저장 응답을 기다리는 동안 설정 전체가 손상되면 칸은 저장된 값을 보이고, 시계가 뒤로 간 채 고쳐 쓴 뒤 앞 저장의 성공이 늦게 와도 그대로이며, 앞에 정한 값을 다시 정하면 저장한다', async () => {
+    // 지금 시각보다 큰 세대 번호로 저장된 설정(그 뒤 시계가 뒤로 갔다). 손상을 고쳐 쓴 값의 세대 번호는 지금 시각이라 이
+    // 칸이 손상 전에 저장한 것보다 작다(결정 0011 "세대 번호"의 한계).
+    const ahead = startTime + 10_000_000_000;
+    const popup = await openPopup('response', {
+      version: settingsFormat.version,
+      revision: ahead,
+      features: {},
+      sites: {},
+    });
+    await popup.choose('1500');
+    await vi.waitFor(() => {
+      expect(popup.heldCount()).toBe(1);
+    });
+    expect(popup.storedRevision()).toBe(ahead + 1);
+
+    await popup.corrupt();
+    await vi.waitFor(() => {
+      expect(popup.storedRevision()).toBeTypeOf('number');
+    });
+    expect(popup.storedRevision()).toBeLessThan(ahead);
+    expect(popup.storedWidth()).toBe(1200);
+    await vi.waitFor(() => {
+      expect(popup.field().value).toBe('1200');
+    });
+
+    // 손상 전에 보낸 저장의 성공(세대 번호 ahead + 1)이 늦게 와도 칸은 저장된 값이다.
+    await popup.release();
+    await settle();
+    expect(popup.field().value).toBe('1200');
+
+    await popup.choose('1500');
+    await vi.waitFor(() => {
+      expect(popup.heldCount()).toBe(1);
+    });
+    expect(popup.storedWidth()).toBe(1500);
+    await popup.release();
+    await settle();
+    expect(popup.field().value).toBe('1500');
+  });
+
+  it('COM-3 기대 동작 3 결정 0036 손상 전에 보낸 저장이 서비스 워커가 고쳐 쓴 뒤에 저장되어도, 그사이 보이는 기본값과 같은 값을 정하면 보내 마지막으로 정한 값이 남는다', async () => {
+    const popup = await openPopup('delivery');
+    await popup.choose('1500');
+    expect(popup.heldCount()).toBe(1);
+    await popup.corrupt();
+    await vi.waitFor(() => {
+      expect(popup.storedRevision()).toBeTypeOf('number');
+    });
+    await vi.waitFor(() => {
+      expect(popup.field().value).toBe('1200');
+    });
+
+    // 잊은 1500이 고쳐 쓴 값 뒤에 담길 수 있어, 보이는 1200과 같은 값도 보낸다.
+    await popup.choose('1200');
+    expect(popup.heldCount()).toBe(2);
+    await popup.release();
+    await vi.waitFor(() => {
+      expect(popup.storedWidth()).toBe(1500);
+    });
+    await popup.release();
+    await vi.waitFor(() => {
+      expect(popup.storedWidth()).toBe(1200);
+    });
+    await settle();
+    expect(popup.field().value).toBe('1200');
+  });
 });

@@ -1055,8 +1055,9 @@ describe('결정 0030 기능의 화면 조각', () => {
     });
     expect(container.querySelector('.controls')).toBeNull();
     // 칸이 없는 동안 온 응답도 기억에 담긴다.
-    await act(() => {
+    await act(async () => {
       answers[0]?.(ok({ revision: 2 }));
+      for (let step = 0; step < 5; step += 1) await Promise.resolve();
     });
     await act(() => {
       popup.tab('미디어').click();
@@ -1119,6 +1120,35 @@ describe('결정 0030 기능의 화면 조각', () => {
     // 시계가 뒤로 간 채 고쳐 쓴 값(세대 1)도 따른다.
     await popup.apply(sizedSettings(4), 1);
     expect(text('.size')).toBe('4');
+  });
+
+  it('결정 0036 결정 0037 조각이 그려져 있지 않은 동안 기본값으로 대신 쓰게 되어도 응답을 기다리던 저장을 잊고, 그 늦은 응답은 버린다', async () => {
+    const answers: ((value: Result<{ readonly revision: number }, AppError>) => void)[] = [];
+    const popup = await show({
+      features: [sized, toggleFeature('hide', 'page', '숨김 기능')],
+      uiParts: [sizedPart],
+      update: () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        }),
+    });
+    await popup.awake();
+    await popup.apply(sizedSettings(3), 1000);
+    await sizeTo(5);
+    await act(() => {
+      popup.tab('페이지').click();
+    });
+    await popup.apply({ features: new Map(), sites: new Map() }, null);
+    // 시계가 뒤로 간 채 고쳐 쓴 값(세대 100) 뒤에 앞 저장의 성공(세대 1001)이 온다.
+    await popup.apply(sizedSettings(3), 100);
+    await act(async () => {
+      answers[0]?.(ok({ revision: 1001 }));
+      for (let step = 0; step < 5; step += 1) await Promise.resolve();
+    });
+    await act(() => {
+      popup.tab('미디어').click();
+    });
+    expect(text('.size')).toBe('3');
   });
 });
 

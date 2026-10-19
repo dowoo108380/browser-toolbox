@@ -157,6 +157,87 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
     expect(width.shown()).toBe(1300);
   });
 
+  it('결정 0036 응답을 기다리는 동안 기본값으로 대신 쓰게 되면 칸은 저장된 값을 보이고, 그 전에 보낸 저장의 성공이 시계가 뒤로 간 채 고쳐 쓴 값 뒤에 와도 버리며, 앞에 정한 값을 다시 정하면 보낸다', () => {
+    // 저장값 1200·세대 1000에서 1500을 보내고 응답을 기다린다.
+    const width = field(1200, 1000);
+    width.choose(1500);
+    width.accept(undefined, null);
+    expect(width.shown()).toBe(1200);
+    // 시계가 뒤로 간 채 고쳐 쓴 값(세대 100). 그 뒤 앞 저장의 성공(세대 1001)이 늦게 온다.
+    width.accept(1200, 100);
+    expect(width.shown()).toBe(1200);
+    width.answer(0, 1001);
+    expect(width.shown()).toBe(1200);
+
+    expect(width.choose(1500)).toBe(true);
+    expect(width.shown()).toBe(1500);
+    width.answer(1, 101);
+    expect(width.shown()).toBe(1500);
+    width.accept(1500, 101);
+    expect(width.shown()).toBe(1500);
+    // 잊은 저장이 기다리는 수에 남지 않았다: 이 칸의 저장이 담긴 뒤 다른 화면이 바꾼 값을 따른다.
+    width.accept(1800, 102);
+    expect(width.shown()).toBe(1800);
+  });
+
+  it('결정 0036 잊을 때 아직 담기지 않은 저장이 있었으면, 그 뒤에 보낸 저장이 될 때까지 정한 값은 보이는 값과 같아도 보낸다', () => {
+    const width = field(1200, 1000);
+    width.choose(1500);
+    width.accept(undefined, null);
+    width.accept(1200, 100);
+    // 잊은 1500이 고쳐 쓴 값 뒤에 담길 수 있어, 보이는 1200과 같아도 보낸다. 실패하면 그대로다.
+    expect(width.choose(1200)).toBe(true);
+    width.answer(1, null);
+    expect(width.shown()).toBe(1200);
+    expect(width.choose(1200)).toBe(true);
+    width.answer(2, 101);
+    width.accept(1200, 101);
+    expect(width.choose(1200)).toBe(false);
+    expect(width.sent()).toEqual([{ width: 1500 }, { width: 1200 }, { width: 1200 }]);
+  });
+
+  it('결정 0036 잊은 저장이 고쳐 쓴 값 뒤에 담기면 칸은 그 값을 보이고, 그 뒤 정한 값은 보이는 값과 견준다', () => {
+    const width = field(1200, 1000);
+    width.choose(1500);
+    width.accept(undefined, null);
+    // 서비스 워커가 손상을 읽은 뒤 1500을 저장했다(그 값이 고쳐 쓴 값이다).
+    width.accept(1500, 100);
+    width.answer(0, 100);
+    expect(width.shown()).toBe(1500);
+    expect(width.choose(1200)).toBe(true);
+    width.answer(1, 101);
+    width.accept(1200, 101);
+    expect(width.choose(1200)).toBe(false);
+  });
+
+  it('결정 0036 잊을 때 보낸 저장이 모두 담겼으면 그 뒤에는 보이는 값과 같은 값을 보내지 않는다', () => {
+    const width = field(1200, 1);
+    width.choose(1500);
+    width.answer(0, 2);
+    width.accept(1500, 2);
+    width.accept(undefined, null);
+    expect(width.shown()).toBe(1200);
+    expect(width.choose(1200)).toBe(false);
+  });
+
+  it('결정 0036 기본값으로 대신 쓰는 동안 보낸 저장은 응답이 와도 고쳐 쓴 값이 그것을 담을 때까지 그 값을 보이고, 실패하면 저장된 값이다', () => {
+    const width = field(1200, null);
+    width.choose(1500);
+    width.answer(0, 7);
+    expect(width.shown()).toBe(1500);
+    // 고쳐 쓴 값(세대 5)은 이 저장보다 앞이다.
+    width.accept(1200, 5);
+    expect(width.shown()).toBe(1500);
+    width.accept(1500, 7);
+    width.accept(1800, 8);
+    expect(width.shown()).toBe(1800);
+
+    const failed = field(1200, null);
+    failed.choose(1500);
+    failed.answer(0, null);
+    expect(failed.shown()).toBe(1200);
+  });
+
   it('기능과 설정 항목마다 따로 센다. 정한 값 가운데 하나라도 보이는 값과 다르면 함께 보낸다', () => {
     let choices = accepted(noChoices, 1);
     const stored = { enabled: true, width: 1200, size: 3 };
@@ -170,7 +251,7 @@ describe('결정 0036 결정 0037 화면 조각이 정한 값과 그 저장', ()
 
     // 같은 값(width)과 다른 값(size)을 함께 정하면 둘 다 보낸다.
     const both = chose(choices, 'a', stored, { width: 1500, size: 4 });
-    expect(both?.sent).toEqual({ featureId: 'a', patch: { width: 1500, size: 4 } });
+    expect(both?.sent.patch).toEqual({ width: 1500, size: 4 });
     if (both === null) throw new Error('보내야 한다.');
     choices = answered(both.choices, first.sent, 2);
     expect(chosenValues(choices, 'a')).toEqual(
