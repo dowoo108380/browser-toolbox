@@ -240,6 +240,8 @@ async function show({
     // 저장된 설정이 바뀐 것처럼 알린다(세대 번호를 주지 않으면 2).
     apply: (snapshot: Snapshot, revision: number | null = 2) =>
       act(() => handlers?.apply(snapshot, revision)),
+    // 읽기 도우미가 문제를 알린다(예: 설정을 읽지 못함).
+    readerProblem: (error: AppError) => act(() => handlers?.problem(error)),
     tab: (name: string) => {
       const found = [...container.querySelectorAll<HTMLElement>('[role=tab]')].find(
         (element) => element.textContent === name,
@@ -940,54 +942,55 @@ describe('COM-3 기대 동작 3 저장에 실패하면 화면은 저장된 값�
   });
 });
 
-describe('결정 0030 기능의 화면 조각', () => {
-  const sized = defineFeature({
-    id: 'sized',
-    requirements: [],
-    name: '크기 기능',
-    description: '크기를 정한다',
-    category: 'media',
-    kind: 'toggle',
-    content: null,
-    permissions: [],
-    settings: {
-      schema: v.object({ enabled: v.boolean(), size: v.int() }),
-      defaults: { enabled: false, size: 3 },
-    },
+// 크기를 정하는 화면 조각이 있는 기능(결정 0030). 조각의 시험과 알림 줄의 시험이 쓴다.
+const sized = defineFeature({
+  id: 'sized',
+  requirements: [],
+  name: '크기 기능',
+  description: '크기를 정한다',
+  category: 'media',
+  kind: 'toggle',
+  content: null,
+  permissions: [],
+  settings: {
+    schema: v.object({ enabled: v.boolean(), size: v.int() }),
+    defaults: { enabled: false, size: 3 },
+  },
+});
+// 보일 크기를 보이고, 누르면 그 크기를 정하는 단추 둘(3, 5)이 있는 조각.
+const sizedPart = defineUiPart(sized, ({ settings, disabled, choose }) => (
+  <div class="controls">
+    <span class="size">{settings.size}</span>
+    {[3, 5].map((size) => (
+      <button
+        type="button"
+        key={size}
+        data-size={size}
+        disabled={disabled}
+        onClick={() => {
+          choose({ size });
+        }}
+      >
+        {size}로
+      </button>
+    ))}
+  </div>
+));
+const text = (selector: string) => container.querySelector(selector)?.textContent;
+const sizeTo = (size: number) =>
+  act(() => {
+    const found = container.querySelector<HTMLButtonElement>(
+      `.controls [data-size="${String(size)}"]`,
+    );
+    if (found === null) throw new Error('조각의 단추가 없다.');
+    found.click();
   });
-  // 보일 크기를 보이고, 누르면 그 크기를 정하는 단추 둘(3, 5)이 있는 조각.
-  const sizedPart = defineUiPart(sized, ({ settings, disabled, choose }) => (
-    <div class="controls">
-      <span class="size">{settings.size}</span>
-      {[3, 5].map((size) => (
-        <button
-          type="button"
-          key={size}
-          data-size={size}
-          disabled={disabled}
-          onClick={() => {
-            choose({ size });
-          }}
-        >
-          {size}로
-        </button>
-      ))}
-    </div>
-  ));
-  const text = (selector: string) => container.querySelector(selector)?.textContent;
-  const sizeTo = (size: number) =>
-    act(() => {
-      const found = container.querySelector<HTMLButtonElement>(
-        `.controls [data-size="${String(size)}"]`,
-      );
-      if (found === null) throw new Error('조각의 단추가 없다.');
-      found.click();
-    });
-  const sizedSettings = (size: number): Snapshot => ({
-    features: new Map([['sized', { enabled: false, size }]]),
-    sites: new Map(),
-  });
+const sizedSettings = (size: number): Snapshot => ({
+  features: new Map([['sized', { enabled: false, size }]]),
+  sites: new Map(),
+});
 
+describe('결정 0030 기능의 화면 조각', () => {
   it('그 기능 항목의 설명 아래에 그 기능의 저장된 설정(없으면 기본값)으로 그린다', async () => {
     const popup = await show({ features: [sized, feature], uiParts: [sizedPart] });
     const item = container.querySelector('[data-feature="sized"]')?.closest('li');
@@ -1239,6 +1242,147 @@ describe('결정 0030 기능의 화면 조각', () => {
   });
 });
 
+describe('COM-3 기대 동작 3 결정 0036 알림 줄은 소식의 차례를 따른다', () => {
+  const capture = defineFeature({
+    id: 'capture',
+    requirements: [],
+    name: '캡처',
+    description: '화면을 캡처한다.',
+    category: 'media',
+    kind: 'action',
+    content: null,
+    permissions: [],
+    task: { timeoutMs: 10_000 },
+  });
+  const taskFailed = appError('platform', '작업 기록을 읽지 못했다.');
+
+  // 저장(조각과 스위치)의 응답을 시험이 정한 차례로 보낸다. index는 보낸 차례(0부터)다.
+  async function showHeld(options: Options = {}) {
+    const answers: ((value: Saved) => void)[] = [];
+    const popup = await show({
+      features: [sized, capture],
+      uiParts: [sizedPart],
+      update: () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        }),
+      ...options,
+    });
+    await popup.awake();
+    return {
+      ...popup,
+      answer: (index: number, value: Saved) =>
+        act(async () => {
+          answers[index]?.(value);
+          for (let step = 0; step < 5; step += 1) await Promise.resolve();
+        }),
+      flip: () =>
+        act(async () => {
+          popup.toggle().click();
+          await Promise.resolve();
+        }),
+    };
+  }
+
+  it('앞에 보낸 저장의 성공이 그 뒤에 보낸 저장의 실패보다 늦게 와도 실패 알림은 남는다(조각과 스위치는 한 알림 줄을 쓴다)', async () => {
+    for (const order of [
+      ['조각', '조각'],
+      ['스위치', '조각'],
+      ['조각', '스위치'],
+    ] as const) {
+      const popup = await showHeld();
+      let size = 3;
+      for (const which of order) {
+        if (which === '스위치') {
+          await popup.flip();
+        } else {
+          size = size === 3 ? 5 : 3;
+          await sizeTo(size);
+        }
+      }
+      expect(popup.updates).toHaveBeenCalledTimes(2);
+      await popup.answer(1, err(saveFailed));
+      await popup.answer(0, ok({ revision: 2 }));
+      expect({ order, status: popup.status() }).toEqual({ order, status: saveFailed.message });
+      render(null, container);
+    }
+  });
+
+  it('앞에 시작한 작업의 성공이 그 뒤에 보낸 저장의 실패보다 늦게 와도 실패 알림은 남는다', async () => {
+    let started: (value: Result<unknown, AppError>) => void = () => undefined;
+    const popup = await showHeld({
+      startTask: () =>
+        new Promise((resolve) => {
+          started = resolve;
+        }),
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[data-feature="capture"]')?.click();
+      await Promise.resolve();
+    });
+    expect(popup.starts).toHaveBeenCalledTimes(1);
+    await sizeTo(5);
+    await popup.answer(0, err(saveFailed));
+    await act(async () => {
+      started(ok({ taskId: 'task-1' }));
+      for (let step = 0; step < 5; step += 1) await Promise.resolve();
+    });
+    expect(popup.status()).toBe(saveFailed.message);
+  });
+
+  it('저장을 보낸 뒤에 받은 다른 알림(작업 기록, 읽기 도우미)은 그 저장의 늦은 성공이 지우지 않고, 그 뒤에 보낸 저장의 성공이 지운다', async () => {
+    const readFailed = appError('platform', '설정을 읽지 못했다.');
+    for (const source of ['작업 기록', '읽기 도우미'] as const) {
+      const popup = await showHeld();
+      await sizeTo(5);
+      if (source === '작업 기록') await popup.taskProblem(taskFailed);
+      else await popup.readerProblem(readFailed);
+      const message = source === '작업 기록' ? taskFailed.message : readFailed.message;
+      await popup.answer(0, ok({ revision: 2 }));
+      expect({ source, status: popup.status() }).toEqual({ source, status: message });
+      await sizeTo(3);
+      await popup.answer(1, ok({ revision: 3 }));
+      expect({ source, status: popup.status() }).toEqual({ source, status: undefined });
+      render(null, container);
+    }
+  });
+
+  it('앞에 보낸 저장의 실패가 그 뒤에 보낸 저장의 성공보다 늦게 와도 알리고(실패를 숨기지 않는다), 그 뒤에 보낸 저장의 성공이 지운다', async () => {
+    const popup = await showHeld();
+    await sizeTo(5);
+    await popup.flip();
+    await popup.answer(1, ok({ revision: 2 }));
+    expect(popup.status()).toBeUndefined();
+    await popup.answer(0, err(saveFailed));
+    expect(popup.status()).toBe(saveFailed.message);
+    // 첫 저장(5)은 저장하지 않았으므로 칸은 저장된 3을 보인다.
+    await sizeTo(5);
+    await popup.answer(2, ok({ revision: 3 }));
+    expect(popup.status()).toBeUndefined();
+  });
+
+  it('앞에 보낸 저장의 실패가 먼저 오면 그 뒤에 보낸 저장의 성공이 지운다', async () => {
+    const popup = await showHeld();
+    await sizeTo(5);
+    await sizeTo(3);
+    await popup.answer(0, err(saveFailed));
+    expect(popup.status()).toBe(saveFailed.message);
+    await popup.answer(1, ok({ revision: 2 }));
+    expect(popup.status()).toBeUndefined();
+  });
+
+  it('줄이 담은 가장 나중의 소식보다 앞에 보낸 저장의 성공은, 그보다 앞의 실패가 줄을 덮었어도 지우지 않는다', async () => {
+    const popup = await showHeld();
+    // 저장 셋을 보낸 뒤 다른 알림을 받는다. 첫 저장의 실패가 그 알림을 덮고, 그 뒤 둘째 저장의 성공이 온다.
+    await sizeTo(5);
+    await sizeTo(3);
+    await popup.taskProblem(taskFailed);
+    await popup.answer(0, err(saveFailed));
+    await popup.answer(1, ok({ revision: 2 }));
+    expect(popup.status()).toBe(saveFailed.message);
+  });
+});
+
 describe('N-12 서비스 워커가 깨어난 뒤에만 조작한다', () => {
   it('깨우기가 늦으면 응답이 올 때까지 스위치를 쓸 수 없다', async () => {
     let woken: (result: Result<unknown, AppError>) => void = () => undefined;
@@ -1260,6 +1404,12 @@ describe('N-12 서비스 워커가 깨어난 뒤에만 조작한다', () => {
     const popup = await show({ wake: () => Promise.resolve(err(timeout)) });
     await popup.awake();
     expect(popup.status()).toBe(timeout.message);
+    // 깨우기 뒤에 보낸 저장이 되면 그 알림을 지운다(결정 0036).
+    await act(async () => {
+      popup.toggle().click();
+      await Promise.resolve();
+    });
+    expect(popup.status()).toBeUndefined();
   });
 
   it('열려 있는 동안 20초마다 다시 깨우고, 닫히면 그친다', async () => {

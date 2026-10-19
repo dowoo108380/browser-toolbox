@@ -87,9 +87,25 @@ interface PopupProps {
 // 팝업이 열려 있는 동안 그보다 짧은 간격으로 깨워, 오래 열어 둔 뒤 누르자마자 닫혀도 요청이 닿게 한다(N-12, R-23).
 export const keepAwakeIntervalMs = 20_000;
 
-// 알림. 실패할 때마다 새 객체를 둔다. 같은 문구라도 다시 그려야 스위치가 저장된 값으로 돌아가기 때문이다.
+// 알림 줄의 소식(결정 0036). 줄은 소식 하나와 그 차례 번호를 든다. 번호는 요청이면 그 요청을 보낸 때, 그 밖의 알림(읽기
+// 도우미, 작업 기록, 복구 알림 읽기의 문제)이면 받은 때 매기고, 매길 때마다 커진다. 실패는 받는 대로 보인다(실패를 숨기지
+// 않는다, COM-3 기대 동작 3). 성공(저장, 작업 시작)은 줄이 담은 소식이 모두 그보다 앞일 때만 줄을 비운다. 그래서 늦게 온 앞
+// 요청의 성공이 그 뒤에 보낸 요청의 실패나 그 뒤에 받은 알림을 지우지 않는다. 실패할 때마다 새 객체를 둔다. 같은 문구라도
+// 다시 그려야 스위치가 저장된 값으로 돌아가기 때문이다.
 interface Notice {
   readonly message: string;
+  // 이 줄이 담은 소식 가운데 가장 나중 것의 번호. 앞의 실패가 더 나중의 소식을 덮었어도 그 소식의 번호를 남긴다.
+  readonly order: number;
+}
+
+// 차례 번호 order의 실패나 알림을 줄에 보인다.
+function noticed(notice: Notice | null, order: number, message: string): Notice {
+  return { message, order: Math.max(notice?.order ?? order, order) };
+}
+
+// 차례 번호 order의 요청이 성공했다. 줄이 담은 소식이 모두 그보다 앞이면 줄을 비운다.
+function cleared(notice: Notice | null, order: number): Notice | null {
+  return notice !== null && notice.order < order ? null : notice;
 }
 
 // 지금 탭의 작업(결정 0024). 둘은 기록을 받을 때 함께 바뀐다. 작업 칸이 기록보다 늦게 그려지는 때가 없게 하기 위해서다.
@@ -128,6 +144,21 @@ export function PopupApp({
 }: PopupProps) {
   const [stored, setStored] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // 알림 줄의 소식에 마지막으로 매긴 차례 번호. ref라 처음 그릴 때 만든 처리기가 불러도 같은 번호를 센다.
+  const lastOrder = useRef(0);
+  const nextOrder = () => {
+    lastOrder.current += 1;
+    return lastOrder.current;
+  };
+  // 실패나 알림을 줄에 보인다. 요청의 실패면 그 요청을 보낸 때의 번호를 넘기고, 아니면 받은 때의 번호를 매긴다.
+  const report = (message: string, order = nextOrder()) => {
+    setNotice((previous) => noticed(previous, order, message));
+  };
+  // 보낸 때의 번호가 order인 요청의 결과를 줄에 맞춘다.
+  const reportResult = (order: number, result: Result<unknown, AppError>) => {
+    if (result.ok) setNotice((previous) => cleared(previous, order));
+    else report(result.error.message, order);
+  };
   // 서비스 워커가 깨어났는지(첫 깨우기의 응답을 받았는지). 그 전에는 스위치를 쓸 수 없다.
   // 깨어나는 중에 보낸 요청은 팝업이 곧바로 닫히면 닿지 않기 때문이다(N-12, R-23).
   const [awake, setAwake] = useState(false);
@@ -166,6 +197,7 @@ export function PopupApp({
   const [tabId, setTabId] = useState<number | null>(null);
   useEffect(() => {
     let open = true;
+    const order = nextOrder();
     const ask = async (): Promise<Result<TabStatus, AppError>> => {
       const found = await currentTab();
       if (!found.ok) return found;
@@ -177,7 +209,7 @@ export function PopupApp({
     void ask().then((result) => {
       if (!open) return;
       setTabState(result.ok ? result.value : null);
-      if (!result.ok) setNotice({ message: result.error.message });
+      if (!result.ok) report(result.error.message, order);
     });
     return () => {
       open = false;
@@ -195,7 +227,7 @@ export function PopupApp({
         setTask((previous) => received(previous, record));
       },
       problem: (error) => {
-        setNotice({ message: error.message });
+        report(error.message);
       },
     });
   }, [tabId, watchTask]);
@@ -305,10 +337,10 @@ export function PopupApp({
         },
         newer: () => {
           setStored(null);
-          setNotice({ message: strings.newer });
+          report(strings.newer);
         },
         problem: (error) => {
-          setNotice({ message: error.message });
+          report(error.message);
         },
       }),
     [subscribe],
@@ -319,7 +351,7 @@ export function PopupApp({
       watchRepairs({
         notice: setRepairLog,
         problem: (error) => {
-          setNotice({ message: error.message });
+          report(error.message);
         },
       }),
     [watchRepairs],
@@ -328,9 +360,10 @@ export function PopupApp({
   useEffect(() => {
     let open = true;
     const wakeAndReport = async () => {
+      const order = nextOrder();
       const result = await wake();
       // 깨우지 못했으면 이유를 보인다. 스위치를 누르면 그 요청이 다시 깨우고 결과를 알린다.
-      if (open && !result.ok) setNotice({ message: result.error.message });
+      if (open && !result.ok) report(result.error.message, order);
       if (open && result.ok) announcement.current?.renew();
     };
     void wakeAndReport().then(() => {
@@ -353,8 +386,9 @@ export function PopupApp({
     featureId: string,
     patch: Readonly<Record<string, unknown>>,
   ): Promise<Ending> => {
+    const order = nextOrder();
     const result = await update(featureId, patch);
-    setNotice(result.ok ? null : { message: result.error.message });
+    reportResult(order, result);
     if (result.ok) return result.value.revision;
     return result.error.answered && result.error.kind !== 'unexpected' ? 'unwritten' : 'unknown';
   };
@@ -377,8 +411,9 @@ export function PopupApp({
   // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
   const run = async (feature: ActionFeature) => {
     if (tabId === null) return;
+    const order = nextOrder();
     const result = await startTask(feature.id, tabId);
-    setNotice(result.ok ? null : { message: result.error.message });
+    reportResult(order, result);
   };
 
   // 실행 단추를 쓸 수 있는 때(결정 0024): 서비스 워커가 깨어났고(N-12), 지금 탭을 알고, 그 탭의 작업 기록을 처음 받았고,
@@ -450,10 +485,11 @@ export function PopupApp({
     if (repairLog === null || isEmptyRepair(repairLog)) return;
     const { stamp } = repairLog;
     setConfirmedStamp(stamp);
+    const order = nextOrder();
     const result = await dismissRepair(stamp);
     if (!result.ok) {
       setConfirmedStamp(null);
-      setNotice({ message: result.error.message });
+      report(result.error.message, order);
     }
   };
 
