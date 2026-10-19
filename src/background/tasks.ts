@@ -29,7 +29,9 @@ import type { TaskPart } from './task-part.ts';
 
 // 실행 기능의 작업을 탭마다 하나씩 끝까지 하고 그 기록을 쓴다(COM-10, 결정 0012, 0024). 작업 기록을 쓰는 곳은 이것 하나다.
 // 기록의 읽고-고치고-쓰기는 들어온 순서대로 하나씩 한다. 일은 그 줄 밖에서 돌고, 끝나면 줄에 서서 결과를 쓴다.
-// 배지와 탭 사건 듣기는 기록을 쓸 때마다 같은 줄에서 기록에 맞춘다(배지는 기록에서 계산한다, 0012).
+// 배지와 탭 사건 듣기는 기록을 쓸 때마다 같은 줄에서 기록에 맞춘다(배지는 기록에서 계산한다, 0012). 배지는 기록과 다른
+// Chrome API라 그 사이에 서비스 워커가 멈출 수 있다. 그래서 기록이 배지보다 먼저 생기고 나중에 없어지게 쓰고, 서비스 워커가
+// 시작할 때 남은 기록마다 배지를 다시 단다(결정 0038).
 
 export interface TaskRunnerDeps {
   readonly session: KeyValueStore;
@@ -124,13 +126,21 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     };
   };
 
-  // 배지를 달지 못해도 기록은 맞다. 숨기지 않고 기록한다(quality 067).
-  const showBadge = async (tabId: number, task: TaskRecord | null) => {
+  // 그 탭에 그 기록의 배지를 단다. 달지 못하면 거짓이다.
+  const applyBadge = async (tabId: number, task: TaskRecord | null): Promise<boolean> => {
     try {
       await deps.badge(tabId, badgeOf(task));
+      return true;
     } catch {
-      deps.record({ featureId: task?.featureId ?? null, kind: 'platform' });
+      return false;
     }
+  };
+
+  // 기록이 있는 탭의 배지를 그 기록에 맞춘다. 달지 못해도 기록은 맞다. 숨기지 않고 기록한다(quality 067). 빠진 배지는 그
+  // 탭이 이동할 때나 다음 서비스 워커가 시작할 때 다시 단다.
+  const showBadge = async (tabId: number, task: TaskRecord) => {
+    const shown = await applyBadge(tabId, task);
+    if (!shown) deps.record({ featureId: task.featureId, kind: 'platform' });
   };
 
   // 읽은 기록의 모양이 틀리면 결함이다(쓰는 곳이 여기 하나다). 기록하고 빈 기록에서 다시 시작한다(결정 0024).
@@ -147,18 +157,35 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
     return ok({});
   };
 
-  // 기록을 쓰고, 그 탭들의 배지와 탭 사건 듣기를 새 기록에 맞춘다.
+  // 그 탭들 가운데 기록이 있는 탭의 배지를 기록에 맞춘다.
+  const showBadges = async (records: TaskRecords, tabIds: readonly number[]) => {
+    for (const tabId of tabIds) {
+      const task = taskOf(records, tabId);
+      if (task !== null) await showBadge(tabId, task);
+    }
+  };
+
+  // 기록을 쓰고, 그 탭들(열린 탭)의 배지와 탭 사건 듣기를 새 기록에 맞춘다. 기록이 배지보다 먼저 생기고 나중에 없어지게
+  // 한다(결정 0038): 기록을 지우는 탭은 배지를 먼저 지우고, 지우지 못하면 기록도 지우지 않는다. 기록이 남는 탭은 쓴 뒤에
+  // 배지를 맞춘다. 그래서 그 사이에 서비스 워커가 멈춰도 기록이 없는 탭에는 배지가 남지 않고, 기록과 어긋난 배지는 다음
+  // 시작이 맞춘다(recover). 배지를 지운 뒤 기록을 쓰지 못하면 그 결과는 배지 없이 기록에 남는다(팝업은 다음에 열 때 다시
+  // 보이고, 다음 시작이 배지를 다시 단다).
   const commit = async (
     records: TaskRecords,
     tabIds: readonly number[],
   ): Promise<Result<null, AppError>> => {
+    for (const tabId of tabIds) {
+      if (taskOf(records, tabId) === null && !(await applyBadge(tabId, null))) {
+        return err(appError('platform', strings.badgeFailed));
+      }
+    }
     try {
       await deps.session.set({ [tasksKey]: records });
     } catch {
       return err(appError('platform', strings.writeFailed));
     }
     deps.listenTabs(hasTasks(records));
-    for (const tabId of tabIds) await showBadge(tabId, taskOf(records, tabId));
+    await showBadges(records, tabIds);
     return ok(null);
   };
 
@@ -343,16 +370,17 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
           (tabId) => open.has(tabId),
           appError('unexpected', strings.interrupted),
         );
-        // 고칠 것이 없으면 쓰지 않는다(서비스 워커는 자주 다시 시작한다). 배지는 서비스 워커가 멈춰도 남는다.
+        // 남은 기록의 탭마다 배지를 다시 단다(끝낸 작업은 실패 배지). 앞 서비스 워커가 기록을 쓴 뒤 배지를 바꾸기 전에
+        // 멈췄으면 배지가 빠지거나 낡았다. 기록이 없는 탭에는 배지가 남지 않으므로(commit) 기록이 있는 탭만 보면 되고, 모든
+        // 탭을 묻지 않는다(결정 0038). 닫힌 탭은 Chrome이 배지를 지웠다.
+        const openTabs = [...open];
+        // 고칠 것이 없으면 쓰지 않는다(서비스 워커는 자주 다시 시작한다).
         if (interrupted.length === 0 && open.size === tabIds.length) {
-          deps.listenTabs(hasTasks(loaded.value));
+          deps.listenTabs(hasTasks(records));
+          await showBadges(records, openTabs);
           return;
         }
-        // 끝낸 작업의 탭에 실패 배지를 단다. 닫힌 탭은 Chrome이 배지를 지웠다.
-        const endedTabs = [...open].filter(
-          (tabId) => taskOf(loaded.value, tabId)?.status === 'running',
-        );
-        const committed = await commit(records, endedTabs);
+        const committed = await commit(records, openTabs);
         if (!committed.ok) {
           deps.record({ featureId: null, kind: 'platform' });
           return;

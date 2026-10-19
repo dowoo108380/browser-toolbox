@@ -3,7 +3,14 @@ import { defineFeature, v } from '../contracts/index.ts';
 import { type FakeStore, createFakeStore } from '../platform/fake.ts';
 import type { Delivery, TabBadge } from '../platform/index.ts';
 import { type AppError, appError, err, ok } from '../shared/index.ts';
-import { type TaskOutcome, tasksKey } from '../storage/index.ts';
+import {
+  type TaskOutcome,
+  type TaskRecord,
+  type TaskRecords,
+  parseTasks,
+  taskOf,
+  tasksKey,
+} from '../storage/index.ts';
 import type { Problem } from './problems.ts';
 import { type TaskContext, type TaskPart, defineTaskPart } from './task-part.ts';
 import { createTaskRunner } from './tasks.ts';
@@ -397,10 +404,12 @@ describe('결과 확인(task.seen, 결정 0012)', () => {
     return context;
   }
 
-  it('같은 작업의 끝난 결과면 그 탭의 기록을 지운다', async () => {
-    const { runner, records } = await finished();
+  it('같은 작업의 끝난 결과면 그 탭의 배지를 한 번 지우고 기록을 지운다', async () => {
+    const { runner, records, badges } = await finished();
+    const before = badges.length;
     expect(await runner.seen(4, 't1')).toEqual(ok(null));
     expect(records()).toEqual({});
+    expect(badges.slice(before)).toEqual([[4, null]]);
   });
 
   it('COM-10.8 다음 작업이 시작된 뒤 늦게 닿은 확인은 그 작업을 지우지 않는다', async () => {
@@ -430,6 +439,20 @@ describe('결과 확인(task.seen, 결정 0012)', () => {
       expect(records()).toEqual({ '4': unseen });
     },
   );
+
+  it('배지를 지우지 못하면 기록도 지우지 않고 platform으로 답하고 기록한다. 기록이 없는 탭에 배지만 남지 않는다(결정 0038)', async () => {
+    const session = createFakeStore({ [tasksKey]: { '4': unseen } });
+    const writes = vi.spyOn(session, 'set');
+    const { runner, records, problems } = setup({
+      session,
+      badge: () => Promise.reject(new Error('action')),
+    });
+    const result = await runner.seen(4, 'a');
+    expect(result.ok ? null : result.error.kind).toBe('platform');
+    expect(writes).not.toHaveBeenCalled();
+    expect(records()).toEqual({ '4': unseen });
+    expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
+  });
 });
 
 describe('실행 기능과 일의 짝(quality 066)', () => {
@@ -655,7 +678,7 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     '확장이 작업 도중 다시 시작되어 끝까지 하지 못했다. 다시 실행한다.',
   );
 
-  it('앞 서비스 워커의 진행 중 작업은 끝내고 실패 배지를 달며 기록한다. 닫힌 탭의 기록은 지우고 끝난 결과는 그대로다', async () => {
+  it('앞 서비스 워커의 진행 중 작업은 끝내고 실패 배지를 달며 기록한다. 닫힌 탭의 기록은 지우고 끝난 결과는 그대로 두며 그 배지를 다시 단다', async () => {
     const done = { id: 'b', featureId: 'copy', status: 'succeeded', summary: null } as const;
     const session = createFakeStore({
       [tasksKey]: {
@@ -674,22 +697,26 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
       '5': done,
     });
     expect(problems).toEqual([{ featureId: 'save', kind: 'unexpected' }]);
-    expect(badges).toEqual([[4, failedBadge]]);
+    expect(badges).toEqual([
+      [4, failedBadge],
+      [5, { ...succeededBadge, title: 'Browser Toolbox: URL 복사 끝남' }],
+    ]);
     expect(listening).toEqual([true]);
     // 끝낸 작업이 있던 탭에서 다시 시작할 수 있다.
     expect((await runner.start('copy', 4)).ok).toBe(true);
   });
 
-  it('고칠 것이 없으면 쓰지 않고, 기록이 없으면 탭 사건 듣기를 그만둔다', async () => {
+  it('고칠 것이 없으면 쓰지 않고, 기록이 없으면 배지를 건드리지 않고 탭 사건 듣기를 그만둔다', async () => {
     const session = createFakeStore();
     const writes = vi.spyOn(session, 'set');
-    const { runner, listening } = setup({ session });
+    const { runner, listening, badges } = setup({ session });
     await runner.recover();
     expect(writes).not.toHaveBeenCalled();
+    expect(badges).toEqual([]);
     expect(listening).toEqual([false]);
   });
 
-  it('끝난 결과만 있으면 쓰지 않고 듣기를 이어 간다(배지는 서비스 워커가 멈춰도 남는다)', async () => {
+  it('끝난 결과만 있으면 쓰지 않고 듣기를 이어 가며, 앞 서비스 워커가 배지를 바꾸기 전에 멈췄을 수 있어 그 배지를 다시 단다(결정 0038)', async () => {
     const session = createFakeStore({
       [tasksKey]: { '4': { id: 'a', featureId: 'save', status: 'succeeded', summary: null } },
     });
@@ -698,7 +725,19 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     await runner.recover();
     expect(writes).not.toHaveBeenCalled();
     expect(listening).toEqual([true]);
-    expect(badges).toEqual([]);
+    expect(badges).toEqual([[4, succeededBadge]]);
+  });
+
+  it('COM-10.6 진행 중인 작업이 없어도 닫힌 탭의 기록은 지워 쓰고, 열린 탭의 배지는 다시 단다(닫힘을 놓친 경우)', async () => {
+    const session = createFakeStore({ [tasksKey]: { '4': unseen, '6': unseen } });
+    const { runner, records, badges, listening } = setup({
+      session,
+      tabExists: (tabId) => Promise.resolve(tabId !== 6),
+    });
+    await runner.recover();
+    expect(records()).toEqual({ '4': unseen });
+    expect(badges).toEqual([[4, succeededBadge]]);
+    expect(listening).toEqual([true]);
   });
 
   it('기록을 읽지 못하면 platform으로 기록하고 듣기를 그대로 둔다', async () => {
@@ -733,6 +772,193 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
     expect(records()).toEqual({ '4': running });
   });
+});
+
+describe('이슈 #7 서비스 워커가 작업 기록과 배지 사이에서 멈춰도 다시 시작한 뒤 배지는 기록과 같다', () => {
+  // Chrome에 남는 것은 작업 기록(storage.session)과 탭마다 보이는 배지 글자·아이콘 제목이다. 서비스 워커가 바뀌어도 남는다.
+  // 배지 하나는 실제 setTabBadge처럼 글자를 바꾼 뒤 제목을 바꾸는 두 호출이다.
+  interface Shown {
+    readonly text: string;
+    readonly title: string;
+  }
+  const blank: Shown = { text: '', title: 'Browser Toolbox' };
+  const names: Readonly<Record<string, string>> = { save: '자막 저장', copy: 'URL 복사' };
+  // 그 기록이면 보여야 하는 배지. 끝났고 보지 않은 결과만 배지가 있다(결정 0012, 0024).
+  const expectedOf = (task: TaskRecord | null): Shown => {
+    if (task === null || task.status === 'running') return blank;
+    const name = names[task.featureId] ?? task.featureId;
+    return task.status === 'succeeded'
+      ? { text: '✓', title: `Browser Toolbox: ${name} 끝남` }
+      : { text: '!', title: `Browser Toolbox: ${name} 실패` };
+  };
+
+  // 탭 4에서 일이 일어난다. 탭 5에는 다른 기능의 보지 않은 결과와 그 배지가 있어 탭 4의 일이 그것을 흐트러뜨리지 않는지도
+  // 본다. 탭 6은 닫혔다.
+  const openTabs = [4, 5] as const;
+  const closedTab = 6;
+  const other: TaskRecord = { id: 'b', featureId: 'copy', status: 'succeeded', summary: null };
+  const running: TaskRecord = { id: 'a', featureId: 'save', status: 'running' };
+
+  // 서비스 워커를 Chrome API 호출의 차례(0부터)의 앞이나 뒤에서 멈춘다. 뒤에서 멈추면 그 호출은 Chrome에 닿았다.
+  interface StopPoint {
+    readonly call: number;
+    readonly when: 'before' | 'after';
+  }
+
+  function chromeWith(records: TaskRecords, badges: readonly (readonly [number, Shown])[]) {
+    const session = createFakeStore({ [tasksKey]: records });
+    const shown = new Map<number, Shown>(badges);
+    // 서비스 워커 하나. 멈춘 뒤로는 어떤 Chrome API 호출도 끝나지 않아, 그 줄의 일도 더 돌지 않는다.
+    const worker = (stop: StopPoint | null) => {
+      let calls = 0;
+      let stopped = false;
+      const halted = Promise.withResolvers<'stopped'>();
+      const never = new Promise<never>(() => undefined);
+      const call = async <T>(effect: () => T | Promise<T>): Promise<T> => {
+        if (stopped) return never;
+        const index = calls;
+        calls += 1;
+        const stopsAt = (when: StopPoint['when']) => {
+          if (stop?.call !== index || stop.when !== when) return false;
+          stopped = true;
+          halted.resolve('stopped');
+          return true;
+        };
+        if (stopsAt('before')) return never;
+        const value = await effect();
+        if (stopsAt('after')) return never;
+        return value;
+      };
+      const paint = (tabId: number, change: Partial<Shown>) =>
+        call(() => {
+          shown.set(tabId, { ...(shown.get(tabId) ?? blank), ...change });
+        });
+      const saving = controlledPart(save);
+      let ids = 0;
+      const runner = createTaskRunner({
+        session: {
+          ...session,
+          get: (key) => call(() => session.get(key)),
+          set: (items) => call(() => session.set(items)),
+        },
+        features: [toggle, save, copy],
+        parts: [saving.part, controlledPart(copy).part],
+        randomId: () => {
+          ids += 1;
+          return `n${String(ids)}`;
+        },
+        tabExists: (tabId) => call(() => tabId !== closedTab),
+        badge: async (tabId, badge) => {
+          await paint(tabId, { text: badge?.text ?? blank.text });
+          await paint(tabId, { title: badge?.title ?? blank.title });
+        },
+        listenTabs: () => undefined,
+        // 그 탭을 보는 팝업이 있어 페이지 위 알림은 보내지 않는다(이 시험이 보는 것이 아니다).
+        popupViewing: () => true,
+        isTabActive: () => Promise.resolve(true),
+        notify: () => Promise.resolve('delivered'),
+        record: () => undefined,
+      });
+      return { runner, saving, halted: halted.promise, calls: () => calls };
+    };
+    return { session, shown, worker };
+  }
+
+  type Worker = ReturnType<ReturnType<typeof chromeWith>['worker']>;
+
+  // 가짜의 호출은 모두 곧 끝나므로, 한 번 쉬면 일이 끝을 쓰고 배지를 다는 데까지 간다.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  // 멈춰 볼 일. 처음 기록과 배지에서 시작해 서비스 워커 하나가 한다.
+  const scenarios: readonly {
+    readonly name: string;
+    readonly records: TaskRecords;
+    readonly badges: readonly (readonly [number, Shown])[];
+    readonly run: (worker: Worker) => Promise<unknown>;
+  }[] = [
+    {
+      name: '작업이 끝나 끝난 기록을 쓰고 배지를 닮',
+      records: { '5': other },
+      badges: [[5, expectedOf(other)]],
+      run: async ({ runner, saving }) => {
+        await runner.start('save', 4);
+        saving.call(0).finish(ok({ summary: null }));
+        await settle();
+      },
+    },
+    {
+      name: '팝업이 결과를 보여 기록과 배지를 지움',
+      records: { '4': unseen, '5': other },
+      badges: [
+        [4, expectedOf(unseen)],
+        [5, expectedOf(other)],
+      ],
+      run: ({ runner }) => runner.seen(4, 'a'),
+    },
+    {
+      name: '보지 않은 결과가 있는 탭에서 새 작업을 시작함',
+      records: { '4': unseen, '5': other },
+      badges: [
+        [4, expectedOf(unseen)],
+        [5, expectedOf(other)],
+      ],
+      run: ({ runner }) => runner.start('copy', 4),
+    },
+    {
+      name: '탭이 다른 문서로 이동해 Chrome이 지운 배지를 다시 닮',
+      records: { '4': unseen, '5': other },
+      badges: [[5, expectedOf(other)]],
+      run: ({ runner }) => runner.tabNavigated(4),
+    },
+    {
+      name: '다시 시작한 서비스 워커가 진행 중이던 작업을 끝내고 닫힌 탭의 기록을 지움',
+      records: { '4': running, '5': other, [String(closedTab)]: unseen },
+      badges: [[5, expectedOf(other)]],
+      run: ({ runner }) => runner.recover(),
+    },
+  ];
+
+  // 서비스 워커가 그 일을 하다 멈추면(stop이 null이면 끝까지 한다) 새 서비스 워커가 시작해 복구한다(startBackground가
+  // 시작할 때 하는 일).
+  async function stopAndRestart(scenario: (typeof scenarios)[number], stop: StopPoint | null) {
+    const chrome = chromeWith(scenario.records, scenario.badges);
+    const first = chrome.worker(stop);
+    await Promise.race([scenario.run(first), first.halted]);
+    const second = chrome.worker(null);
+    await second.runner.recover();
+    return { chrome, first, second };
+  }
+
+  it.each(scenarios)(
+    '$name: 어느 Chrome API 호출의 앞이나 뒤에서 멈춰도 배지가 기록과 같고, 남은 결과를 보면 기록과 배지가 함께 지워진다',
+    async (scenario) => {
+      const total = (await stopAndRestart(scenario, null)).first.calls();
+      expect(total).toBeGreaterThan(1);
+      for (let call = 0; call < total; call += 1) {
+        for (const when of ['before', 'after'] as const) {
+          const at = `호출 ${String(call)}의 ${when === 'before' ? '앞' : '뒤'}에서 멈춤`;
+          const { chrome, second } = await stopAndRestart(scenario, { call, when });
+          const records = parseTasks(chrome.session.peek(tasksKey)) ?? {};
+          for (const tabId of openTabs) {
+            expect(chrome.shown.get(tabId) ?? blank, `${at}, 탭 ${String(tabId)}`).toEqual(
+              expectedOf(taskOf(records, tabId)),
+            );
+          }
+          // 남은 결과는 팝업이 보인 뒤 확인을 보낸다. 그러면 기록과 배지가 함께 지워진다(COM-10.4).
+          for (const tabId of openTabs) {
+            const task = taskOf(records, tabId);
+            if (task !== null) await second.runner.seen(tabId, task.id);
+          }
+          expect(chrome.session.peek(tasksKey), `${at}, 확인 뒤`).toEqual({});
+          for (const tabId of openTabs) {
+            expect(chrome.shown.get(tabId) ?? blank, `${at}, 확인 뒤 탭 ${String(tabId)}`).toEqual(
+              blank,
+            );
+          }
+        }
+      }
+    },
+  );
 });
 
 describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {

@@ -10,6 +10,7 @@ export const strings = {
   running: (name: string) => `이 탭에서 ${name} 진행 중이다. 끝난 뒤 다시 한다.`,
   readFailed: '작업 기록을 읽지 못했다.',
   writeFailed: '작업 기록을 남기지 못했다.',
+  badgeFailed: '확장 아이콘의 배지를 지우지 못해 작업 기록을 지우지 않았다.',
   timeout: (seconds: number) => `${String(seconds)}초 안에 끝나지 않아 멈췄다.`,
   unexpected: '작업 중에 예상하지 못한 오류가 났다.',
   interrupted: '확장이 작업 도중 다시 시작되어 끝까지 하지 못했다. 다시 실행한다.',

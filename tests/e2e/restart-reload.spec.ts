@@ -157,6 +157,49 @@ test.describe('서비스 워커가 다시 시작함', () => {
     await after.run(fixtureTask.name).click();
     await expect(after.status).toHaveText('시험 작업: 진행 중이다.');
   });
+
+  test('이슈 #7 결정 0038 앞 서비스 워커가 끝난 기록을 쓰고 배지를 달기 전에 멈췄으면, 다시 시작한 서비스 워커가 그 탭에 배지를 단다', async ({
+    context,
+    extensionId,
+  }) => {
+    const worker = await serviceWorkerOf(context);
+    const page = await openPage(context);
+    const tabId = await tabIdOf(worker, page);
+    // 작업 실행이 끝난 기록을 쓴 직후와 같은 상태를 만든다: 기록은 있고 배지는 아직 없다.
+    await worker.evaluate(
+      async ({ key, records }) => {
+        await chrome.storage.session.set({ [key]: records });
+      },
+      {
+        key: 'tasks',
+        records: {
+          [String(tabId)]: {
+            id: 'earlier',
+            featureId: fixtureTask.id,
+            status: 'succeeded',
+            summary: fixtureSummary,
+          },
+        },
+      },
+    );
+    expect(await badgeOf(worker, tabId)).toEqual({ text: '', title: defaultTitle });
+
+    const workerStatus = await watchServiceWorker(await context.newPage());
+    await workerStatus.stop();
+    const waker = await openPopup(context, extensionId);
+    await workerStatus.reach('running');
+    const restarted = await serviceWorkerOf(context);
+    await expect
+      .poll(() => badgeOf(restarted, tabId))
+      .toEqual({ text: '✓', title: `${defaultTitle}: 시험 작업 끝남` });
+    await waker.close();
+
+    // 그 탭의 팝업이 결과를 보이면 배지와 기록이 함께 지워진다(COM-10.4. 배지를 먼저 지운다).
+    const opened = await popupFor(context, extensionId, page);
+    await expect(opened.status).toHaveText(`시험 작업: 끝났다. ${fixtureSummary}`);
+    await expect.poll(() => taskRecords(restarted)).toEqual({});
+    expect(await badgeOf(restarted, tabId)).toEqual({ text: '', title: defaultTitle });
+  });
 });
 
 test.describe('확장을 다시 불러옴', () => {
