@@ -38,3 +38,22 @@ export {
   watchTask,
   withoutTab,
 } from './tasks.ts';
+export {
+  type TabToggleRecords,
+  type TabTogglesWatchHandlers,
+  mayBeOn,
+  parseTabToggleHint,
+  parseTabToggles,
+  recordedTabs,
+  tabIsOn,
+  tabNotice,
+  tabToggleHintKey,
+  tabTogglesKey,
+  watchTabToggles,
+  withAllTabs,
+  withChoice,
+  withNotice,
+  withReplacedTab,
+  withTurnedOff,
+  withoutTab as withoutTabToggles,
+} from './tab-toggles.ts';

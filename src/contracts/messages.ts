@@ -143,6 +143,48 @@ export const taskSeen = defineRequest({
   senders: 'extension',
 });
 
+// 팝업이 그 탭들에서 탭마다 켜고 끄는 기능을 켜거나 끈다(TAB-2 기대 동작 1, 결정 0043). 서비스 워커는 탭마다 고른 것을
+// storage.session에 쓰고(그 탭이 "모든 탭" 스위치와 같으면 고른 것을 지운다) 그 탭들의 Chrome 상태를 맞춘다.
+export const tabToggleSet = defineRequest({
+  type: 'tabToggle.set',
+  payload: v.object({
+    featureId: v.string(),
+    tabIds: v.array(v.int()),
+    on: v.boolean(),
+  }),
+  value: v.null(),
+  senders: 'extension',
+});
+
+// 그 탭에서 켜진 탭마다 켜고 끄는 기능(기능 id의 목록). 콘텐츠 스크립트가 시작할 때 묻고(tabState.get), 바뀌면 서비스
+// 워커가 그 탭의 모든 프레임에 알린다(tabState.changed, 결정 0043). 콘텐츠 스크립트는 storage.session을 읽지 않는다(결정 0005).
+// 이 값은 서비스 워커만 보낸다.
+const tabStateSchema = v.object({ on: v.array(v.string()) });
+
+export type TabState = v.InferOutput<typeof tabStateSchema>;
+
+// 콘텐츠 스크립트가 자기 탭의 상태를 묻는다. 보낸 곳의 탭으로 답한다.
+export const tabStateGet = defineRequest({
+  type: 'tabState.get',
+  payload: v.object({}),
+  value: tabStateSchema,
+  senders: 'any',
+});
+
+// 기능별 명령의 봉투(결정 0043). 이름과 내용의 스키마는 그 기능의 명령(contracts/command.ts의 defineCommand)이 정하고, 받는
+// 쪽이 그것으로 다시 검증한다. 콘텐츠 스크립트가 보내면 서비스 워커가 그 기능의 서비스 워커 쪽에 넘기고(보낸 탭과 프레임을
+// 함께), 서비스 워커가 보내면 그 프레임의 실행 틀이 그 기능의 페이지 쪽에 넘긴다.
+export const featureCommand = defineRequest({
+  type: 'feature.command',
+  payload: v.object({
+    featureId: v.pipe(v.string(), v.maxLength(64)),
+    name: v.pipe(v.string(), v.maxLength(64)),
+    payload: v.unknown(),
+  }),
+  value: v.unknown(),
+  senders: 'any',
+});
+
 export const requests = [
   settingsUpdate,
   storageEnsureReady,
@@ -152,6 +194,9 @@ export const requests = [
   tabStatus,
   taskStart,
   taskSeen,
+  tabToggleSet,
+  tabStateGet,
+  featureCommand,
 ] as const;
 
 // 서비스 워커가 콘텐츠 스크립트에 보내는 요청(chrome.tabs.sendMessage). 콘텐츠 스크립트는 이 확장의 서비스 워커가 보낸
@@ -178,6 +223,15 @@ export const pageStatus = defineRequest({
 });
 
 export type PageStatus = v.InferOutput<typeof pageStatus.value>;
+
+// 서비스 워커가 그 탭의 모든 프레임에 탭의 상태가 바뀌었다고 알린다(위 tabState.get). 받는 쪽이 없는 프레임(이 확장이 스크립트를
+// 넣을 수 없는 페이지)은 그대로 둔다.
+export const tabStateChanged = defineRequest({
+  type: 'tabState.changed',
+  payload: tabStateSchema,
+  value: v.null(),
+  senders: 'extension',
+});
 
 // 팝업이 열려 있는 동안 서비스 워커에 여는 연결(chrome.runtime.connect)의 이름과 첫 메시지. 서비스 워커는 연결이 열린
 // 동안 그 탭을 "팝업이 보는 탭"으로 안다(결정 0024).

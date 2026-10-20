@@ -1,10 +1,12 @@
 import {
   type ElementRef,
+  type FeatureCommand,
   type PageBundle,
   type PageStatus,
   type UnmetReason,
   pageRuntimeKey,
   retireEventName,
+  v,
 } from '../contracts/index.ts';
 import {
   type NamedElement,
@@ -15,7 +17,15 @@ import {
   createScope,
   elementTimeoutMs,
 } from '../dom/index.ts';
-import { type AppError, type ErrorKind, type Result, runMachine } from '../shared/index.ts';
+import {
+  type AppError,
+  type ErrorKind,
+  type Result,
+  appError,
+  err,
+  ok,
+  runMachine,
+} from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import {
   type Lifecycle,
@@ -59,11 +69,37 @@ interface PageRuntimeDeps {
   // 서비스 워커가 지금 상태(외부 화면에 기대한 것이 어긋난 기능)를 물으면 answer로 답한다(결정 0026, 0034). 돌려준 함수로 듣기를
   // 그만둔다.
   readonly listenStatus: (answer: () => PageStatus) => () => void;
+  // 이 탭에서 켜진 탭마다 켜고 끄는 기능을 받는다(결정 0043). 탭마다 켜는 기능의 페이지 쪽 일이 이 묶음에 있을 때만 부른다.
+  // 돌려준 함수로 그만둔다.
+  readonly subscribeTab: (handlers: {
+    readonly apply: (on: ReadonlySet<string>) => void;
+    readonly problem: (error: AppError) => void;
+  }) => () => void;
+  // 기능의 명령을 그 기능의 서비스 워커 쪽에 보낸다(feature.command).
+  readonly sendCommand: (
+    featureId: string,
+    name: string,
+    payload: unknown,
+  ) => Promise<Result<unknown, AppError>>;
+  // 서비스 워커가 이 프레임에 보낸 기능의 명령을 받는다. 돌려준 함수로 듣기를 그만둔다.
+  readonly listenCommands: (
+    handle: (featureId: string, name: string, payload: unknown) => Result<unknown, AppError>,
+  ) => () => void;
 }
 
 // 같은 스크립트가 한 프레임에 여러 번 실려도 실행 틀은 하나만 만든다(COM-1.4). 표식의 값은 그 실행 틀의 묶음이다.
 // 격리된 쪽의 전역은 같은 확장의 콘텐츠 스크립트끼리만 함께 본다.
 const runtimeMarker = Symbol.for(pageRuntimeKey);
+
+// 실행 틀이 기능 명령에 답하는 실패의 문구.
+const strings = {
+  badAnswer: '서비스 워커의 답이 명령의 형식에 맞지 않는다.',
+  badCommand: '명령의 내용이 맞지 않는다.',
+  noAnswerer: '이 프레임에서 그 명령에 답하는 기능이 돌고 있지 않다.',
+  retired: '확장이 다시 로드되었다. 이 페이지를 새로 고친다.',
+};
+
+const commandKey = (featureId: string, name: string) => `${featureId}/${name}`;
 
 // 물러남 이벤트를 받았는데 아직 연결되어 있을 때 다시 확인하는 때(ms). 끝없이 확인하지 않는다(quality 069).
 const retireRecheckDelaysMs = [200, 1000, 5000];
@@ -79,8 +115,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   // 콘텐츠 스크립트는 모든 프레임에 실리므로(아키텍처 2장) 정의의 프레임 범위는 여기서 지킨다.
   const parts = deps.topFrame ? deps.parts : deps.parts.filter((part) => part.frames === 'all');
 
-  // 시작하는 방법: 이 실행의 자원 범위와 외부 화면 요소 찾기·적용 확인을 받아 기능을 시작한다.
-  type Start = (run: Pick<PageStart, 'scope' | 'find' | 'verify'>) => void;
+  // 시작하는 방법: 이 실행의 자원 범위와 외부 화면 요소 찾기·적용 확인, 기능 명령을 받아 기능을 시작한다.
+  type Start = (run: Omit<PageStart, keyof PageContext | 'topFrame'>) => void;
 
   // 기능의 켜기·끄기 수명은 상태 기계(lifecycle.ts)가 정하고, 실행 틀은 그 할 일만 한다(quality 062).
   // 상태 기계는 실행 번호만 알고, 그 실행의 자원 범위는 여기 둔다. 'start'와 'watch'가 만들고 'close'가 닫고 지운다.
@@ -170,8 +206,35 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
               unmet('not-applied', element);
             },
           });
+        // 기능 명령(결정 0043). 다른 기능의 명령을 쓰면 결함이다. 시작 함수의 예외처럼 그 기능만 멈춘다.
+        const own = (command: FeatureCommand<unknown, unknown>) => {
+          if (command.featureId !== featureId) {
+            throw new Error(`기능 ${featureId}이 다른 기능(${command.featureId})의 명령을 썼다.`);
+          }
+        };
+        const send: PageStart['send'] = async (command, payload) => {
+          own(command);
+          const sent = await deps.sendCommand(command.featureId, command.name, payload);
+          if (!sent.ok) return sent;
+          const value = v.safeParse(command.value, sent.value);
+          return value.success ? ok(value.output) : err(appError('unexpected', strings.badAnswer));
+        };
+        const answer: PageStart['answer'] = (command, handle) => {
+          own(command);
+          const key = commandKey(command.featureId, command.name);
+          const answerer = (payload: unknown): Result<unknown, AppError> => {
+            const parsed = v.safeParse(command.payload, payload);
+            return parsed.success
+              ? handle(parsed.output)
+              : err(appError('invalid-input', strings.badCommand));
+          };
+          answerers.set(key, answerer);
+          scope.defer(() => {
+            if (answerers.get(key) === answerer) answerers.delete(key);
+          });
+        };
         try {
-          effect.start({ scope, find, verify });
+          effect.start({ scope, find, verify, send, answer });
         } catch {
           // 시작 도중의 예외: 그때까지 범위에 맡긴 자원을 치우고 기록한다.
           dispatch({ type: 'fail', featureId, run });
@@ -223,18 +286,33 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     dispatch({ type: 'stopAll' });
   };
 
-  // 바뀐 기능만 다시 적용한다(결정 0011 읽는 쪽 계약 5). 기능마다 그 기능의 설정(JSON)이 key다.
-  const apply = (snapshot: Snapshot) => {
+  // 바뀐 기능만 다시 적용한다(결정 0011 읽는 쪽 계약 5). 기능마다 그 기능의 설정(JSON)이 key다. 탭마다 켜고 끄는 기능은 이
+  // 탭에서 켜졌는지가 key이고, 꺼졌으면 시작하지 않는다(결정 0043). 설정을 받기 전에는 적용하지 않는다.
+  let latest: Snapshot | null = null;
+  let tabOn: ReadonlySet<string> = new Set();
+  const desire = () => {
+    const snapshot = latest;
+    if (snapshot === null) return;
     dispatch({
       type: 'apply',
-      desired: parts.map((part) => ({
-        featureId: part.featureId,
-        key: JSON.stringify(snapshot.features.get(part.featureId) ?? null),
-        start: (run: Pick<PageStart, 'scope' | 'find' | 'verify'>) => {
-          part.start(snapshot, { ...deps.context, ...run });
-        },
-      })),
+      desired: parts.map((part) => {
+        const off = part.toggledBy === 'tab' && !tabOn.has(part.featureId);
+        return {
+          featureId: part.featureId,
+          key:
+            part.toggledBy === 'tab'
+              ? String(!off)
+              : JSON.stringify(snapshot.features.get(part.featureId) ?? null),
+          start: (run: Omit<PageStart, keyof PageContext | 'topFrame'>) => {
+            if (!off) part.start(snapshot, { ...deps.context, ...run, topFrame: deps.topFrame });
+          },
+        };
+      }),
     });
+  };
+  const apply = (snapshot: Snapshot) => {
+    latest = snapshot;
+    desire();
   };
 
   // 웹 페이지도 이 이벤트를 보낼 수 있다. 연결이 실제로 끊겼을 때만 따른다(결정 0008).
@@ -280,6 +358,32 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     if (checkConnection()) notices.show(text);
   });
 
+  // 기능의 명령에 답하는 곳(기능 id와 이름 → 답하는 함수). 기능의 실행이 등록하고 그 범위가 닫히면 지운다(결정 0043).
+  const answerers = new Map<string, (payload: unknown) => Result<unknown, AppError>>();
+  const stopCommands = deps.listenCommands((featureId, name, payload) => {
+    if (!checkConnection()) return err(appError('disconnected', strings.retired));
+    const answerer = answerers.get(commandKey(featureId, name));
+    return answerer === undefined
+      ? err(appError('unavailable', strings.noAnswerer))
+      : answerer(payload);
+  });
+
+  // 탭마다 켜고 끄는 기능이 이 묶음에 있으면 이 탭에서 켜진 것을 받는다(결정 0043).
+  const stopTab = parts.some((part) => part.toggledBy === 'tab')
+    ? deps.subscribeTab({
+        apply: (on) => {
+          if (!checkConnection()) return;
+          tabOn = on;
+          desire();
+        },
+        problem: (error) => {
+          if (!checkConnection()) return;
+          if (error.kind === 'disconnected') retire();
+          else report({ featureId: null, kind: error.kind });
+        },
+      })
+    : () => undefined;
+
   // 팝업이 열릴 때 서비스 워커가 최상위 프레임에 묻는다(결정 0026, 0034). 상태 기계의 지금 상태에서 계산한다.
   const stopStatus = deps.listenStatus(() => ({
     unmet: unmetOf(lifecycle.state()).map(({ featureId, unmet }) => ({
@@ -318,6 +422,8 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     },
     stopNotices,
     stopStatus,
+    stopCommands,
+    stopTab,
     notices.close,
     stopAll,
     () => {

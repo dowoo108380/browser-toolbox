@@ -4,7 +4,7 @@ import { elementTimeoutMs, pageElementAttribute } from '../../src/dom/index.ts';
 import { page } from '../../src/features/chatgpt-width/page.ts';
 import { startPageRuntime } from '../../src/page/index.ts';
 import type { PageProblem } from '../../src/page/runtime.ts';
-import { ok } from '../../src/shared/index.ts';
+import { appError, err, ok } from '../../src/shared/index.ts';
 import type { SettingsReaderHandlers } from '../../src/storage/index.ts';
 
 // GPT-2를 실제 실행 틀(찾기, 적용 확인, 기능 수명, 기록)로 로그인한 chatgpt.com의 화면 바꾸기에서 본다(COM-6, 결정 0034).
@@ -130,6 +130,9 @@ function startGpt2() {
     },
     isConnected: () => runtime.connected,
     listenNotices: () => () => undefined,
+    subscribeTab: () => () => undefined,
+    sendCommand: () => Promise.resolve(err(appError('unavailable', '기능 명령을 쓰지 않는다.'))),
+    listenCommands: () => () => undefined,
     listenStatus: (answer) => {
       answerStatus = answer;
       return () => undefined;

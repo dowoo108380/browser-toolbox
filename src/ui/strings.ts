@@ -55,4 +55,14 @@ export const strings = {
   taskCancelled: (name: string, reason: string) => `${name}: 취소했다. ${reason}`,
   // 다른 실행 기능이 쓸 수 없는 이유(COM-10.7). '쓸 수 없음:' 뒤에 붙는다.
   runningHere: (name: string) => `이 탭에서 ${name} 진행 중`,
+  // 탭마다 켜고 끄는 기능(결정 0043).
+  allTabs: '모든 탭',
+  windowTabs: '이 창의 탭',
+  turnOnSelected: '고른 탭 켜기',
+  turnOffSelected: '고른 탭 끄기',
+  untitledTab: '제목을 볼 수 없는 탭',
+  // 웹 페이지가 아닌 탭(Chrome 내부 화면, 새 탭, 파일, 웹 스토어). '쓸 수 없음:' 뒤에 붙는다.
+  webPageOnly: '웹 페이지에서만 쓸 수 있음',
+  // 서비스 워커가 남긴 까닭을 이 판이 모를 때(일어나면 안 된다).
+  unknownNotice: '알 수 없는 까닭으로 멈췄다.',
 };

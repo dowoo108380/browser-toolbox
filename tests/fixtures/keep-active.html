@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>활성 상태 유지 시험</title>
+    <!--
+      페이지 활성 상태 유지(TAB-2) 시험 페이지. 보임·초점·입력을 기록하는 코드는 시험이 넣는다(tests/lint/fixtures.test.ts).
+      왼쪽 위에 단추와 링크, 오른쪽 위에 영상과 다른 사이트의 iframe이 있고, 나머지는 빈 곳(안전한 곳)이다.
+    -->
+    <style>
+      body {
+        margin: 0;
+        font: 16px/1.5 sans-serif;
+      }
+      .controls {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 240px;
+        height: 160px;
+      }
+      .controls button {
+        display: block;
+        width: 240px;
+        height: 80px;
+      }
+      .controls a {
+        display: block;
+        height: 80px;
+      }
+      video {
+        position: absolute;
+        left: 300px;
+        top: 0;
+        width: 240px;
+        height: 160px;
+        background: #000;
+      }
+      iframe {
+        position: absolute;
+        left: 560px;
+        top: 0;
+        width: 240px;
+        height: 160px;
+      }
+      .empty {
+        position: absolute;
+        left: 0;
+        top: 200px;
+        right: 0;
+        bottom: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      <button type="button" id="button">단추</button>
+      <a href="#link" id="link">링크</a>
+    </div>
+    <video id="video" muted loop></video>
+    <iframe
+      id="frame"
+      title="다른 사이트"
+      src="http://insecure.test:4174/keep-active-frame.html"
+    ></iframe>
+    <div class="empty"><p>빈 곳</p></div>
+  </body>
+</html>

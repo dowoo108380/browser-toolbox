@@ -15,8 +15,9 @@ export const categories = [
 
 export type Category = (typeof categories)[number];
 
-// 기능이 요청하는 Chrome 권한. 기능을 만들며 필요한 것을 더한다(결정 0009).
-type FeaturePermission = never;
+// 기능이 요청하는 Chrome 권한. 기능을 만들며 필요한 것을 더한다(결정 0009). debugger: 활성 상태 유지(TAB-2)의 초점
+// 흉내와 가짜 입력(결정 0041).
+type FeaturePermission = 'debugger';
 
 // 사이트 전용 기능이 작용하는 사이트(결정 0029). 사이트마다 콘텐츠 스크립트 묶음 하나가 그 주소에 실리고, 모든 사이트의
 // 묶음(공통)은 그 주소에 실리지 않는다. YouTube는 그 사이트의 기능을 만들 때 더한다.
@@ -37,6 +38,9 @@ export interface ContentTarget {
   readonly sites: 'all' | Site;
   // 'top'이면 탭의 최상위 프레임에서만 작용한다.
   readonly frames: 'all' | 'top';
+  // 참이면 이 기능은 페이지의 세계(MAIN)에 실리는 페이지 쪽 스크립트(features/<기능>/main.ts, 진입점 entries/main-<기능 id>.ts)를
+  // 가진다. manifest가 같은 사이트와 프레임에 document_start로 싣는다(아키텍처 2장, 결정 0043).
+  readonly mainWorld?: true;
 }
 
 // "켜고 끄기" 기능의 설정은 켜짐 여부를 가진다(COM-1).
@@ -45,7 +49,6 @@ export interface ToggleSettings {
 }
 
 // 기능 하나의 원본(결정 0004, 아키텍처 3장). 다른 곳은 이것을 읽기만 한다. 종류마다 그 종류에만 뜻이 있는 것을 둔다(055).
-// "탭마다 켜고 끄기" 종류는 그런 기능을 처음 만들 때 더한다.
 interface FeatureBase {
   readonly id: string;
   // 이 기능이 맡는 요구사항 번호(예: MED-1).
@@ -76,12 +79,35 @@ export interface ActionFeature extends FeatureBase {
   };
 }
 
-export type FeatureDefinition = ToggleFeature | ActionFeature;
+// 탭마다 켜고 끄기(용어집, 결정 0043). 설정의 enabled는 "모든 탭" 스위치다: 켜면 열린 탭과 앞으로 여는 탭이 모두 켜지고, 끄면
+// 모두 꺼진다. 탭마다 따로 켜고 끈 것은 서비스 워커가 storage.session에 두고, 스위치가 바뀌면 지운다. 확장을 다시 불러오거나
+// 브라우저를 다시 켜면 탭마다 켠 것은 사라지고 스위치는 남는다(TAB-2 기대 동작 1, 10).
+export interface TabToggleFeature<S extends ToggleSettings = ToggleSettings> extends FeatureBase {
+  readonly kind: 'tab-toggle';
+  readonly settings: {
+    readonly schema: v.Schema<S>;
+    readonly defaults: S;
+  };
+  // 탭마다의 알림: 그 기능의 서비스 워커 쪽이 정하는 이름 → 팝업의 탭 목록이 그 탭에 보이는 문구. 그 탭을 끈 까닭(예: 디버거를
+  // 붙이지 못함)이나 켜진 채 하지 못한 일(예: 가짜 입력을 보낼 곳이 없음)이다.
+  readonly notices: Readonly<Record<string, string>>;
+}
+
+export type FeatureDefinition = ToggleFeature | ActionFeature | TabToggleFeature;
+
+// 설정을 저장하는 기능(켜고 끄기, 탭마다 켜고 끄기의 "모든 탭" 스위치). 설정을 읽고 쓰는 곳은 이것만 받는다.
+export type SettingsFeature = ToggleFeature | TabToggleFeature;
 
 // 페이지에 작용하는 켜고 끄기 기능. 페이지 쪽 일(definePagePart)은 이것만 받는다.
 export type PageToggleFeature<S extends ToggleSettings = ToggleSettings> = ToggleFeature<S> & {
   readonly content: ContentTarget;
 };
+
+// 페이지에 작용하는 탭마다 켜고 끄기 기능. 탭마다의 페이지 쪽 일(defineTabPagePart)은 이것만 받는다.
+export type PageTabToggleFeature<S extends ToggleSettings = ToggleSettings> =
+  TabToggleFeature<S> & {
+    readonly content: ContentTarget;
+  };
 
 // 페이지에 작용한다고 적은 정의는 그 타입을 그대로 돌려준다. 그래서 페이지에 작용하지 않는 기능(content: null)에 페이지 쪽
 // 일을 만들면 타입 검사가 막는다.
@@ -92,6 +118,9 @@ export function defineFeature<S extends ToggleSettings>(
   definition: ToggleFeature<S>,
 ): ToggleFeature<S>;
 export function defineFeature(definition: ActionFeature): ActionFeature;
+export function defineFeature<S extends ToggleSettings>(
+  definition: PageTabToggleFeature<S>,
+): PageTabToggleFeature<S>;
 export function defineFeature(definition: FeatureDefinition): FeatureDefinition {
   return definition;
 }
@@ -99,6 +128,13 @@ export function defineFeature(definition: FeatureDefinition): FeatureDefinition 
 // 설정을 저장하는 기능. 설정을 읽고 쓰는 곳(읽기 도우미, 서비스 워커의 설정 쓰기)은 이것만 받는다.
 export function featuresWithSettings(
   features: readonly FeatureDefinition[],
-): readonly ToggleFeature[] {
-  return features.filter((feature) => feature.kind === 'toggle');
+): readonly SettingsFeature[] {
+  return features.filter((feature) => feature.kind !== 'action');
+}
+
+// 탭마다 켜고 끄는 기능.
+export function tabToggleFeatures(
+  features: readonly FeatureDefinition[],
+): readonly TabToggleFeature[] {
+  return features.filter((feature) => feature.kind === 'tab-toggle');
 }

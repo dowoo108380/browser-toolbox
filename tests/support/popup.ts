@@ -8,6 +8,7 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  tabToggleSet,
   taskSeen,
   taskStart,
 } from '../../src/contracts/index.ts';
@@ -16,6 +17,7 @@ import type {
   KeyValueStore,
   PopupAnnouncement,
   Requester,
+  TabInfo,
   currentTabId,
 } from '../../src/platform/index.ts';
 import { ok } from '../../src/shared/index.ts';
@@ -24,6 +26,7 @@ import {
   settingsFormat,
   startSettingsReader,
   watchRepairNotice,
+  watchTabToggles,
   watchTask,
 } from '../../src/storage/index.ts';
 import { type FeatureUiPart, PopupApp } from '../../src/ui/index.ts';
@@ -47,6 +50,8 @@ export interface TestPopupOptions {
   readonly announceTab?: (tabId: number) => PopupAnnouncement;
   // 기능의 화면 조각(결정 0030). 없으면 없다.
   readonly uiParts?: readonly FeatureUiPart[];
+  // 이 창의 탭(탭마다 켜고 끄는 기능의 목록, 결정 0043). 없으면 탭이 없다.
+  readonly windowTabs?: () => Promise<readonly TabInfo[]>;
 }
 
 export async function renderTestPopup(
@@ -60,6 +65,7 @@ export async function renderTestPopup(
     currentTab = () => Promise.resolve(ok(1)),
     announceTab = () => ({ renew: () => undefined, close: () => undefined }),
     uiParts = [],
+    windowTabs = () => Promise.resolve([]),
   }: TestPopupOptions,
 ): Promise<void> {
   await act(() => {
@@ -85,6 +91,10 @@ export async function renderTestPopup(
         watchTask: (tab, handlers) => watchTask(session, tab, handlers),
         taskSeen: (tab, taskId) => request(taskSeen, { tabId: tab, taskId }),
         announceTab,
+        windowTabs: async () => ok(await windowTabs()),
+        watchTabToggles: (handlers) => watchTabToggles(session, handlers),
+        setTabToggle: (featureId, tabIds, on) =>
+          request(tabToggleSet, { featureId, tabIds: [...tabIds], on }),
       }),
       container,
     );

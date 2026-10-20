@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { retireEventName } from '../../contracts/index.ts';
 import { createScope, hostTagName } from '../../dom/index.ts';
 import { type PagePart, startPageRuntime } from '../../page/index.ts';
-import { type ErrorKind, ok } from '../../shared/index.ts';
+import { type ErrorKind, appError, err, ok } from '../../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../../storage/index.ts';
 import { page } from './page.ts';
 
@@ -90,7 +90,20 @@ function start(snapshot: Snapshot) {
   const verify = () => {
     throw new Error('배속 표시창은 외부 화면 요소에 건 변경을 확인하지 않는다.');
   };
-  page.start(snapshot, { window, document, scope, find, verify });
+  page.start(snapshot, {
+    window,
+    document,
+    scope,
+    find,
+    verify,
+    topFrame: true,
+    send: () => {
+      throw new Error('이 기능은 기능 명령을 보내지 않는다.');
+    },
+    answer: () => {
+      throw new Error('이 기능은 기능 명령에 답하지 않는다.');
+    },
+  });
   return { close: scope.close, errors };
 }
 
@@ -558,6 +571,9 @@ describe('quality 010 배속 표시창의 콜백이 실패할 때(결정 0014)',
       isConnected: () => connected.value,
       listenNotices: () => () => undefined,
       listenStatus: () => () => undefined,
+      subscribeTab: () => () => undefined,
+      sendCommand: () => Promise.resolve(err(appError('unavailable', '기능 명령을 쓰지 않는다.'))),
+      listenCommands: () => () => undefined,
     });
     handlers?.apply(enabled, 1);
     return reports;

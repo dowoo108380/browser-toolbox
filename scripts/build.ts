@@ -11,7 +11,7 @@ import path from 'node:path';
 import { type BuildOptions, type Plugin, build } from 'esbuild';
 import { features as productFeatures } from '../src/features/list.ts';
 import { pageScriptBudgetBytes } from './budgets.ts';
-import { createManifest, minimumChromeVersion } from './manifest.ts';
+import { createManifest, mainWorldFeatures, minimumChromeVersion } from './manifest.ts';
 import { assertUniqueFeatureIds, contentBundles, syncGenerated } from './registry.ts';
 
 // dist/에 압축 해제된 확장을 만든다(결정 0002, 아키텍처 10장).
@@ -103,12 +103,26 @@ const builds: BuildOptions[] = [
     ),
     format: 'iife',
   },
+  // 페이지의 세계(MAIN)에 싣는 페이지 쪽 스크립트(아키텍처 2장, 결정 0043). 기능마다 파일 하나다.
+  {
+    ...common,
+    entryPoints: Object.fromEntries(
+      mainWorldFeatures(features).map((feature) => [
+        `main-${feature.id}`,
+        `src/entries/main-${feature.id}.ts`,
+      ]),
+    ),
+    format: 'iife',
+  },
 ];
 
 for (const options of builds) await build(options);
 
 // 웹 페이지에 실리는 묶음은 크기 예산을 넘으면 빌드를 멈춘다(quality 111).
-for (const file of contentBundles(features).map((bundle) => `content-${bundle}.js`)) {
+for (const file of [
+  ...contentBundles(features).map((bundle) => `content-${bundle}.js`),
+  ...mainWorldFeatures(features).map((feature) => `main-${feature.id}.js`),
+]) {
   const size = statSync(path.join(outdir, file)).size;
   if (size > pageScriptBudgetBytes) {
     throw new Error(

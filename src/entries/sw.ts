@@ -1,23 +1,40 @@
 import { startBackground } from '../background/index.ts';
-import { pageRuntimeKey, pageStatus, retireEventName, taskNotice } from '../contracts/index.ts';
+import {
+  featureCommand,
+  pageRuntimeKey,
+  pageStatus,
+  retireEventName,
+  tabStateChanged,
+  taskNotice,
+} from '../contracts/index.ts';
 import { claimAttribute, pageElementAttribute } from '../dom/index.ts';
 import { features } from '../features/list.ts';
 import {
+  allTabInfos,
+  attachDebugger,
   chromeLocalStore,
   chromeSessionStore,
+  detachDebugger,
   isTabActive,
+  listenDebuggerLoss,
   listenInstalled,
   listenRequests,
   listenTabEvents,
   probePageRuntime,
   retireInAllFrames,
+  sendDebuggerCommand,
+  sendToAllFrames,
   sendToTab,
+  setAutoDiscardable,
   setTabBadge,
   tabExists,
+  tabInfo,
   watchPopups,
+  watchTabActivity,
+  windowInfo,
 } from '../platform/index.ts';
 import { settingsFormat } from '../storage/index.ts';
-import { taskParts } from './generated/sw.ts';
+import { tabToggleParts, taskParts } from './generated/sw.ts';
 
 // 서비스 워커. Chrome 이벤트는 처음 실행될 때 바로 걸어야 하므로 여기서 곧바로 시작한다.
 startBackground({
@@ -47,4 +64,16 @@ startBackground({
     ),
   probePage: (tabId) => probePageRuntime(tabId, pageRuntimeKey),
   askPage: (tabId, timeoutMs) => sendToTab(pageStatus, tabId, {}, timeoutMs),
+  tabToggleParts,
+  attachDebugger,
+  detachDebugger,
+  sendDebuggerCommand,
+  listenDebuggerLoss,
+  tabInfo,
+  allTabInfos,
+  setAutoDiscardable,
+  windowInfo,
+  watchTabActivity,
+  pushTabState: (tabId, state) => sendToAllFrames(tabStateChanged, tabId, state),
+  sendFeatureCommand: (tabId, message) => sendToTab(featureCommand, tabId, message),
 });

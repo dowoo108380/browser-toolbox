@@ -1,10 +1,13 @@
 import type {
   ContentTarget,
+  FeatureCommand,
+  PageTabToggleFeature,
   PageToggleFeature,
-  ToggleFeature,
+  SettingsFeature,
   ToggleSettings,
 } from '../contracts/index.ts';
 import type { NamedElement, Scope } from '../dom/index.ts';
+import type { AppError, Result } from '../shared/index.ts';
 import { type Snapshot, settingsOf } from '../storage/index.ts';
 
 // 기능의 페이지 쪽 일(features/<기능>/page.ts)이 실행 틀에 내놓는 모양(결정 0014).
@@ -36,12 +39,29 @@ export interface PageStart extends PageContext {
     elements: readonly NamedElement[],
     check: (current: readonly Element[]) => number | null,
   ) => () => void;
+  // 이 문서가 탭의 최상위 프레임인지.
+  readonly topFrame: boolean;
+  // 이 기능의 서비스 워커 쪽에 명령을 보낸다(feature.command, 결정 0043). 답은 명령의 value로 검증해 준다. 다른 기능의 명령은
+  // 보내지 못한다(던진다).
+  readonly send: <Payload, Value>(
+    command: FeatureCommand<Payload, Value>,
+    payload: Payload,
+  ) => Promise<Result<Value, AppError>>;
+  // 서비스 워커 쪽이 이 프레임에 보낸 이 기능의 명령에 답한다. 내용은 명령의 payload로 검증해 넘긴다. 이번 실행이 끝나면(scope가
+  // 닫히면) 그만 답한다. 다른 기능의 명령에는 답하지 못한다(던진다).
+  readonly answer: <Payload, Value>(
+    command: FeatureCommand<Payload, Value>,
+    handle: (payload: Payload) => Result<Value, AppError>,
+  ) => void;
 }
 
 export interface PagePart {
   readonly featureId: string;
   // 이 기능이 작용하는 프레임(기능 정의의 content.frames). 'top'이면 실행 틀은 탭의 최상위 프레임에서만 시작한다.
   readonly frames: ContentTarget['frames'];
+  // 'tab'이면 탭마다 켜고 끄는 기능이다(결정 0043). 실행 틀은 서비스 워커가 이 탭에서 켜졌다고 알리면 시작하고, 꺼졌다고
+  // 알리면 닫는다. 없으면 이 기능의 설정이 바뀔 때마다 다시 시작한다.
+  readonly toggledBy?: 'tab';
   // 이 기능의 설정이 켜짐이면 시작한다. 꺼짐이면 아무것도 하지 않는다.
   // 기능이 페이지에 더한 화면 요소, 이벤트 처리, 타이머, 관찰은 모두 만든 즉시 scope에 맡긴다.
   // 실행 틀이 scope를 닫으면 모두 사라진다(COM-1.3). 시작 도중에 예외를 던져도 그때까지 맡긴 것은 치운다.
@@ -52,7 +72,7 @@ export interface PagePart {
 // 도우미에 넘긴다. 그래서 페이지에 작용하지 않는 기능이 늘어도 모든 페이지에 실리는 비용(정의를 싣고 스키마를 만들고
 // 항목을 검증하는 일)은 늘지 않는다. 다른 기능의 항목은 모르는 기능의 것처럼 보지 않는다(결정 0027, 0011 읽는 쪽 계약 4).
 export interface FeaturePagePart extends PagePart {
-  readonly feature: ToggleFeature;
+  readonly feature: SettingsFeature;
 }
 
 export function definePagePart<S extends ToggleSettings>(
@@ -66,6 +86,23 @@ export function definePagePart<S extends ToggleSettings>(
     start: (snapshot, context) => {
       const settings = settingsOf(snapshot, definition);
       if (settings.enabled) start(settings, context);
+    },
+  };
+}
+
+// 탭마다 켜고 끄는 기능의 페이지 쪽 일(결정 0043). 실행 틀은 서비스 워커가 이 탭에서 켜졌다고 알린 동안만 start를 부른다.
+// 설정("모든 탭" 스위치)은 서비스 워커가 탭마다의 켜짐을 정할 때 쓰므로 페이지 쪽 일에는 넘기지 않는다.
+export function defineTabPagePart<S extends ToggleSettings>(
+  definition: PageTabToggleFeature<S>,
+  start: (context: PageStart) => void,
+): FeaturePagePart {
+  return {
+    featureId: definition.id,
+    frames: definition.content.frames,
+    feature: definition,
+    toggledBy: 'tab',
+    start: (_snapshot, context) => {
+      start(context);
     },
   };
 }

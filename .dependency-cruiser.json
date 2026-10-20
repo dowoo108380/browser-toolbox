@@ -130,12 +130,12 @@
     },
     {
       "name": "entries-slot-files",
-      "comment": "진입점은 기능의 자리 파일(feature.ts, page.ts, background.ts, ui.tsx)만 가져온다(결정 0004).",
+      "comment": "진입점은 기능의 자리 파일(feature.ts, page.ts, background.ts, ui.tsx, 페이지 쪽 스크립트 main.ts)만 가져온다(결정 0004, 0043).",
       "severity": "error",
       "from": { "path": "^src/entries/" },
       "to": {
         "path": "^src/features/[^/]+/",
-        "pathNot": "^src/features/[^/]+/(feature\\.ts|page\\.ts|background\\.ts|ui\\.tsx)$"
+        "pathNot": "^src/features/[^/]+/(feature\\.ts|page\\.ts|background\\.ts|ui\\.tsx|main\\.ts)$"
       }
     },
     {

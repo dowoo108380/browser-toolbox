@@ -74,6 +74,13 @@ function start(width: number, options: { obeyed?: boolean } = {}) {
     window,
     document,
     scope,
+    topFrame: true,
+    send: () => {
+      throw new Error('이 기능은 기능 명령을 보내지 않는다.');
+    },
+    answer: () => {
+      throw new Error('이 기능은 기능 명령에 답하지 않는다.');
+    },
     find: (element, onFound) => {
       const search = { id: element.id, stopped: false };
       searches.push(search);

@@ -1,4 +1,4 @@
-import type { ToggleFeature, ToggleSettings } from '../contracts/index.ts';
+import type { TabToggleFeature, ToggleFeature, ToggleSettings } from '../contracts/index.ts';
 import { type SettingsFormat, classify } from './format.ts';
 import { type FeatureSettingsSpec, checkItems } from './items.ts';
 import { type RepairScope, wholeRepair } from './repair-notice.ts';
@@ -98,7 +98,7 @@ export function receive(
 // 한 기능의 설정. 없으면 기본값이다(결정 0011).
 export function settingsOf<S extends ToggleSettings>(
   snapshot: Snapshot,
-  definition: ToggleFeature<S>,
+  definition: ToggleFeature<S> | TabToggleFeature<S>,
 ): S {
   const value = snapshot.features.get(definition.id);
   if (value === undefined) return definition.settings.defaults;

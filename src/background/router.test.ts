@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  featureCommand,
   popupRemember,
   problemReport,
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabStateGet,
   tabStatus,
+  tabToggleSet,
   taskSeen,
   taskStart,
 } from '../contracts/index.ts';
@@ -33,6 +36,9 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       ),
       route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
       route(taskSeen, () => Promise.resolve(ok(null))),
+      route(tabToggleSet, () => Promise.resolve(ok(null))),
+      route(tabStateGet, () => Promise.resolve(ok({ on: [] }))),
+      route(featureCommand, () => Promise.resolve(ok(null))),
     ],
     (error) => unexpected.push(error),
   );
@@ -97,6 +103,31 @@ describe('요청 검증(결정 0006)', () => {
     }
   });
 
+  it('결정 0043 탭마다 켜고 끄기는 확장 화면만 바꾸고, 탭의 상태와 기능 명령은 콘텐츠 스크립트도 보낸다', async () => {
+    const { router } = setup();
+    const set = { type: 'tabToggle.set', payload: { featureId: 'a', tabIds: [1, 2], on: true } };
+    expect(await router(set, extension)).toEqual(ok(null));
+    const fromContent = await router(set, content);
+    expect(fromContent.ok).toBe(false);
+    if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+    expect(await router({ type: 'tabState.get', payload: {} }, content)).toEqual(ok({ on: [] }));
+    const command = {
+      type: 'feature.command',
+      payload: { featureId: 'a', name: 'hidden', payload: { hidden: true } },
+    };
+    expect(await router(command, content)).toEqual(ok(null));
+    // 이름과 기능 id의 길이는 봉투가 막는다(콘텐츠 스크립트가 보내는 글, 결정 0006).
+    const long = await router(
+      {
+        type: 'feature.command',
+        payload: { featureId: 'a'.repeat(65), name: 'hidden', payload: {} },
+      },
+      content,
+    );
+    expect(long.ok).toBe(false);
+    if (!long.ok) expect(long.error.kind).toBe('invalid-input');
+  });
+
   it('콘텐츠 스크립트도 준비 요청과 문제 기록은 보낼 수 있다', async () => {
     const { router } = setup();
     expect(await router({ type: 'storage.ensureReady', payload: {} }, content)).toEqual(ok(null));
@@ -151,6 +182,9 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         ),
         route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
         route(taskSeen, () => Promise.resolve(ok(null))),
+        route(tabToggleSet, () => Promise.resolve(ok(null))),
+        route(tabStateGet, () => Promise.resolve(ok({ on: [] }))),
+        route(featureCommand, () => Promise.resolve(ok(null))),
       ],
       (error) => unexpected.push(error),
     );

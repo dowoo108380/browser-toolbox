@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startTestBackground } from '../../tests/support/background.ts';
+import { createFakeBrowser } from '../../tests/support/fake-browser.ts';
 import { specs, stored } from '../../tests/support/settings.ts';
 import {
   type PageStatus,
@@ -48,6 +49,8 @@ function start(
     retireOldScripts: retire,
     probePage: () => Promise.resolve({ status: 'ran', marker: 'common' }),
     askPage: () => Promise.resolve({ delivery: 'delivered', value: { unmet: [] } }),
+    tabToggleParts: [],
+    ...createFakeBrowser().deps,
   });
   return () => {
     installed();

@@ -13,6 +13,7 @@ import { type NamedElement, pageElementAttribute } from '../../src/dom/index.ts'
 import { definePagePart, startPageRuntime } from '../../src/page/index.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
 import { settingsFormat, startSettingsReader } from '../../src/storage/index.ts';
+import { appError, err } from '../../src/shared/index.ts';
 import { startTestBackground } from '../support/background.ts';
 import { renderTestPopup, switchOf } from '../support/popup.ts';
 
@@ -127,6 +128,9 @@ function startExtension() {
     report: (problem) => request(problemReport, problem),
     isConnected: () => runtime.connected,
     listenNotices: () => () => undefined,
+    subscribeTab: () => () => undefined,
+    sendCommand: () => Promise.resolve(err(appError('unavailable', '기능 명령을 쓰지 않는다.'))),
+    listenCommands: () => () => undefined,
     listenStatus: (next) => {
       answer = next;
       return () => {

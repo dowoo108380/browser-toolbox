@@ -76,23 +76,35 @@ export function contentSource(
   return lines.join('\n');
 }
 
-// 서비스 워커가 실행 기능의 작업에 쓸 일(결정 0024). 실행 기능의 background.ts가 내놓는 task다.
-// 실행 기능마다 일이 꼭 하나 있는지는 서비스 워커가 시작할 때 본다(src/background/tasks.ts).
+// 서비스 워커가 쓸 기능의 일. 실행 기능의 background.ts는 작업의 일 task를(결정 0024), 탭마다 켜고 끄는 기능의 background.ts는
+// 탭마다의 일 background를 내놓는다(결정 0043). 기능마다 일이 꼭 하나 있는지는 서비스 워커가 시작할 때 본다
+// (src/background/tasks.ts, tab-toggles.ts).
 export function swSource(features: readonly FeatureDefinition[], root: string): string {
-  const parts = features.filter(
-    (feature) =>
-      feature.kind === 'action' &&
-      existsSync(path.join(root, 'src', 'features', feature.id, 'background.ts')),
-  );
+  const withBackground = (kind: FeatureDefinition['kind']) =>
+    features.filter(
+      (feature) =>
+        feature.kind === kind &&
+        existsSync(path.join(root, 'src', 'features', feature.id, 'background.ts')),
+    );
+  const tasks = withBackground('action');
+  const tabToggles = withBackground('tab-toggle');
+  const names = (parts: readonly FeatureDefinition[]) =>
+    parts.map((feature) => camelCase(feature.id)).join(', ');
   const lines = [
     ...header,
-    "import type { TaskPart } from '../../background/index.ts';",
-    ...parts.map(
+    "import type { TabTogglePart, TaskPart } from '../../background/index.ts';",
+    ...tasks.map(
       (feature) =>
         `import { task as ${camelCase(feature.id)} } from '../../features/${feature.id}/background.ts';`,
     ),
+    ...tabToggles.map(
+      (feature) =>
+        `import { background as ${camelCase(feature.id)} } from '../../features/${feature.id}/background.ts';`,
+    ),
     '',
-    `export const taskParts: readonly TaskPart[] = [${parts.map((feature) => camelCase(feature.id)).join(', ')}];`,
+    `export const taskParts: readonly TaskPart[] = [${names(tasks)}];`,
+    '',
+    `export const tabToggleParts: readonly TabTogglePart[] = [${names(tabToggles)}];`,
     '',
   ];
   return lines.join('\n');

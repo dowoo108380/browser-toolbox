@@ -123,7 +123,20 @@ function start(snapshot: Snapshot) {
       verification.stopped = true;
     };
   };
-  page.start(snapshot, { window, document, scope, find, verify });
+  page.start(snapshot, {
+    window,
+    document,
+    scope,
+    find,
+    verify,
+    topFrame: true,
+    send: () => {
+      throw new Error('이 기능은 기능 명령을 보내지 않는다.');
+    },
+    answer: () => {
+      throw new Error('이 기능은 기능 명령에 답하지 않는다.');
+    },
+  });
   return { close: scope.close, searches, verifications };
 }
 

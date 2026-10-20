@@ -88,7 +88,15 @@ function fakeChrome(
       get: (tabId: number) => Promise.resolve({ id: tabId }),
       onRemoved: event(),
       onUpdated: event(),
+      // 탭마다 켜고 끄는 기능이 듣는 탭과 창의 사건, 디버거의 끊김(결정 0042, 0043). 이 시험에서는 오지 않는다.
+      onActivated: event(),
+      onAttached: event(),
+      onDetached: event(),
+      onCreated: event(),
+      onReplaced: event(),
     },
+    windows: { onBoundsChanged: event(), onFocusChanged: event() },
+    debugger: { onDetach: event() },
     scripting: { executeScript },
   });
   return {

@@ -5,7 +5,8 @@ import {
   responseSchema,
   v,
 } from '../../src/contracts/index.ts';
-import { type TaskPart, startBackground } from '../../src/background/index.ts';
+import { type TabTogglePart, type TaskPart, startBackground } from '../../src/background/index.ts';
+import { tabToggleParts as productTabToggleParts } from '../../src/entries/generated/sw.ts';
 import type {
   Delivery,
   KeyValueStore,
@@ -20,6 +21,7 @@ import type {
 import { createFakeStore } from '../../src/platform/fake.ts';
 import { appError, err } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
+import { type FakeBrowser, createFakeBrowser } from './fake-browser.ts';
 
 // 실제 모듈끼리 연결한 시험(tests/integration)이 실제 서비스 워커(startBackground)를 시작한다. 가짜는 Chrome 경계뿐이다:
 // 저장소(받은 것), 메시지 통로(돌려주는 요청 함수, 또는 실제 요청 도우미가 부르는 chrome.runtime), 시계(startTime에서 시작해
@@ -49,14 +51,25 @@ export interface TestBackgroundOptions {
   readonly popupViewing?: (tabId: number) => boolean;
   readonly isTabActive?: (tabId: number) => Promise<boolean>;
   readonly notifyTab?: (tabId: number, text: string) => Promise<Delivery>;
+  // 탭, 창, 디버거의 가짜 Chrome(결정 0041–0043). 없으면 탭이 없는 새 가짜다.
+  readonly browser?: FakeBrowser;
+  // 탭마다 켜고 끄는 기능의 일. 없으면 제품의 일 가운데 features에 든 기능의 것이다.
+  readonly tabToggleParts?: readonly TabTogglePart[];
 }
 
 // 확장 화면과 콘텐츠 스크립트가 쓰는 요청 함수를 돌려준다. chromeRequester처럼 메시지를 구조화 복제로 건네고,
 // 응답을 그 요청의 정의로 검증한다. 서비스 워커가 실패로 답한 것만 answered다.
 export function startTestBackground(options: TestBackgroundOptions): Requester {
+  return startTestBackgroundFrom(options)({ kind: 'extension' });
+}
+
+// 보낸 곳을 정해 요청 함수를 만든다. 콘텐츠 스크립트가 보내는 요청(tabState.get, feature.command)을 시험하는 데 쓴다.
+export function startTestBackgroundFrom(
+  options: TestBackgroundOptions,
+): (sender: Sender) => Requester {
   const send = startBackgroundWith(options);
-  return async (definition, payload) => {
-    const response = await send({ type: definition.type, payload });
+  return (sender) => async (definition, payload) => {
+    const response = await send({ type: definition.type, payload }, sender);
     const parsed = v.safeParse(responseSchema(definition.value), response);
     if (!parsed.success) {
       return err({ ...appError('unexpected', '확장의 응답 형식이 맞지 않는다.'), answered: false });
@@ -78,7 +91,7 @@ export function startTestBackgroundOnRuntime(options: TestBackgroundOptions): vo
 // 때는 options.deliver가 정한다.
 function startBackgroundWith(
   options: TestBackgroundOptions,
-): (message: unknown) => Promise<unknown> {
+): (message: unknown, sender?: Sender) => Promise<unknown> {
   let handle: ((message: unknown, sender: Sender) => Promise<unknown>) | undefined;
   const clock = { time: options.startTime };
   let taskCount = 0;
@@ -112,12 +125,18 @@ function startBackgroundWith(
     askPage:
       options.askPage ??
       (() => Promise.resolve({ delivery: 'delivered', value: { unmet: [] } } as const)),
+    tabToggleParts:
+      options.tabToggleParts ??
+      productTabToggleParts.filter((part) =>
+        options.features.some((feature) => feature.id === part.featureId),
+      ),
+    ...(options.browser ?? createFakeBrowser()).deps,
   });
   const deliver = options.deliver ?? ((_type, send) => send());
-  return (message) => {
+  return (message, sender = { kind: 'extension' }) => {
     const send = async (): Promise<unknown> => {
       if (handle === undefined) throw new Error('서비스 워커가 요청을 듣지 않는다.');
-      return structuredClone(await handle(structuredClone(message), { kind: 'extension' }));
+      return structuredClone(await handle(structuredClone(message), sender));
     };
     const type: unknown = Reflect.get(Object(message), 'type');
     return deliver(typeof type === 'string' ? type : '', send);

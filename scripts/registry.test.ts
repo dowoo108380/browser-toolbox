@@ -46,6 +46,20 @@ const toggle = (id: string, content: FeatureDefinition['content']): FeatureDefin
     settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
   });
 
+const tabToggle = (id: string): FeatureDefinition =>
+  defineFeature({
+    id,
+    requirements: [],
+    name: id,
+    description: id,
+    category: 'tabs',
+    kind: 'tab-toggle',
+    content: { sites: 'all', frames: 'all' },
+    permissions: [],
+    settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
+    notices: {},
+  });
+
 const action = (id: string): FeatureDefinition =>
   defineFeature({
     id,
@@ -178,9 +192,36 @@ describe('등록 목록의 생성 규칙(결정 0004)', () => {
     }).not.toThrow();
   });
 
+  it('결정 0043 서비스 워커의 등록 목록에는 탭마다 켜고 끄는 기능 가운데 background.ts가 있는 것의 background를 따로 넣는다', () => {
+    const root = rootWith({
+      'tab-keep-active': ['feature.ts', 'page.ts', 'background.ts'],
+      'subtitle-export': ['feature.ts', 'background.ts'],
+      'tab-without-background': ['feature.ts'],
+    });
+    const source = swSource(
+      [
+        tabToggle('tab-keep-active'),
+        action('subtitle-export'),
+        tabToggle('tab-without-background'),
+      ],
+      root,
+    );
+    expect(source).toContain(
+      "import { background as tabKeepActive } from '../../features/tab-keep-active/background.ts';",
+    );
+    expect(source).toContain(
+      'export const tabToggleParts: readonly TabTogglePart[] = [tabKeepActive];',
+    );
+    expect(source).toContain('export const taskParts: readonly TaskPart[] = [subtitleExport];');
+    expect(source).not.toContain('tabWithoutBackground');
+  });
+
   it('넣을 기능이 없으면 빈 목록을 만든다(타입은 가져온다)', () => {
     const source = swSource([], rootWith({}));
-    expect(source).toContain("import type { TaskPart } from '../../background/index.ts';");
+    expect(source).toContain(
+      "import type { TabTogglePart, TaskPart } from '../../background/index.ts';",
+    );
     expect(source).toContain('export const taskParts: readonly TaskPart[] = [];');
+    expect(source).toContain('export const tabToggleParts: readonly TabTogglePart[] = [];');
   });
 });

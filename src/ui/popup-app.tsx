@@ -4,22 +4,27 @@ import type {
   Category,
   FeatureDefinition,
   TabStatus,
+  TabToggleFeature,
   ToggleFeature,
 } from '../contracts/index.ts';
-import type { PopupAnnouncement, RequestError } from '../platform/index.ts';
-import { type AppError, type Result, appError, err } from '../shared/index.ts';
+import type { PopupAnnouncement, RequestError, TabInfo } from '../platform/index.ts';
+import { type AppError, type Result, appError, err, isWebPage } from '../shared/index.ts';
 import {
   type RepairNotice,
   type RepairNoticeHandlers,
   type RepairScope,
   type SettingsReaderHandlers,
   type Snapshot,
+  type TabToggleRecords,
+  type TabTogglesWatchHandlers,
   type TaskRecord,
   type TaskWatchHandlers,
   isEmptyRepair,
   mergeRepairs,
   noRepair,
   settingsOf,
+  tabIsOn,
+  tabNotice,
 } from '../storage/index.ts';
 import { ActionItem } from './action-item.tsx';
 import { unavailableReason } from './availability.ts';
@@ -39,6 +44,7 @@ import type { FeatureUiPart } from './part.ts';
 import { SearchBox, SearchResults } from './feature-search.tsx';
 import { isSearchShortcut, searchFeatures } from './search.ts';
 import { strings } from './strings.ts';
+import { type TabRow, TabToggleItem } from './tab-toggle-item.tsx';
 import { TaskStatus } from './task-status.tsx';
 
 // 팝업(COM-2, 결정 0023). 위에 기능 검색 칸, 그 아래 왼쪽에 범주 목록, 오른쪽에 고른 범주의 기능 항목을 보인다.
@@ -81,6 +87,16 @@ interface PopupProps {
   // 그 탭을 본다고 서비스 워커에 알린다(팝업의 연결, 결정 0024). 그 탭에서 끝난 작업은 페이지 위에 알리지 않고 이 팝업이
   // 보인다. renew는 연결이 끊겼으면(서비스 워커가 다시 시작함) 다시 잇는다.
   readonly announceTab: (tabId: number) => PopupAnnouncement;
+  // 팝업이 붙은 창의 탭들(탭마다 켜고 끄는 기능의 탭 목록, 결정 0043).
+  readonly windowTabs: () => Promise<Result<readonly TabInfo[], AppError>>;
+  // 탭마다 켜고 끄는 기능의 기록(storage.session)을 받는다.
+  readonly watchTabToggles: (handlers: TabTogglesWatchHandlers) => () => void;
+  // 그 탭들에서 그 기능을 켜거나 끈다.
+  readonly setTabToggle: (
+    featureId: string,
+    tabIds: readonly number[],
+    on: boolean,
+  ) => Promise<Result<unknown, AppError>>;
 }
 
 // Chrome은 30초 동안 일이 없는 서비스 워커를 멈추고, 메시지를 받으면 그 시간을 다시 센다(Chrome 문서).
@@ -141,6 +157,9 @@ export function PopupApp({
   watchTask,
   taskSeen,
   announceTab,
+  windowTabs,
+  watchTabToggles,
+  setTabToggle,
 }: PopupProps) {
   const [stored, setStored] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -247,6 +266,31 @@ export function PopupApp({
     void taskSeen(tabId, shown.id);
   }, [task, tabId, taskSeen]);
   const running = task.latest?.status === 'running' ? task.latest : null;
+
+  // 탭마다 켜고 끄는 기능의 탭 목록(결정 0043): 이 창의 탭(열 때 한 번 묻는다)과 서비스 워커의 기록. 그런 기능이 없으면 묻지 않는다.
+  const hasTabToggles = features.some((feature) => feature.kind === 'tab-toggle');
+  const [openTabs, setOpenTabs] = useState<readonly TabInfo[] | null>(null);
+  const [toggleRecords, setToggleRecords] = useState<TabToggleRecords>({});
+  useEffect(() => {
+    if (!hasTabToggles) return undefined;
+    let open = true;
+    const order = nextOrder();
+    void windowTabs().then((result) => {
+      if (!open) return;
+      if (result.ok) setOpenTabs(result.value);
+      else report(result.error.message, order);
+    });
+    const stop = watchTabToggles({
+      records: setToggleRecords,
+      problem: (error) => {
+        report(error.message);
+      },
+    });
+    return () => {
+      open = false;
+      stop();
+    };
+  }, [hasTabToggles, windowTabs, watchTabToggles]);
 
   // 지금 탭을 알면 그 탭을 본다고 알리고, 팝업이 닫히면 연결을 닫는다. 깨울 때마다 끊긴 연결을 다시 잇는다(아래).
   const announcement = useRef<{ readonly renew: () => void } | null>(null);
@@ -408,6 +452,28 @@ export function PopupApp({
     });
   };
 
+  // 탭마다 켜고 끄는 기능의 탭 목록의 줄(TAB-2 기대 동작 8): 켜짐(고른 것, 없으면 스위치)과 까닭. 그 기능이 남긴 까닭이 먼저이고,
+  // 웹 페이지가 아닌 탭은 쓸 수 없는 이유를 보인다.
+  const tabRows = (feature: TabToggleFeature, allTabs: boolean): readonly TabRow[] | null =>
+    openTabs?.map((tab) => {
+      const notice = tabNotice(toggleRecords, feature.id, tab.id);
+      const noticeText =
+        notice === null ? null : (feature.notices[notice] ?? strings.unknownNotice);
+      return {
+        id: tab.id,
+        title: tab.title ?? strings.untitledTab,
+        on: tabIsOn(toggleRecords, feature.id, tab.id, allTabs),
+        reason:
+          noticeText ?? (isWebPage(tab.url) ? null : strings.unavailable(strings.webPageOnly)),
+      };
+    }) ?? null;
+
+  // 그 탭들에서 그 기능을 켜거나 끈다. 하지 못하면 이유를 알린다. 거절하지 않는다.
+  const applyTabs = async (feature: TabToggleFeature, tabIds: readonly number[], on: boolean) => {
+    const order = nextOrder();
+    reportResult(order, await setTabToggle(feature.id, tabIds, on));
+  };
+
   // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
   const run = async (feature: ActionFeature) => {
     if (tabId === null) return;
@@ -453,6 +519,22 @@ export function PopupApp({
                     },
                   })
             }
+          />
+        );
+      }
+      case 'tab-toggle': {
+        const allTabs = settingsOf(settings, feature).enabled;
+        return (
+          <TabToggleItem
+            key={feature.id}
+            feature={feature}
+            allTabs={allTabs}
+            disabled={!awake}
+            onAllTabs={(enabled) => {
+              void save(feature.id, { enabled });
+            }}
+            tabs={tabRows(feature, allTabs)}
+            onApply={(tabIds, on) => applyTabs(feature, tabIds, on)}
           />
         );
       }

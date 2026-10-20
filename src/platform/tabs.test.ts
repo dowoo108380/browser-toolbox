@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ok } from '../shared/index.ts';
-import { currentTabId, isTabActive, listenTabEvents, tabExists } from './tabs.ts';
+import {
+  allTabInfos,
+  currentTabId,
+  isTabActive,
+  listenTabEvents,
+  tabExists,
+  tabInfo,
+  watchTabActivity,
+} from './tabs.ts';
 
 // 탭 경계(결정 0024). 진짜 chrome 대신 시험이 만든 객체를 전역에 둔다. 서비스 워커를 깨우는지는 Chrome의 일이라
 // 여기서는 듣기를 걸고 그만두는 것만 본다(그만두면 깨우지 않는 것은 결정 0024의 실험 6).
@@ -123,5 +131,78 @@ describe('팝업이 붙은 창의 지금 탭(결정 0023)', () => {
   it('Chrome이 거절하면 던지지 않고 platform 실패로 준다(quality 067)', async () => {
     answer(() => Promise.reject(new Error('알려지지 않은 거절')));
     expect(await currentTabId()).toMatchObject({ ok: false, error: { kind: 'platform' } });
+  });
+});
+
+describe('탭마다 켜고 끄는 기능이 보는 탭의 사정(결정 0041)', () => {
+  // Chrome이 주는 탭. splitViewId가 -1이면 분할 보기에 들지 않았다(chrome.tabs.SPLIT_VIEW_ID_NONE).
+  const chromeTab = (id: number, active: boolean, splitViewId?: number, windowId = 1) => ({
+    id,
+    windowId,
+    active,
+    splitViewId,
+    url: `https://a.test/${String(id)}`,
+    title: '제목',
+    autoDiscardable: true,
+  });
+
+  it('TAB-2.25 활성 탭과 같은 분할 보기에 든 탭은 창에 나와 있다. 다른 분할 보기나 다른 창의 탭은 아니다', async () => {
+    const all = [
+      chromeTab(1, true, 5),
+      chromeTab(2, false, 5),
+      chromeTab(3, false, 6),
+      chromeTab(4, false, 6),
+      chromeTab(5, false, -1),
+      chromeTab(6, true, -1, 2),
+      // splitViewId가 없는 Chrome(140 전)의 탭.
+      chromeTab(7, false, undefined, 2),
+    ];
+    vi.stubGlobal('chrome', { tabs: { query: () => Promise.resolve(all) } });
+    const shown = (await allTabInfos()).filter((info) => info.shown).map((info) => info.id);
+    expect(shown).toEqual([1, 2, 6]);
+  });
+
+  it('탭 하나를 물을 때 분할 보기의 활성이 아닌 쪽이면 그 창의 활성 탭을 물어 가린다', async () => {
+    const query = vi.fn(() => Promise.resolve([chromeTab(1, true, 5)]));
+    const get = (id: number) =>
+      Promise.resolve(id === 2 ? chromeTab(2, false, 5) : chromeTab(id, false, id === 3 ? 8 : -1));
+    vi.stubGlobal('chrome', { tabs: { get, query } });
+    expect((await tabInfo(2))?.shown).toBe(true);
+    expect(query).toHaveBeenCalledWith({ windowId: 1, active: true });
+    expect((await tabInfo(3))?.shown).toBe(false);
+    query.mockClear();
+    expect((await tabInfo(4))?.shown).toBe(false);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('분할 보기에 들거나 나온 바뀜은 넘기고, 제목만 바뀐 것은 넘기지 않는다', () => {
+    const events = {
+      onActivated: fakeEvent(),
+      onAttached: fakeEvent(),
+      onDetached: fakeEvent(),
+      onUpdated: fakeEvent(),
+      onCreated: fakeEvent(),
+      onReplaced: fakeEvent(),
+      onRemoved: fakeEvent(),
+    };
+    vi.stubGlobal('chrome', {
+      tabs: events,
+      windows: { onBoundsChanged: fakeEvent(), onFocusChanged: fakeEvent() },
+    });
+    const updated: number[] = [];
+    const ignore = () => undefined;
+    watchTabActivity({
+      activated: ignore,
+      moved: ignore,
+      updated: (tabId) => updated.push(tabId),
+      created: ignore,
+      replaced: ignore,
+      removed: ignore,
+      window: ignore,
+    });
+    events.onUpdated.fire(1, { splitViewId: 5 });
+    events.onUpdated.fire(2, { splitViewId: -1 });
+    events.onUpdated.fire(3, { title: '제목' });
+    expect(updated).toEqual([1, 2]);
   });
 });

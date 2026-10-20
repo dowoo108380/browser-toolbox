@@ -5,3 +5,4 @@ export { runMachine } from './machine.ts';
 export { withTimeout } from './timeout.ts';
 export { parseInteger } from './integer.ts';
 export { unappliedIndex } from './applied-width.ts';
+export { isWebPage } from './web-page.ts';

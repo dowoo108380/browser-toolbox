@@ -6,6 +6,7 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStatus,
+  tabToggleSet,
   taskSeen,
   taskStart,
 } from '../contracts/index.ts';
@@ -16,12 +17,14 @@ import {
   chromeRequester,
   chromeSessionStore,
   currentTabId,
+  currentWindowTabs,
 } from '../platform/index.ts';
 import {
   readRememberedCategory,
   settingsFormat,
   startSettingsReader,
   watchRepairNotice,
+  watchTabToggles,
   watchTask,
 } from '../storage/index.ts';
 import { PopupApp } from '../ui/index.ts';
@@ -57,6 +60,11 @@ render(
     watchTask={(tabId, handlers) => watchTask(session, tabId, handlers)}
     taskSeen={(tabId, taskId) => request(taskSeen, { tabId, taskId })}
     announceTab={announcePopup}
+    windowTabs={currentWindowTabs}
+    watchTabToggles={(handlers) => watchTabToggles(session, handlers)}
+    setTabToggle={(featureId, tabIds, on) =>
+      request(tabToggleSet, { featureId, tabIds: [...tabIds], on })
+    }
   />,
   root,
 );

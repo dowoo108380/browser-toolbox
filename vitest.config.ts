@@ -48,6 +48,7 @@ export default defineConfig({
         'src/shared/integer.ts',
         'src/shared/machine.ts',
         'src/page/lifecycle.ts',
+        'src/background/debugger-connection.ts',
         'src/ui/choices.ts',
       ],
       exclude: ['**/*.test.ts', '**/index.ts'],

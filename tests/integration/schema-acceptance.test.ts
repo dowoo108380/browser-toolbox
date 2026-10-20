@@ -10,7 +10,11 @@ import {
   requests,
   settingsUpdate,
   storageEnsureReady,
+  tabStateChanged,
+  tabStateGet,
   tabStatus,
+  tabToggleSet,
+  featureCommand,
   taskNotice,
   taskSeen,
   taskStart,
@@ -550,6 +554,9 @@ describe('메시지의 받아들임과 거절', () => {
       'tab.status',
       'task.start',
       'task.seen',
+      'tabToggle.set',
+      'tabState.get',
+      'feature.command',
     ]);
     payloads(settingsUpdate, [
       [
@@ -686,6 +693,53 @@ describe('메시지의 받아들임과 거절', () => {
       ['빈 객체', {}, accepted({})],
       ['배열', [], 'rejected'],
     ]);
+    // 결정 0043: 탭마다 켜고 끄기, 탭의 상태, 기능 명령의 봉투.
+    payloads(tabToggleSet, [
+      [
+        '맞는 값',
+        { featureId: 'f', tabIds: [1, 2], on: true },
+        accepted({ featureId: 'f', tabIds: [1, 2], on: true }),
+      ],
+      [
+        '빈 탭 목록',
+        { featureId: 'f', tabIds: [], on: false },
+        accepted({ featureId: 'f', tabIds: [], on: false }),
+      ],
+      ['탭 1.5', { featureId: 'f', tabIds: [1.5], on: true }, 'rejected'],
+      ['탭 목록이 객체', { featureId: 'f', tabIds: {}, on: true }, 'rejected'],
+      ['켜짐 없음', { featureId: 'f', tabIds: [1] }, 'rejected'],
+    ]);
+    payloads(tabStateGet, [
+      ['빈 객체', {}, accepted({})],
+      ['배열', [], 'rejected'],
+    ]);
+    payloads(tabStateChanged, [
+      ['켜진 기능', { on: ['f'] }, accepted({ on: ['f'] })],
+      ['없음', { on: [] }, accepted({ on: [] })],
+      ['목록이 아님', { on: 'f' }, 'rejected'],
+    ]);
+    payloads(featureCommand, [
+      [
+        '맞는 값',
+        { featureId: 'f', name: 'hidden', payload: { hidden: true } },
+        accepted({ featureId: 'f', name: 'hidden', payload: { hidden: true } }),
+      ],
+      // 내용의 모양은 그 기능의 명령이 검증한다. 봉투는 내용 키가 있기만 하면 받는다.
+      [
+        '내용 null',
+        { featureId: 'f', name: 'n', payload: null },
+        accepted({ featureId: 'f', name: 'n', payload: null }),
+      ],
+      ['내용 키 없음', { featureId: 'f', name: 'n' }, 'rejected'],
+      [
+        '기능 id 64자',
+        { featureId: 'a'.repeat(64), name: 'n', payload: null },
+        accepted({ featureId: 'a'.repeat(64), name: 'n', payload: null }),
+      ],
+      ['기능 id 65자', { featureId: 'a'.repeat(65), name: 'n', payload: null }, 'rejected'],
+      ['이름 65자', { featureId: 'f', name: 'a'.repeat(65), payload: null }, 'rejected'],
+      ['이름 없음', { featureId: 'f', payload: null }, 'rejected'],
+    ]);
   });
 
   // 응답의 검증(결정 0006). 탭에 보내기(sendToTab)로 정의마다의 응답 값 스키마를 본다. 형식에 맞는 성공 답이면 그 값이다.
@@ -775,6 +829,17 @@ describe('메시지의 받아들임과 거절', () => {
     await values(taskStart, [
       ['작업 id', { taskId: 'task-1' }, accepted({ taskId: 'task-1' })],
       ['작업 id 없음', {}, 'failed'],
+    ]);
+    await values(tabToggleSet, [
+      ['null', null, accepted(null)],
+      ['빈 객체', {}, 'failed'],
+    ]);
+    await values(tabStateGet, [
+      ['켜진 기능', { on: ['f'] }, accepted({ on: ['f'] })],
+      ['목록 없음', {}, 'failed'],
+    ]);
+    await values(featureCommand, [
+      ['아무 값(그 기능의 명령이 검증)', { pair: null }, accepted({ pair: null })],
     ]);
     await values(pageStatus, [
       ['어긋남 없음', { unmet: [] }, accepted({ unmet: [] })],

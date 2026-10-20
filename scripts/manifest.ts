@@ -11,6 +11,13 @@ const pageMatches = ['http://*/*', 'https://*/*'];
 // 그 밖의 공용 권한(offscreen 등)은 처음 쓰는 기능을 만들 때 더한다.
 const commonPermissions = ['storage', 'scripting'];
 
+// 페이지의 세계(MAIN)에 싣는 페이지 쪽 스크립트를 가진 기능(아키텍처 2장, 결정 0043). 파일은 main-<기능 id>.js다.
+export function mainWorldFeatures(
+  features: readonly FeatureDefinition[],
+): readonly FeatureDefinition[] {
+  return features.filter((feature) => feature.content?.mainWorld === true);
+}
+
 // 콘텐츠 스크립트 묶음 하나의 항목. 모든 프레임에 싣고, about:blank 같은 프레임에도 만든 문서의 출처를 보고 싣는다
 // (아키텍처 2장).
 function contentScript(
@@ -40,6 +47,21 @@ export function createManifest(
   const siteBundles = contentBundles(features).flatMap((bundle) =>
     bundle === 'common' ? [] : [bundle],
   );
+  // 페이지 쪽 스크립트는 그 기능의 사이트와 프레임에 싣는다. 격리된 쪽 묶음과 따로 실리고 서로 DOM 이벤트로 주고받는다.
+  const mainScripts = mainWorldFeatures(features).flatMap((feature) => {
+    if (feature.content === null) return [];
+    const { sites: target, frames } = feature.content;
+    return [
+      {
+        matches: target === 'all' ? pageMatches : siteMatches[target],
+        js: [`main-${feature.id}.js`],
+        all_frames: frames === 'all',
+        match_origin_as_fallback: true,
+        run_at: 'document_start',
+        world: 'MAIN',
+      },
+    ];
+  });
   return {
     manifest_version: 3,
     name: 'Browser Toolbox',
@@ -62,6 +84,7 @@ export function createManifest(
             ...siteBundles.map((site) =>
               contentScript(`content-${site}.js`, siteMatches[site], []),
             ),
+            ...mainScripts,
           ],
   };
 }

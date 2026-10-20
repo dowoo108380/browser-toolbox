@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type PageStatus,
+  defineCommand,
   defineFeature,
   pageRuntimeKey,
   retireEventName,
@@ -18,7 +19,7 @@ import {
 import { retireInFrame } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
-import { type PagePart, definePagePart } from './part.ts';
+import { type PagePart, definePagePart, defineTabPagePart } from './part.ts';
 import { type PageProblem, startPageRuntime } from './runtime.ts';
 
 // 테스트가 만든 실행 틀. 테스트가 끝나면 모두 물러나게 해 다음 테스트에 남지 않게 한다(quality 104).
@@ -56,6 +57,23 @@ function setup(
   // 서비스 워커가 지금 상태를 물으면 답하는 함수(결정 0026). 시험이 status로 묻는다.
   let answerStatus: (() => PageStatus) | undefined;
   let statusListeners = 0;
+  // 서비스 워커가 알리는 이 탭의 상태(결정 0043). 시험이 tab으로 보낸다.
+  let tabHandlers:
+    | {
+        readonly apply: (on: ReadonlySet<string>) => void;
+        readonly problem: (error: AppError) => void;
+      }
+    | undefined;
+  let tabSubscriptions = 0;
+  // 페이지 쪽이 보낸 기능 명령과 그 답(시험이 reply로 정한다). 서비스 워커가 보낸 명령은 command로 넣는다.
+  const sentCommands: {
+    readonly featureId: string;
+    readonly name: string;
+    readonly payload: unknown;
+  }[] = [];
+  let reply: Result<unknown, AppError> = ok(null);
+  let handleCommand:
+    ((featureId: string, name: string, payload: unknown) => Result<unknown, AppError>) | undefined;
   const deps = {
     parts,
     bundle: 'common' as const,
@@ -90,6 +108,23 @@ function setup(
         if (breaking.includes('status')) throw goneApi();
       };
     },
+    subscribeTab: (handlers: NonNullable<typeof tabHandlers>) => {
+      tabSubscriptions += 1;
+      tabHandlers = handlers;
+      return () => {
+        tabHandlers = undefined;
+      };
+    },
+    sendCommand: (featureId: string, name: string, payload: unknown) => {
+      sentCommands.push({ featureId, name, payload });
+      return Promise.resolve(reply);
+    },
+    listenCommands: (handle: NonNullable<typeof handleCommand>) => {
+      handleCommand = handle;
+      return () => {
+        handleCommand = undefined;
+      };
+    },
   };
   startPageRuntime(deps);
   started.push(deps);
@@ -105,6 +140,17 @@ function setup(
     noticeListeners: () => noticeListeners,
     status: () => answerStatus?.(),
     statusListeners: () => statusListeners,
+    tab: (on: readonly string[]) => tabHandlers?.apply(new Set(on)),
+    tabProblem: (error: AppError) => tabHandlers?.problem(error),
+    tabSubscriptions: () => tabSubscriptions,
+    tabListening: () => tabHandlers !== undefined,
+    command: (featureId: string, name: string, payload: unknown) =>
+      handleCommand?.(featureId, name, payload),
+    commandListening: () => handleCommand !== undefined,
+    sentCommands,
+    reply: (next: Result<unknown, AppError>) => {
+      reply = next;
+    },
   };
 }
 
@@ -1282,5 +1328,162 @@ describe('결정 0004 기능의 프레임 범위(기능 정의의 content.frames
     expect(everywhere.counts.started).toBe(1);
     vi.advanceTimersByTime(elementTimeoutMs);
     expect(runtime.reports).toEqual([notFound('top-only'), notFound('everywhere')]);
+  });
+});
+
+describe('결정 0043 탭마다 켜고 끄는 기능과 기능 명령', () => {
+  const tabFeature = defineFeature({
+    id: 'per-tab',
+    requirements: [],
+    name: '탭마다',
+    description: '탭마다 켜는 시험 기능',
+    category: 'tabs',
+    kind: 'tab-toggle',
+    content: { sites: 'all', frames: 'all' },
+    permissions: [],
+    settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
+    notices: {},
+  });
+  const ping = defineCommand({
+    featureId: tabFeature.id,
+    name: 'ping',
+    payload: v.object({ n: v.int() }),
+    value: v.object({ n: v.int() }),
+  });
+  const otherCommand = defineCommand({
+    featureId: 'other',
+    name: 'ping',
+    payload: v.null(),
+    value: v.null(),
+  });
+
+  // 시작과 정리를 세고, 서비스 워커가 보낸 ping에 n + 1로 답한다.
+  function tabPart(options: { readonly misuse?: boolean } = {}) {
+    const counts: { started: number; disposed: number; topFrames: boolean[] } = {
+      started: 0,
+      disposed: 0,
+      topFrames: [],
+    };
+    const part = defineTabPagePart(tabFeature, ({ scope, answer, topFrame, send }) => {
+      counts.started += 1;
+      counts.topFrames.push(topFrame);
+      scope.defer(() => {
+        counts.disposed += 1;
+      });
+      if (options.misuse === true) {
+        answer(otherCommand, () => ok(null));
+        return;
+      }
+      answer(ping, ({ n }) => ok({ n: n + 1 }));
+      scope.listen(document, 'test-send', async () => {
+        sentResults.push(await send(ping, { n: 1 }));
+      });
+    });
+    return { part, counts };
+  }
+  const sentResults: Result<{ readonly n: number }, AppError>[] = [];
+
+  beforeEach(() => {
+    sentResults.length = 0;
+  });
+
+  it('서비스 워커가 이 탭에서 켜졌다고 알린 동안만 시작하고, 꺼지면 닫는다. 설정이 바뀌어도 다시 시작하지 않는다', () => {
+    const { part, counts } = tabPart();
+    const runtime = setup([part]);
+    runtime.apply(snapshot({}));
+    expect(counts.started).toBe(0);
+    runtime.tab(['per-tab']);
+    expect(counts).toMatchObject({ started: 1, disposed: 0, topFrames: [true] });
+    runtime.apply(snapshot({ 'per-tab': { enabled: true } }));
+    expect(counts).toMatchObject({ started: 1, disposed: 0 });
+    runtime.tab([]);
+    expect(counts).toMatchObject({ started: 1, disposed: 1 });
+  });
+
+  it('설정을 받기 전에는 탭이 켜졌어도 시작하지 않고, 받으면 시작한다', () => {
+    const { part, counts } = tabPart();
+    const runtime = setup([part]);
+    runtime.tab(['per-tab']);
+    expect(counts.started).toBe(0);
+    runtime.apply(snapshot({}));
+    expect(counts.started).toBe(1);
+  });
+
+  it('탭마다 켜는 기능이 이 묶음에 없으면 탭의 상태를 묻지 않는다', () => {
+    const { part } = countingPart('a');
+    expect(setup([part]).tabSubscriptions()).toBe(0);
+  });
+
+  it('탭마다 켜는 기능이 이 묶음에 있으면 시작할 때 탭의 상태를 받는다', () => {
+    expect(setup([tabPart().part]).tabSubscriptions()).toBe(1);
+  });
+
+  it('서비스 워커가 보낸 명령은 그것에 답하는 지금 실행에 내용을 검증해 넘긴다. 닫힌 실행이나 모르는 명령에는 unavailable이다', () => {
+    const { part } = tabPart();
+    const runtime = setup([part]);
+    runtime.apply(snapshot({}));
+    expect(runtime.command('per-tab', 'ping', { n: 1 })).toEqual(
+      err(appError('unavailable', '이 프레임에서 그 명령에 답하는 기능이 돌고 있지 않다.')),
+    );
+    runtime.tab(['per-tab']);
+    expect(runtime.command('per-tab', 'ping', { n: 1 })).toEqual(ok({ n: 2 }));
+    const wrong = runtime.command('per-tab', 'ping', { n: 'x' });
+    expect(wrong?.ok === false ? wrong.error.kind : null).toBe('invalid-input');
+    expect(runtime.command('per-tab', 'nope', null)?.ok).toBe(false);
+    runtime.tab([]);
+    expect(runtime.command('per-tab', 'ping', { n: 1 })?.ok).toBe(false);
+  });
+
+  it('페이지 쪽이 보낸 명령의 답은 그 명령의 값으로 검증해 준다', async () => {
+    const { part } = tabPart();
+    const runtime = setup([part]);
+    runtime.apply(snapshot({}));
+    runtime.tab(['per-tab']);
+    runtime.reply(ok({ n: 5 }));
+    document.dispatchEvent(new Event('test-send'));
+    await vi.waitFor(() => {
+      expect(sentResults).toHaveLength(1);
+    });
+    expect(runtime.sentCommands).toEqual([
+      { featureId: 'per-tab', name: 'ping', payload: { n: 1 } },
+    ]);
+    expect(sentResults[0]).toEqual(ok({ n: 5 }));
+    runtime.reply(ok({ n: 'x' }));
+    document.dispatchEvent(new Event('test-send'));
+    await vi.waitFor(() => {
+      expect(sentResults).toHaveLength(2);
+    });
+    expect(sentResults[1]?.ok === false ? sentResults[1].error.kind : null).toBe('unexpected');
+  });
+
+  it('quality 010 다른 기능의 명령을 쓰면 그 기능만 멈추고 기록한다', () => {
+    const { part, counts } = tabPart({ misuse: true });
+    const runtime = setup([part]);
+    runtime.apply(snapshot({}));
+    runtime.tab(['per-tab']);
+    expect(counts).toMatchObject({ started: 1, disposed: 1 });
+    expect(runtime.reports).toEqual([{ featureId: 'per-tab', kind: 'unexpected' }]);
+  });
+
+  it('탭의 상태를 받지 못하면 기록하고, 확장이 끊겼다고 하면 물러난다', () => {
+    const { part } = tabPart();
+    const runtime = setup([part]);
+    runtime.tabProblem(appError('timeout', '답이 없다.'));
+    expect(runtime.reports).toEqual([{ featureId: null, kind: 'timeout' }]);
+    runtime.tabProblem(appError('disconnected', '끊겼다.'));
+    expect(runtime.tabListening()).toBe(false);
+    expect(runtime.commandListening()).toBe(false);
+  });
+
+  it('COM-7.2 물러나면 탭의 상태와 명령 듣기를 그만두고 돌던 탭마다의 기능을 닫는다', () => {
+    const { part, counts } = tabPart();
+    const runtime = setup([part]);
+    runtime.apply(snapshot({}));
+    runtime.tab(['per-tab']);
+    runtime.deps.isConnected = () => false;
+    document.dispatchEvent(new Event(retireEventName));
+    expect(counts.disposed).toBe(1);
+    expect(runtime.tabListening()).toBe(false);
+    expect(runtime.commandListening()).toBe(false);
   });
 });

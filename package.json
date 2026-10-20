@@ -5,6 +5,7 @@
   "description": "웹을 쓰는 동안 늘 켜 두는 Chrome 확장",
   "license": "MIT",
   "type": "module",
+  "sideEffects": false,
   "scripts": {
     "verify": "pnpm check && pnpm build && pnpm build:fixture && pnpm test:e2e && pnpm package",
     "check": "pnpm generate --check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm structure && pnpm unused && pnpm test",

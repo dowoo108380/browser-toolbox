@@ -43,6 +43,26 @@ export async function sendToTab<Payload, Value>(
   }
 }
 
+// 그 탭의 모든 프레임에 보낸다. 받는 쪽이 여럿이면 Chrome은 먼저 답한 프레임의 답을 준다. 탭의 상태가 바뀐 것을 알리는 데
+// 쓴다(tabState.changed, 결정 0043). 그래서 답의 값은 보지 않고 닿았는지만 돌려준다.
+export async function sendToAllFrames<Payload, Value>(
+  definition: RequestDefinition<string, Payload, Value>,
+  tabId: number,
+  payload: Payload,
+  timeoutMs: number = defaultTimeoutMs,
+): Promise<Delivery> {
+  try {
+    const response = await withTimeout(timeoutMs, (): Promise<unknown> =>
+      chrome.tabs.sendMessage(tabId, { type: definition.type, payload }),
+    );
+    if (!response.done) return 'timeout';
+    const parsed = v.safeParse(responseSchema(definition.value), response.value);
+    return parsed.success && parsed.output.ok ? 'delivered' : 'failed';
+  } catch (error) {
+    return isUnreachable(error) ? 'unreachable' : 'failed';
+  }
+}
+
 const envelopeSchema = v.object({ type: v.string(), payload: v.unknown() });
 
 // 콘텐츠 스크립트가 이 확장의 서비스 워커(와 확장 화면)가 보낸 그 요청을 받는다. 탭에서 온 것(다른 콘텐츠 스크립트)과

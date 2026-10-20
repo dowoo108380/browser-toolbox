@@ -1,6 +1,7 @@
 import type { AppError } from '../shared/index.ts';
 
-// 서비스 워커가 만들어 사용자에게 보이는 문구(결정 0007): 작업을 시작하지 못한 이유, 작업의 실패 이유, 확장 아이콘의 제목(COM-10).
+// 서비스 워커가 만들어 사용자에게 보이는 문구(결정 0007): 작업을 시작하지 못한 이유, 작업의 실패 이유, 확장 아이콘의 제목(COM-10),
+// 탭마다 켜고 끄는 기능을 켜지 못한 이유(결정 0043).
 // 주소, 제목, 파일 이름은 넣지 않는다(quality 082).
 
 export const strings = {
@@ -23,6 +24,15 @@ export const strings = {
         ? `${name}: 취소했다. ${error.message}`
         : `${name}: 실패했다. ${error.message}`,
   },
+  // 디버거 관리(결정 0042). 기능이 이 까닭을 받아 그 기능의 알림으로 바꿔 보인다.
+  debuggerUnexpected: '디버거를 다루다 예상하지 못한 오류가 났다.',
+  debuggerWithdrawn: '디버거가 붙기 전에 그만 쓰기로 했다.',
+  debuggerNotAttached: '디버거가 이 탭에 붙어 있지 않다.',
+  // 탭마다 켜고 끄기(결정 0043).
+  notTabToggle: '탭마다 켜고 끄는 기능이 아니다.',
+  tabTogglesWriteFailed: '탭마다 켠 기능의 기록을 남기지 못해 바꾸지 않았다. 다시 한다.',
+  commandFromPage: '기능의 명령은 그 기능의 페이지 쪽만 보낸다.',
+  tabStateFromPage: '탭의 상태는 그 탭의 페이지만 묻는다.',
   // 끝났고 아직 보지 않은 작업이 있는 탭의 확장 아이콘 제목(결정 0024). 배지 글자만으로는 화면 낭독기가 알 수 없다.
   badgeTitle: {
     succeeded: (name: string) => `Browser Toolbox: ${name} 끝남`,

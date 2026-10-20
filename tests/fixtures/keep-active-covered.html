@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>단추로 덮인 시험 페이지</title>
+    <!-- 화면 전체가 단추로 덮여 가짜 입력을 보낼 안전한 곳이 없다(TAB-2.15). -->
+    <style>
+      body {
+        margin: 0;
+      }
+      button {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <button type="button">화면 전체 단추</button>
+  </body>
+</html>

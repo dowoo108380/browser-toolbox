@@ -2,6 +2,7 @@
 // 기능을 더하거나 뺀 뒤 `pnpm generate`를 실행한다.
 import type { FeaturePagePart } from '../../page/index.ts';
 import { page as mediaSpeed } from '../../features/media-speed/page.ts';
+import { page as tabKeepActive } from '../../features/tab-keep-active/page.ts';
 import { page as claudeWidth } from '../../features/claude-width/page.ts';
 
-export const pageParts: readonly FeaturePagePart[] = [mediaSpeed, claudeWidth];
+export const pageParts: readonly FeaturePagePart[] = [mediaSpeed, tabKeepActive, claudeWidth];

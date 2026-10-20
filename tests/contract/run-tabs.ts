@@ -3,11 +3,15 @@ import {
   type Delivery,
   isTabActive,
   sendToTab,
+  setAutoDiscardable,
   setTabBadge,
   tabExists,
+  tabInfo,
+  windowInfo,
 } from '../../src/platform/index.ts';
 
-// 탭 경계(결정 0024)가 실제 Chrome에서 결정 0024의 실험대로 나누는지 확장의 서비스 워커 안에서 돌린다. 확장 전체 시험이
+// 탭 경계(결정 0024, 0041)가 실제 Chrome에서 실험대로, 그리고 시험의 가짜 Chrome(tests/support/fake-browser.ts)과 같게 나누는지
+// 확장의 서비스 워커 안에서 돌린다. 확장 전체 시험이
 // 이 파일을 esbuild로 묶어 서비스 워커에서 실행한다(tests/e2e/tab-contract.spec.ts). 배포물에는 들어가지 않는다.
 // 거절 문구로 나누는 곳(받는 쪽이 없음, 닫힌 탭)이 Chrome이 바뀌어 어긋나면 여기서 드러난다.
 
@@ -26,6 +30,15 @@ export interface TabContractResult {
   readonly active: Readonly<Record<keyof TabIds, boolean>>;
   // 닫힌 탭에 배지를 달고 지울 때 던진 오류. 던지지 않았으면 null이다.
   readonly closedBadgeError: string | null;
+  // 탭마다 켜고 끄는 기능이 보는 탭의 사정(결정 0041): 닫힌 탭이면 null, 열린 탭은 창에 나와 있는지와 싣는 중인지.
+  readonly info: Readonly<
+    Record<keyof TabIds, { readonly shown: boolean; readonly loading: boolean } | null>
+  >;
+  // 닫힌 창의 사정(null이어야 한다)과 지금 창의 사정.
+  readonly closedWindow: unknown;
+  readonly pageWindow: unknown;
+  // 닫힌 탭의 autoDiscardable을 바꿀 때 던진 오류. 던지지 않았으면 null이다.
+  readonly closedDiscardableError: string | null;
 }
 
 export async function run(tabs: TabIds): Promise<TabContractResult> {
@@ -41,7 +54,24 @@ export async function run(tabs: TabIds): Promise<TabContractResult> {
   } catch (error) {
     closedBadgeError = error instanceof Error ? error.message : String(error);
   }
+  const pageTab = await tabInfo(tabs.page);
+  const closingWindow = await chrome.windows.create({});
+  if (closingWindow?.id === undefined) throw new Error('창 id가 없다.');
+  await chrome.windows.remove(closingWindow.id);
+  let closedDiscardableError: string | null = null;
+  try {
+    await setAutoDiscardable(tabs.closed, false);
+  } catch (error) {
+    closedDiscardableError = error instanceof Error ? error.message : String(error);
+  }
   return {
+    info: await each(async (tabId) => {
+      const info = await tabInfo(tabId);
+      return info === null ? null : { shown: info.shown, loading: info.loading };
+    }),
+    closedWindow: await windowInfo(closingWindow.id),
+    pageWindow: pageTab === null ? null : await windowInfo(pageTab.windowId),
+    closedDiscardableError,
     deliveries: await each(
       async (tabId) => (await sendToTab(taskNotice, tabId, { text: '계약 시험' })).delivery,
     ),
