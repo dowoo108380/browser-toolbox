@@ -195,6 +195,28 @@ describe('저장된 값의 받아들임과 거절', () => {
     );
   });
 
+  // CLD-1의 너비도 px 정수 640–3840이다(사용자, 2026-10-20. GPT-2와 따로 정한 같은 값, 결정 0039). 끝을 표로 고정하는 까닭은
+  // GPT-2와 같다.
+  it('CLD-1 결정 0040 claude.ai 대화 열·작성란 너비의 항목', () => {
+    const withWidth = (item: unknown) => ({ ...valid, features: { 'claude-width': item } });
+    const corrupt = { features: ['claude-width'], sites: [] };
+    check<unknown>(
+      [
+        ['기본값', withWidth({ enabled: false, width: 1200 }), 'current'],
+        ['가장 좁게', withWidth({ enabled: true, width: 640 }), 'current'],
+        ['가장 넓게', withWidth({ enabled: true, width: 3840 }), 'current'],
+        ['모르는 필드', withWidth({ enabled: true, width: 1200, later: 1 }), 'current'],
+        ['너비 없음', withWidth({ enabled: true }), corrupt],
+        ['범위보다 좁음', withWidth({ enabled: true, width: 639 }), corrupt],
+        ['범위보다 넓음', withWidth({ enabled: true, width: 3841 }), corrupt],
+        ['정수 아님', withWidth({ enabled: true, width: 1200.5 }), corrupt],
+        ['문자열', withWidth({ enabled: true, width: '1200' }), corrupt],
+        ['null', withWidth({ enabled: true, width: null }), corrupt],
+      ],
+      settingsOutcome,
+    );
+  });
+
   it('결정 0011 읽는 쪽이 받는 기능 설정은 스키마를 거친 값이다(모르는 필드는 빠진다)', async () => {
     const store = createFakeStore({
       [settingsKey]: {

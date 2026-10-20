@@ -1,7 +1,17 @@
 import type * as v from './schema.ts';
 
 // 팝업 범주. 요구사항 묶음과 같고, 팝업은 이 순서로 보인다(quality 017, 결정 0023). 설정 범주는 설정 페이지를 만들 때 더한다.
-export const categories = ['media', 'youtube', 'subtitles', 'tabs', 'page', 'chatgpt'] as const;
+// 범주는 설정(settings)에 들지 않아 더해도 형식 버전과 상관없다. 팝업이 기억한 범주(storage.local의 popup)가 그 판이 모르는
+// 것이면(새 판이 더한 범주를 옛 판이 읽음) 알리지 않고 첫 범주로 연다(storage/popup-state.ts, 결정 0040).
+export const categories = [
+  'media',
+  'youtube',
+  'subtitles',
+  'tabs',
+  'page',
+  'chatgpt',
+  'claude',
+] as const;
 
 export type Category = (typeof categories)[number];
 
@@ -10,13 +20,14 @@ type FeaturePermission = never;
 
 // 사이트 전용 기능이 작용하는 사이트(결정 0029). 사이트마다 콘텐츠 스크립트 묶음 하나가 그 주소에 실리고, 모든 사이트의
 // 묶음(공통)은 그 주소에 실리지 않는다. YouTube는 그 사이트의 기능을 만들 때 더한다.
-export const sites = ['chatgpt'] as const;
+export const sites = ['chatgpt', 'claude'] as const;
 
 export type Site = (typeof sites)[number];
 
 // 사이트의 주소 패턴(manifest의 matches). manifest 생성이 쓰는 원본이다.
 export const siteMatches: Readonly<Record<Site, readonly string[]>> = {
   chatgpt: ['https://chatgpt.com/*'],
+  claude: ['https://claude.ai/*'],
 };
 
 // 기능이 페이지에 작용하는 곳(아키텍처 2장). 사이트는 빌드가 그 기능의 페이지 쪽 일을 넣을 콘텐츠 스크립트 묶음을 고르고

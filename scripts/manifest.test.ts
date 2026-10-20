@@ -25,15 +25,16 @@ describe('manifest', () => {
     ]);
   });
 
-  it('결정 0029 사이트 전용 기능(GPT-2)이 있는 사이트에는 그 사이트의 묶음만 싣고, 공통 묶음은 그 사이트를 뺀다', () => {
+  it('결정 0029 사이트 전용 기능(GPT-2, CLD-1)이 있는 사이트에는 그 사이트의 묶음만 싣고, 공통 묶음은 그 사이트들을 뺀다', () => {
     expect(manifest['content_scripts']).toEqual([
       {
         matches: ['http://*/*', 'https://*/*'],
-        exclude_matches: ['https://chatgpt.com/*'],
+        exclude_matches: ['https://chatgpt.com/*', 'https://claude.ai/*'],
         js: ['content-common.js'],
         ...everyFrame,
       },
       { matches: ['https://chatgpt.com/*'], js: ['content-chatgpt.js'], ...everyFrame },
+      { matches: ['https://claude.ai/*'], js: ['content-claude.js'], ...everyFrame },
     ]);
   });
 });

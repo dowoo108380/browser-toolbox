@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- favicon 요청이 콘솔 오류로 남지 않게 한다. -->
+    <link rel="icon" href="data:," />
+    <title>Claude(본뜬 시험 페이지)</title>
+    <!--
+      claude.ai의 대화 화면과 새 채팅 화면을 본뜬 시험 페이지(CLD-1, 결정 0040, quality 105).
+
+      본뜬 날: 2026-10-20.
+      출처: 로그인한 화면, 사용자의 Chrome(Windows, 창 3072px). 기존 대화 둘(/chat/<id>)과 새 채팅(/new, 문서를 싣는 이동과
+      페이지 안 이동). 요소 종류, 속성 이름, 계산된 너비·최대 너비·안쪽 여백·배치와 그 요소에 맞는 사이트 스타일 규칙의 너비
+      값만 돌려주는 스크립트로 봤다. 화면의 글, 대화 제목, 프로젝트 이름, 계정 정보, 속성의 값은 보지도 옮기지도 않았다. 그래서
+      이 문서의 글은 모두 지어 넣은 것이고, 값을 모르는 속성은 비워 두거나 넣지 않았다.
+
+      옮긴 것
+      - 대화 화면: 스크롤 구역 [data-autoscroll-container] 안의 열 [data-transcript-stays-put-scope]이 사이트의 CSS 변수
+        --transcript-width(지정되지 않아 48rem)에 좌우 안쪽 여백 20px씩을 더한 최대 너비(808px)로 가운데에 놓인다. 열 안의
+        대화 기록 상자(속성은 data-testid뿐)는 최대 너비가 그 변수 그대로이고(안쪽 여백 16px씩 포함, 768px) 메시지 행
+        [data-transcript-row]를 담는다. 작성란 칸 [data-chat-input-container]는 열을 채우고, 그 안의 [data-composer-card-holder]가
+        작성 칸 [data-composer-editor](contenteditable)의 카드를 담는다.
+      - 새 채팅 화면: 스크롤 구역 [data-new-page-scroll-column] 안의 틀(속성 없음)이 최대 너비 var(--container-7xl)(80rem)와
+        좌우 안쪽 여백 56px씩을 두고, 그 안의 작성란 자리 [data-chorus-card-slot]가 최대 너비 40rem으로 가운데에 놓여 같은
+        [data-composer-card-holder]를 담는다. 이 화면에는 대화 열과 위 열이 없다.
+      - 실제 화면의 클래스는 꾸미기용 유틸리티 클래스라 옮기지 않고, 같은 계산된 스타일을 아래 style에 이 문서의 클래스로
+        적었다. 옆 메뉴는 288px로 줄였고 그 밖의 상자와 깊이도 줄였다.
+      - 페이지 안에서 이동하면 사이트는 문서를 다시 싣지 않고 주소를 바꾼 뒤 새 화면을 그린다. 앞 화면을 숨긴 채 남기지 않았다.
+
+      화면은 [data-route-outlet]에 비어 있고, 두 화면은 template(실행되지 않는 문서 조각)에 있다. 확장 전체 시험
+      (tests/e2e/claude-width.spec.ts)이 https://claude.ai/ 아래의 요청을 이 문서로 답하고, 주소에 맞는 화면을 그려 넣는다
+      (사이트가 실린 뒤 화면을 그리는 것처럼). 실행 코드는 두지 않는다(tests/lint/fixtures.test.ts).
+    -->
+    <style>
+      :root {
+        --container-7xl: 80rem;
+      }
+      body {
+        margin: 0;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+      }
+      .app {
+        display: flex;
+        height: 100vh;
+      }
+      nav {
+        flex: 0 0 288px;
+      }
+      main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      [data-route-outlet] {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      [data-autoscroll-container],
+      [data-new-page-scroll-column] {
+        flex: 1;
+        overflow: hidden auto;
+      }
+      /* 대화 화면. 사이트가 이 변수로 열과 대화 기록 상자의 최대 너비를 정한다(실제로는 유틸리티 클래스가 둔다). */
+      .column {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: calc(var(--transcript-width, 48rem) + 2.5rem);
+        margin-inline: auto;
+        padding-inline: 20px;
+      }
+      .transcript {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: var(--transcript-width, 48rem);
+        padding-inline: 16px;
+      }
+      [data-chat-input-container] {
+        width: 100%;
+      }
+      /* 새 채팅 화면. 작성란 자리의 최대 너비는 변수 없이 40rem이다. */
+      .frame {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: var(--container-7xl);
+        margin-inline: auto;
+        padding-inline: 56px;
+      }
+      [data-chorus-card-slot] {
+        width: 100%;
+        max-width: 40rem;
+        margin-inline: auto;
+      }
+      [data-composer-editor] {
+        min-height: 2.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav>New chat</nav>
+      <main data-perf-region>
+        <div data-route-outlet></div>
+      </main>
+    </div>
+    <template data-screen="chat">
+      <div data-autoscroll-container>
+        <div class="column" data-testid data-transcript-stays-put-scope>
+          <div class="transcript" data-testid>
+            <div data-transcript-row data-turn-key><div>Hello</div></div>
+            <div data-transcript-row data-turn-key><div>Hello! How can I help you today?</div></div>
+          </div>
+          <div data-composer-banners-room></div>
+          <div data-chat-input-container>
+            <div data-composer-card-holder>
+              <div data-composer-editor contenteditable="true"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+    <template data-screen="new">
+      <div data-new-page-scroll-column>
+        <div class="frame">
+          <div>Greeting</div>
+          <div data-chorus-card-slot>
+            <div data-composer-card-holder>
+              <div data-composer-editor contenteditable="true"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </body>
+</html>

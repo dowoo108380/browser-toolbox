@@ -18,6 +18,7 @@ export const strings = {
   // 사이트 전용 기능을 다른 사이트에서 열었을 때(결정 0029).
   siteOnly: {
     chatgpt: 'chatgpt.com에서만 쓸 수 있음',
+    claude: 'claude.ai에서만 쓸 수 있음',
   } satisfies Record<Site, string>,
   // 기능이 외부 화면에 기대한 것이 어긋났다(COM-6, 용어집). 둘 다 모든 화면에서 같은 상태 문구다.
   // 찾지 못함: 기능이 기대는 외부 화면 요소를 제한 시간 안에 찾지 못했다.
@@ -32,6 +33,7 @@ export const strings = {
     tabs: '탭',
     page: '페이지',
     chatgpt: 'ChatGPT',
+    claude: 'Claude',
   } satisfies Record<Category, string>,
   repairLabel: '설정 복구 알림',
   repairWhole: '저장된 설정을 읽을 수 없어 모든 설정을 기본값으로 바꿨다.',
