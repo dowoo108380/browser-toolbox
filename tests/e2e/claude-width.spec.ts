@@ -96,6 +96,22 @@ async function navigateInPage(page: Page, pathname: string) {
   expect(new URL(page.url()).pathname).toBe(pathname);
 }
 
+// 대화 화면에서 메시지를 보내 사이트가 답을 만들기 시작한 때처럼 한다(2026-10-20에 사용자의 Chrome에서 봄, 이슈 #9): 보낸
+// 메시지의 행을 더하고 열에서 상태 속성 data-transcript-stays-put-scope를 뗀다. 열과 그 안의 상자, 너비는 그대로다.
+function startAnswer(page: Page) {
+  return page.evaluate(() => {
+    const column = document.querySelector('.column');
+    const transcript = document.querySelector('.transcript');
+    if (column === null || transcript === null) throw new Error('대화 화면이 없다.');
+    const row = document.createElement('div');
+    row.setAttribute('data-transcript-row', '');
+    row.setAttribute('data-turn-key', '');
+    row.textContent = 'Question';
+    transcript.append(row);
+    column.removeAttribute('data-transcript-stays-put-scope');
+  });
+}
+
 // 보이는 대화 열과 작성란의 그려진 너비(px). 없으면 null이다.
 function widths(page: Page) {
   return page.evaluate(
@@ -354,6 +370,39 @@ test('CLD-1.6 COM-6.8 결정 0040 너비 규칙이 작용하면 두 화면 모�
   for (const { page, expected } of opened) {
     expect(await widths(page)).toEqual(expected);
   }
+});
+
+test('CLD-1.2 CLD-1.5 이슈 #9 답을 기다리는 동안(사이트가 열의 상태 속성을 뗌) 대화를 연 지 15초가 되어도, 다른 대화로 옮겨 곧 보낸 때와 새 채팅의 첫 메시지 뒤 모두 찾지 못함이 되지 않고 정한 너비가 그대로다', async ({
+  context,
+  extensionId,
+}) => {
+  test.setTimeout(90_000);
+  const worker = await serviceWorkerOf(context);
+  // 다른 대화로 옮기고 곧 메시지를 보낸다. 옮길 때 찾기와 확인(15초)이 새로 시작된다.
+  const { page: moved, errors } = await openClaude(context, '/chat/abc');
+  const { popup, feature } = await popupOn(context, extensionId, moved);
+  await feature.check();
+  await popup.close();
+  await expect.poll(() => widths(moved)).toEqual({ thread: 1200, composer: 1200 });
+  await navigateInPage(moved, '/chat/def');
+  await startAnswer(moved);
+  // 새 채팅에서 첫 메시지를 보낸다. 사이트는 주소를 대화 주소로 바꾸고 답을 만드는 중인 대화 화면을 그린다.
+  const { page: first, errors: firstErrors } = await openClaude(context, '/new');
+  await expect.poll(() => widths(first)).toEqual({ thread: null, composer: 1200 });
+  await navigateInPage(first, '/chat/ghi');
+  await startAnswer(first);
+
+  // 두 탭 모두 이동한 때부터 15초가 지나도록 답을 만드는 중이다.
+  await moved.waitForTimeout(elementTimeoutMs + 3000);
+  expect(await problemRecords(worker)).toEqual([]);
+  for (const page of [moved, first]) {
+    expect(await styled(page, 'claude-width')).toBe(true);
+    expect(await widths(page)).toEqual({ thread: 1200, composer: 1200 });
+    const shown = await popupOn(context, extensionId, page);
+    await expect(shown.reason).toHaveCount(0);
+    await shown.popup.close();
+  }
+  expect([...errors, ...firstErrors]).toEqual([]);
 });
 
 test('CLD-1.1 COM-2.5 결정 0039 팝업의 숫자 칸으로 키보드만 써서 이 기능의 너비를 정한다', async ({

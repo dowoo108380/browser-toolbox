@@ -2,13 +2,15 @@ import type { NamedElement, Scope } from '../../dom/index.ts';
 
 // claude.ai의 화면 지식(결정 0004, 0040). 요소를 찾는 단서, 너비를 바꾸는 규칙, 화면마다 있어야 할 요소, 사이트 안 이동
 // 신호는 여기에만 둔다. 2026-10-20에 사용자의 Chrome(로그인한 화면)에서 본 두 화면의 구조다: 새 채팅(/new)과 기존 대화
-// (/chat/<id>). 클래스 이름은 꾸미기용 유틸리티 클래스이고 aria-label은 화면 언어의 문구라 쓰지 않는다. 남은 단서는 요소 종류와
-// data- 속성의 이름이다(속성의 값은 보지 않았다, R-13).
+// (/chat/<id>). 답을 만드는 동안의 구조도 봤다. 클래스 이름은 꾸미기용 유틸리티 클래스이고 aria-label은 화면 언어의 문구라 쓰지
+// 않는다. 남은 단서는 요소 종류와 data- 속성의 이름이다(속성의 값은 보지 않았다, R-13). 사이트가 상태에 따라 떼었다 다는 속성은
+// 단서로 쓰지 않는다.
 
 // 대화 화면: 메시지와 작성란을 담는 열. 사이트의 CSS 변수 --transcript-width(48rem)에 좌우 안쪽 여백 20px씩을 더한 최대
 // 너비로 가운데에 놓인다. 그 안의 대화 기록 상자(메시지 행 [data-transcript-row]를 담음)는 최대 너비가 그 변수 그대로이고,
-// 작성란 칸([data-chat-input-container])은 열을 채운다.
-const column = '[data-transcript-stays-put-scope]';
+// 작성란 칸([data-chat-input-container])은 열을 채운다. 열은 작성란 칸을 바로 담는 상자로 가린다. 열의 속성
+// data-transcript-stays-put-scope는 사이트가 답을 만드는 동안 뗐다 다시 다는 상태라 단서가 아니다(이슈 #9).
+const column = ':has(> [data-chat-input-container])';
 const transcriptRow = '[data-transcript-row]';
 // 새 채팅 화면: 작성란을 담는 자리. 사이트가 최대 너비를 변수 없이 40rem으로 두고, 그 부모(속성 없음)가 최대 너비
 // 80rem(--container-7xl)과 좌우 안쪽 여백 3.5rem씩으로 화면의 틀을 정한다.
@@ -20,7 +22,8 @@ function namedElement(id: string, name: string, selector: string): NamedElement 
   return { id, name, candidates: (document) => document.querySelectorAll(selector) };
 }
 
-// 대화 열: 열 안에서 메시지 행을 담는 대화 기록 상자. 그려진 너비가 사이트의 변수 그대로다(안쪽 여백 포함).
+// 대화 열: 열 안에서 메시지 행을 담는 대화 기록 상자. 그려진 너비가 사이트의 변수 그대로다(안쪽 여백 포함). 답을 만드는
+// 동안에도 같은 상자다.
 export const thread = namedElement(
   'claude.thread',
   'Claude 대화 열',

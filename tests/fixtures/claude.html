@@ -19,7 +19,13 @@
         --transcript-width(지정되지 않아 48rem)에 좌우 안쪽 여백 20px씩을 더한 최대 너비(808px)로 가운데에 놓인다. 열 안의
         대화 기록 상자(속성은 data-testid뿐)는 최대 너비가 그 변수 그대로이고(안쪽 여백 16px씩 포함, 768px) 메시지 행
         [data-transcript-row]를 담는다. 작성란 칸 [data-chat-input-container]는 열을 채우고, 그 안의 [data-composer-card-holder]가
-        작성 칸 [data-composer-editor](contenteditable)의 카드를 담는다.
+        작성 칸 [data-composer-editor](contenteditable)의 카드를 담는다. 열의 자식은 대화 기록 상자, 알림 자리, 숨은 span,
+        작성란 칸의 넷이다.
+      - 답을 만드는 동안(2026-10-20에 더 봄, 이슈 #9): 사용자가 기존 대화와 새 채팅에서 메시지를 보내고 답이 끝날 때까지
+        같은 방법으로 시각과 함께 기록했다(메시지는 사용자가 보냈다). 사이트는 답을 만드는 동안 열에서
+        data-transcript-stays-put-scope 속성만 떼었다가 다시 단다. 열과 그 자식 넷, 메시지 행, 너비는 그대로다. 새 채팅에서
+        첫 메시지를 보내면 주소를 /chat/<id>로 바꾸고 이 속성이 없는 대화 화면을 그린다. 이 문서에는 실행 코드를 두지 않으므로,
+        확장 전체 시험이 메시지 행을 더하고 이 속성을 떼어 흉내 낸다.
       - 새 채팅 화면: 스크롤 구역 [data-new-page-scroll-column] 안의 틀(속성 없음)이 최대 너비 var(--container-7xl)(80rem)와
         좌우 안쪽 여백 56px씩을 두고, 그 안의 작성란 자리 [data-chorus-card-slot]가 최대 너비 40rem으로 가운데에 놓여 같은
         [data-composer-card-holder]를 담는다. 이 화면에는 대화 열과 위 열이 없다.
@@ -121,6 +127,7 @@
             <div data-transcript-row data-turn-key><div>Hello! How can I help you today?</div></div>
           </div>
           <div data-composer-banners-room></div>
+          <span hidden data-chat-dock-kind data-chat-transcript-phase></span>
           <div data-chat-input-container>
             <div data-composer-card-holder>
               <div data-composer-editor contenteditable="true"></div>

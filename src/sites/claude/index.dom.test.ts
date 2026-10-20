@@ -47,6 +47,27 @@ describe('claude.ai의 이름 붙은 요소(결정 0040)', () => {
     expect(candidates(thread)).not.toContain(input);
   });
 
+  it('대화 열은 답을 만드는 동안 사이트가 열에서 상태 속성(data-transcript-stays-put-scope)을 떼어도 같은 상자다(이슈 #9)', () => {
+    // 2026-10-20에 사용자의 Chrome에서 메시지를 보내고 본 열: 자식 넷과 메시지 행은 그대로이고 그 속성만 뗐다 다시 단다.
+    const scope = element('div', { 'data-testid': '', 'data-transcript-stays-put-scope': '' });
+    const transcript = element('div', { 'data-testid': '' }, scope);
+    element('div', { 'data-transcript-row': '' }, element('div', {}, transcript));
+    element('div', { 'aria-hidden': '', 'data-composer-banners-room': '' }, scope);
+    element(
+      'span',
+      { hidden: '', 'data-chat-dock-kind': '', 'data-chat-transcript-phase': '' },
+      scope,
+    );
+    element('div', { 'data-chat-input-container': '' }, scope);
+    expect(candidates(thread)).toEqual([transcript]);
+
+    scope.removeAttribute('data-transcript-stays-put-scope');
+    expect(candidates(thread)).toEqual([transcript]);
+
+    scope.setAttribute('data-transcript-stays-put-scope', '');
+    expect(candidates(thread)).toEqual([transcript]);
+  });
+
   it('작성란은 작성 칸의 카드를 담는 상자이고, 대화 화면과 새 채팅 화면 모두 같은 단서다', () => {
     expect(candidates(composer)).toEqual([]);
     const input = element('div', { 'data-chat-input-container': '' });
