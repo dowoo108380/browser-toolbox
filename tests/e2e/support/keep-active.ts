@@ -220,9 +220,27 @@ export function turn(raw: RawChromium, tabs: readonly RawTab[], on: boolean): Pr
   return request(raw, tabToggleSet.type, { featureId, tabIds: tabs.map((tab) => tab.tabId), on });
 }
 
-// "모든 탭" 스위치를 켜거나 끈다(팝업의 스위치가 보내는 설정 바꾸기).
+// 그 기능의 설정을 바꾼다(팝업의 스위치와 칸이 보내는 설정 바꾸기).
+export function updateSettings(
+  raw: RawChromium,
+  id: string,
+  patch: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  return request(raw, settingsUpdate.type, { featureId: id, patch });
+}
+
+// "모든 탭" 스위치를 켜거나 끈다.
 export function setAllTabs(raw: RawChromium, enabled: boolean): Promise<void> {
-  return request(raw, settingsUpdate.type, { featureId, patch: { enabled } });
+  return updateSettings(raw, featureId, { enabled });
+}
+
+// 서비스 워커가 남긴 문제 기록(COM-5).
+export function problemRecords(raw: RawChromium): Promise<unknown[]> {
+  return raw.sw(async () => {
+    const { problems }: Record<string, unknown> = await chrome.storage.local.get('problems');
+    const list: unknown[] = Array.isArray(problems) ? problems : [];
+    return list;
+  }, null);
 }
 
 export async function closeTab(raw: RawChromium, tab: RawTab): Promise<void> {

@@ -135,6 +135,32 @@ const pageResources = [
   },
 ];
 
+// 페이지 활성 상태 유지의 방패(TAB-2)는 켜진 동안 창의 신뢰된 blur·focus와 visibilitychange를 창의 캡처 단계에서 막는다(결정
+// 0041). DOM 이벤트는 세계를 가리지 않으므로 확장의 격리된 쪽 듣기에도 닿지 않는다. 그래서 격리된 쪽은 보임을 dom의
+// visibilityEventNames로 듣고(방패가 막을 때 보임 알림을 보낸다), 창의 blur·focus는 듣지 않는다(결정 0044). 방패가 막지 않는
+// 요소의 blur·focus를 들어야 하면 그 줄에서 이유와 함께 끈다. 이름으로 잡으므로 이름을 변수에 담은 경우는 검토로 본다.
+// 잡아야 하는 사례와 잡지 않아야 하는 사례는 tests/lint/restricted-syntax.test.ts에 있다.
+const shieldedEventNames = 'visibilitychange|blur|focus';
+const shieldedEventMessage =
+  '창의 초점·보임 이벤트는 활성 상태 유지의 방패가 막는다. 보임은 dom의 visibilityEventNames로 듣는다(결정 0044).';
+const shieldedEvents = [
+  // document.addEventListener('visibilitychange', f), window.addEventListener('blur', f)
+  {
+    selector: `CallExpression[callee.property.name='addEventListener'][arguments.0.value=/^(${shieldedEventNames})$/]`,
+    message: shieldedEventMessage,
+  },
+  // scope.listen(document, 'visibilitychange', f)
+  {
+    selector: `CallExpression[callee.property.name='listen'][arguments.1.value=/^(${shieldedEventNames})$/]`,
+    message: shieldedEventMessage,
+  },
+  // document.onvisibilitychange = f, window.onblur = f
+  {
+    selector: `MemberExpression[property.name=/^on(${shieldedEventNames})$/]`,
+    message: shieldedEventMessage,
+  },
+];
+
 // 이름 규칙(quality 028): 값은 camelCase, 타입은 PascalCase.
 const namingConvention = [
   { selector: 'default', format: ['camelCase'], leadingUnderscore: 'forbid' },
@@ -203,7 +229,15 @@ export default defineConfig(
     ],
     ignores: ['src/dom/scope.ts', '**/*.test.ts'],
     rules: {
-      'no-restricted-syntax': ['error', ...baseRestrictions, ...pageResources],
+      'no-restricted-syntax': ['error', ...baseRestrictions, ...pageResources, ...shieldedEvents],
+    },
+  },
+  {
+    // 웹 페이지의 격리된 세계에서 도는 실행 틀. 자원 범위 밖에서 듣지만(물러날 때 직접 그만둠) 방패가 막는 이벤트는 같다.
+    files: ['src/page/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...baseRestrictions, ...shieldedEvents],
     },
   },
   {

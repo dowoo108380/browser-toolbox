@@ -1,4 +1,5 @@
 import type { Scope } from './scope.ts';
+import { visibilityEventNames } from './visibility.ts';
 
 // 외부 화면 요소 찾기와 적용 확인(COM-6, 결정 0026, 0034, 0035). 기능이 기대는 요소를 찾기 시작한 때, 또는 찾은 요소에 건
 // 변경이 작용하는지 보기 시작한 때부터 탭이 보인 시간만 세어 기다리고, 한도를 넘기면 알린다. 기다리기, 관찰, 타이머는 모두
@@ -58,8 +59,9 @@ interface Wait<T> {
   readonly early: boolean;
 }
 
-// 탭이 보인 시간만 세어 기다린다. 숨겨지면 관찰과 세기를 멈추고, 다시 보이면 이어 센다(quality 003). 한도에 이르면(마지막으로)
-// 한 번 보고, 아니면 알린다. 이루어지거나 한도에 이르면 끝난다. 돌려준 함수는 이 기다림만 그만둔다. 범위가 닫혀도 그만둔다.
+// 탭이 보인 시간만 세어 기다린다. 숨겨지면 관찰과 세기를 멈추고, 다시 보이면 이어 센다(quality 003). 보임의 바뀜은
+// visibility.ts의 이름들로 듣는다(결정 0044). 한도에 이르면(마지막으로) 한 번 보고, 아니면 알린다. 이루어지거나 한도에 이르면
+// 끝난다. 돌려준 함수는 이 기다림만 그만둔다. 범위가 닫혀도 그만둔다.
 // probe의 예외는 처음 한 번이면 부른 쪽에, 그 뒤면 범위에 간다. onMet과 onTimeout은 범위가 감싼다.
 function awaitVisibleTime<T>({ scope, window, probe, onMet, limit, early }: Wait<T>): () => void {
   const { document } = window;
@@ -120,13 +122,15 @@ function awaitVisibleTime<T>({ scope, window, probe, onMet, limit, early }: Wait
     watching = null;
   };
 
-  wait.listen(document, 'visibilitychange', () => {
+  // 같은 보임을 거듭 받아도 된다: watch와 pause는 이미 그 상태면 아무것도 하지 않는다.
+  const onVisibility = () => {
     if (document.visibilityState !== 'visible') {
       pause();
       return;
     }
     if (!(early && check())) watch();
-  });
+  };
+  for (const type of visibilityEventNames) wait.listen(document, type, onVisibility);
   watch();
   return stop;
 }

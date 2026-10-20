@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { armDetail, nativeDetail, parseArm, parseNative } from './shield.ts';
+import { armDetail, parseArm } from './shield.ts';
 
-// 격리된 쪽과 페이지 쪽 방패가 주고받는 이벤트의 내용(결정 0041). 웹 페이지도 같은 이벤트를 보낼 수 있다.
+// 격리된 쪽이 페이지 쪽 방패를 켜고 끄는 이벤트의 내용(결정 0041). 웹 페이지도 같은 이벤트를 보낼 수 있다.
 
 describe('페이지 쪽 방패의 이벤트 내용', () => {
-  it('켜기·끄기와 숨김·보임을 오간다', () => {
+  it('켜기·끄기를 오간다', () => {
     expect(parseArm(armDetail(true))).toBe(true);
     expect(parseArm(armDetail(false))).toBe(false);
-    expect(parseNative(nativeDetail(true))).toBe(true);
-    expect(parseNative(nativeDetail(false))).toBe(false);
   });
 
   it.each([

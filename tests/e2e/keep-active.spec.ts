@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { elementTimeoutMs, pageElementAttribute } from '../../src/dom/index.ts';
+import { chatgptWidth } from '../../src/features/chatgpt-width/feature.ts';
 import {
   attached,
   blankUrl,
@@ -9,11 +12,13 @@ import {
   pageUrl,
   popupStates,
   pressInList,
+  problemRecords,
   recorder,
   setAllTabs,
   stateText,
   test,
   turn,
+  updateSettings,
   waitAttached,
 } from './support/keep-active.ts';
 import { type RawChromium, type RawTab, launchRawChromium } from './support/raw-chromium.ts';
@@ -394,4 +399,54 @@ test('COM-7.5 켜진 보는 탭에서 서비스 워커가 쉬다 멈춰도, 다�
   await waitAttached(raw, tab, true);
   await sleep(6000);
   expectActiveLike(await page.read());
+});
+
+// 대화 화면에 대화 열이 없는 chatgpt.com(사이트가 화면을 바꿈, GPT-2.5). 로그인하지 않은 화면의 시험 페이지에서 대화 열의
+// 단서를 뺀다.
+function chatgptWithoutThread(): string {
+  const html = readFileSync(
+    path.join(import.meta.dirname, '..', 'fixtures', 'chatgpt.html'),
+    'utf8',
+  );
+  const thread = '<ol aria-label="Conversation" data-conversation-transcript>';
+  if (!html.includes(thread)) throw new Error('시험 페이지에 대화 열이 없다.');
+  return html.replace(thread, '<ol aria-label="Conversation">');
+}
+
+// 페이지에서 돈다. 확장이 넣은 스타일 요소(너비 규칙)가 있는지.
+function hasPageStyle(attribute: string): boolean {
+  return document.querySelector(`style[${attribute}]`) !== null;
+}
+
+test('COM-6.1 COM-6.7 결정 0044 너비 기능과 함께 켠 뒤쪽 탭에서 숨은 채 시작한 찾기는 방패가 켜진 뒤 디버거로 보이게 되면 이어지고, 보인 때부터 15초 뒤 찾지 못함을 기록한다', async ({
+  raw,
+}) => {
+  test.setTimeout(90_000);
+  await raw.serve('https://chatgpt.com', chatgptWithoutThread());
+  await updateSettings(raw, chatgptWidth.id, { enabled: true });
+  // 뒤쪽 탭은 숨어 있다. 너비 규칙을 넣고 대화 열을 찾기 시작하지만, 보일 때까지 세지 않고 쉰다(COM-6.7).
+  const tab = await raw.open('https://chatgpt.com/c/abc');
+  await expect.poll(() => raw.evaluate(tab, hasPageStyle, pageElementAttribute)).toBe(true);
+  expect(await raw.evaluate(tab, () => document.visibilityState, null)).toBe('hidden');
+  // 숨은 동안 지난 시간은 세지 않는다. 세면 아래의 기록이 켠 때부터 15초보다 일찍 남는다.
+  await sleep(3000);
+  const turnedAt = Date.now();
+  await turn(raw, [tab], true);
+  const page = recorder(raw, tab);
+  await page.waitShield(true);
+  await waitAttached(raw, tab, true);
+  // 초점 흉내로 실제로 보인다(화면을 그림). 페이지에는 방패가 그 바뀜을 숨겼다.
+  await page.install();
+  await expect.poll(async () => (await page.read()).painting).toBe(true);
+  const expected = {
+    featureId: chatgptWidth.id,
+    kind: 'not-found',
+    element: { id: 'chatgpt.thread', name: 'ChatGPT 대화 열' },
+  };
+  await expect
+    .poll(() => problemRecords(raw), { timeout: elementTimeoutMs + 10_000 })
+    .toEqual([{ ...expected, at: expect.any(Number) }]);
+  const [record] = await problemRecords(raw);
+  const at = typeof record === 'object' && record !== null && 'at' in record ? record.at : null;
+  expect(typeof at === 'number' && at >= turnedAt + elementTimeoutMs).toBe(true);
 });

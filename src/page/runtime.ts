@@ -16,6 +16,7 @@ import {
   claimOwnedElements,
   createScope,
   elementTimeoutMs,
+  visibilityEventNames,
 } from '../dom/index.ts';
 import {
   type AppError,
@@ -349,7 +350,10 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   };
   // 페이지 안 이동(history.pushState, 주소의 # 바꾸기, 뒤로·앞으로)은 Navigation API가 한 이벤트로 알린다(Chrome 102부터).
   const { navigation } = deps.context.window;
-  deps.context.document.addEventListener('visibilitychange', onVisibilityChange);
+  // 보임은 visibilitychange와 활성 상태 유지의 방패가 그것을 막고 보내는 보임 알림으로 듣는다(결정 0044).
+  for (const type of visibilityEventNames) {
+    deps.context.document.addEventListener(type, onVisibilityChange);
+  }
   navigation.addEventListener('currententrychange', onNavigation);
 
   // 작업 결과 알림(결정 0024). 서비스 워커는 최상위 프레임에만 보낸다.
@@ -412,7 +416,9 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
   const retireSteps: readonly (() => void)[] = [
     () => {
       deps.context.document.removeEventListener(retireEventName, onRetireEvent);
-      deps.context.document.removeEventListener('visibilitychange', onVisibilityChange);
+      for (const type of visibilityEventNames) {
+        deps.context.document.removeEventListener(type, onVisibilityChange);
+      }
       navigation.removeEventListener('currententrychange', onNavigation);
       for (const timer of recheckTimers) deps.context.window.clearTimeout(timer);
       recheckTimers.clear();

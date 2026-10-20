@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type NamedElement, awaitApplied, awaitElement, elementTimeoutMs } from './find.ts';
 import { type Scope, createScope } from './scope.ts';
+import { visibilityNoticeEventName } from './visibility.ts';
 
 // 외부 화면 요소 찾기와 적용 확인(COM-6, 결정 0026, 0034, 0035). 시계는 가짜이고, 문서가 보이는지는 시험이 정한다(headless
 // Chromium의 문서는 늘 visible이다, 결정 0024의 실험 5). 요소가 지금 화면에 그려지는지는 실제 Chromium이 정한다.
@@ -156,6 +157,27 @@ describe('외부 화면 요소 찾기(결정 0026)', () => {
     expect(timeouts()).toBe(0);
     setVisibility('visible');
     vi.advanceTimersByTime(elementTimeoutMs - 1);
+    expect(timeouts()).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(timeouts()).toBe(1);
+  });
+
+  it('COM-6.7 결정 0044 방패가 visibilitychange를 막는 문서에서도 보임 알림으로 숨겨지고 보이는 것을 따라 센다', () => {
+    // 페이지 활성 상태 유지의 방패가 켜진 문서에는 보임이 바뀌어도 visibilitychange 대신 보임 알림만 온다.
+    const notice = (next: DocumentVisibilityState) => {
+      visibility = next;
+      document.dispatchEvent(new Event(visibilityNoticeEventName));
+    };
+    visibility = 'hidden';
+    const { timeouts } = search();
+    vi.advanceTimersByTime(60_000);
+    notice('visible');
+    vi.advanceTimersByTime(10_000);
+    notice('hidden');
+    vi.advanceTimersByTime(60_000);
+    expect(timeouts()).toBe(0);
+    notice('visible');
+    vi.advanceTimersByTime(elementTimeoutMs - 10_000 - 1);
     expect(timeouts()).toBe(0);
     vi.advanceTimersByTime(1);
     expect(timeouts()).toBe(1);

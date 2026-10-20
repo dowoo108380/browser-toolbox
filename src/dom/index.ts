@@ -4,3 +4,4 @@ export { claimAttribute, claimOwnedElements, pageElementAttribute } from './owne
 export { createPageStyle } from './page-style.ts';
 export { type Scope, createScope } from './scope.ts';
 export { type Point, safePair } from './safe-point.ts';
+export { visibilityEventNames, visibilityNoticeEventName } from './visibility.ts';

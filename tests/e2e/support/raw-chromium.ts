@@ -59,6 +59,9 @@ export interface RawChromium {
   ) => Promise<Awaited<R>>;
   // 그 탭에 진짜 마우스 움직임을 보낸다(사용자가 마우스를 그곳에 둔 것).
   readonly moveMouse: (tab: RawTab, x: number, y: number) => Promise<void>;
+  // 그 출처(예: https://chatgpt.com)의 모든 요청에 그 HTML로 답한다(Playwright의 route와 같다). 브라우저 수준 CDP의 Fetch로
+  // 가로채므로 페이지에 붙지 않는다.
+  readonly serve: (origin: string, html: string) => Promise<void>;
   // 팝업 문서를 그 창(없으면 처음 창)의 뒤쪽 탭으로 연다. 실제 팝업처럼 그 창의 탭 목록을 보인다.
   readonly popup: (windowId?: number) => Promise<Popup>;
   // 확장을 다시 불러온다(사용자가 "다시 로드"를 누른 것과 같다, R-04). 새 서비스 워커에 붙는다.
@@ -160,8 +163,14 @@ export async function launchRawChromium(
     number,
     { readonly resolve: (value: unknown) => void; readonly reject: (error: Error) => void }
   >();
+  // serve가 답할 출처와 그 HTML.
+  const served = new Map<string, string>();
   socket.addEventListener('message', (event) => {
     const message: unknown = JSON.parse(String(event.data));
+    if (field(message, 'method') === 'Fetch.requestPaused') {
+      answerPaused(field(message, 'params'));
+      return;
+    }
     const id = field(message, 'id');
     if (typeof id !== 'number') return;
     const waiter = pending.get(id);
@@ -193,6 +202,22 @@ export async function launchRawChromium(
         JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }),
       );
     });
+
+  // 가로챈 요청에 그 출처의 HTML로 답한다. 가로채는 것은 serve한 출처뿐이다. 답하지 못하면(탭이 그 사이 닫힘) 할 일이 없다.
+  function answerPaused(params: unknown) {
+    const requestId = field(params, 'requestId');
+    const html = served.get(new URL(String(field(field(params, 'request'), 'url'))).origin);
+    const answer =
+      html === undefined
+        ? send('Fetch.continueRequest', { requestId })
+        : send('Fetch.fulfillRequest', {
+            requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }],
+            body: Buffer.from(html, 'utf8').toString('base64'),
+          });
+    answer.catch(() => undefined);
+  }
 
   const targets = async (): Promise<TargetInfo[]> => {
     const infos = field(await send('Target.getTargets'), 'targetInfos');
@@ -328,6 +353,12 @@ export async function launchRawChromium(
       withSession(tab.targetId, async (sessionId) => {
         await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sessionId);
       }),
+    serve: async (origin, html) => {
+      served.set(origin, html);
+      await send('Fetch.enable', {
+        patterns: [...served.keys()].map((key) => ({ urlPattern: `${key}/*` })),
+      });
+    },
     popup: async (inWindow = windowId) => {
       const tab = await open(`chrome-extension://${extensionId}/popup.html`, inWindow);
       return { tab, evaluate: (fn, arg) => evaluateOn(tab.targetId, fn, arg) };

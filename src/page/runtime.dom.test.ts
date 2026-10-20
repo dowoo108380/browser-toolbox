@@ -15,6 +15,7 @@ import {
   elementTimeoutMs,
   hostTagName,
   pageElementAttribute,
+  visibilityNoticeEventName,
 } from '../dom/index.ts';
 import { retireInFrame } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
@@ -586,6 +587,12 @@ describe('결정 0008 보조 방법: 물러남 이벤트 없이 연결만 끊긴
     const disconnected = disconnectedRuntime();
     expect(document.visibilityState).toBe('visible');
     document.dispatchEvent(new Event('visibilitychange'));
+    expectRetired(disconnected);
+  });
+
+  it('COM-7.2 결정 0044 방패가 visibilitychange를 막는 문서에서도 보임 알림으로 다시 보이면 연결을 확인해 물러난다', () => {
+    const disconnected = disconnectedRuntime();
+    document.dispatchEvent(new Event(visibilityNoticeEventName));
     expectRetired(disconnected);
   });
 

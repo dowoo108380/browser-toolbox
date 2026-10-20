@@ -1,4 +1,5 @@
-import { armEventName, nativeDetail, nativeEventName, parseArm } from './core/shield.ts';
+import { visibilityNoticeEventName } from '../../dom/index.ts';
+import { armEventName, parseArm } from './core/shield.ts';
 
 // 페이지 활성 상태 유지의 페이지 쪽 방패(TAB-2 기대 동작 4, 결정 0041). 페이지의 세계(MAIN)에서 모든 http·https 프레임에
 // document_start로 실려 페이지의 첫 스크립트보다 먼저 돈다(R-03). 처음에는 아무것도 바꾸지 않는다(통과 상태). 격리된 쪽이 이
@@ -7,6 +8,8 @@ import { armEventName, nativeDetail, nativeEventName, parseArm } from './core/sh
 // - 창의 초점이 바뀌었다는 신호(창에 온 신뢰된 blur와 focus)와 보임이 바뀌었다는 신호(신뢰된 visibilitychange)를 페이지에 전하지
 //   않는다.
 //   창의 캡처 단계에서 가장 먼저 걸어 둔 듣기가 막으므로 페이지가 나중에 건 듣기(창과 문서, 속성 처리기 포함)에 닿지 않는다.
+//   DOM 이벤트는 세계를 가리지 않아 확장의 격리된 쪽 듣기에도 닿지 않으므로, 막은 보임 바뀜은 보임 알림으로 다시 보낸다(결정
+//   0044). 창의 blur·focus를 듣는 확장 코드는 없다(린터가 지킨다).
 // 입력란 같은 요소의 초점 이벤트는 그대로 둔다. iframe에서는 창이 초점을 잃은 것과 문서 안에서 초점을 옮긴 것을 가를 수 없어,
 // 막으면 폼의 검증 같은 페이지 동작이 깨질 수 있다(2026-10-21 실험).
 // 켜고 끌 때 페이지가 마지막으로 본 상태와 지금 답이 다르면 그 이벤트를 한 번 보내(신뢰되지 않은 것) 페이지가 다시 읽게 한다.
@@ -33,7 +36,6 @@ export function installShield(window: Window, prototype: object, retireEventName
   }
   const nativeVisible = () => Reflect.apply(nativeVisibility, document, []) === 'visible';
   const nativeFocused = () => Reflect.apply(nativeHasFocus, document, []) === true;
-  const top = window.top === window;
 
   let armed = false;
   // 페이지가 마지막으로 본 보임과 초점. 켜지 않은 동안은 실제 이벤트에서 받는다.
@@ -126,12 +128,9 @@ export function installShield(window: Window, prototype: object, retireEventName
         return;
       }
       event.stopImmediatePropagation();
-      // 최상위 문서의 실제 숨김은 격리된 쪽이 서비스 워커에 알린다(창이 가려진 것을 아는 길이다).
-      if (top) {
-        document.dispatchEvent(
-          new CustomEvent(nativeEventName, { detail: nativeDetail(!nativeVisible()) }),
-        );
-      }
+      // 페이지에는 숨기고 확장에는 알린다. 격리된 쪽은 실제 보임을 자기 세계에서 읽는다(최상위 문서의 실제 숨김은 이 기능이 가려진
+      // 창을 아는 길이기도 하다, page.ts).
+      document.dispatchEvent(new Event(visibilityNoticeEventName, { bubbles: true }));
     },
     true,
   );

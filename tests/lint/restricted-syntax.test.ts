@@ -173,3 +173,48 @@ describe('결정 0006 외부 메시지를 받지 않는다', () => {
     expect(reported(restrictions, code) > 0).toBe(expected);
   });
 });
+
+describe('결정 0044 방패가 막는 창의 초점·보임 이벤트를 격리된 쪽이 직접 듣지 않는다', () => {
+  const isShielded = (restriction: Restriction) => restriction.message.includes('결정 0044');
+
+  it.each([
+    'src/page/runtime.ts',
+    'src/dom/find.ts',
+    'src/sites/chatgpt/index.ts',
+    'src/features/tab-keep-active/page.ts',
+    'src/features/some-feature/page/part.ts',
+  ])('%s에 규칙이 걸린다', async (file) => {
+    expect((await restrictionsFor(file)).filter(isShielded)).not.toHaveLength(0);
+  });
+
+  it.each([
+    // 방패 자신(페이지의 세계)과 시험, 확장 화면과 서비스 워커는 방패가 없는 곳이거나 그것을 막는 곳이다.
+    'src/features/tab-keep-active/main.ts',
+    'src/page/runtime.dom.test.ts',
+    'src/ui/popup-app.tsx',
+    'src/background/router.ts',
+  ])('%s에는 규칙이 걸리지 않는다', async (file) => {
+    expect((await restrictionsFor(file)).filter(isShielded)).toHaveLength(0);
+  });
+
+  it.each([
+    ['잡는다', "document.addEventListener('visibilitychange', f);", true],
+    ['잡는다', "scope.listen(document, 'visibilitychange', f);", true],
+    ['잡는다', "scope.listen(window, 'blur', f);", true],
+    ['잡는다', "window.addEventListener('focus', f, true);", true],
+    ['잡는다', 'document.onvisibilitychange = f;', true],
+    ['잡는다', 'window.onblur = f;', true],
+    [
+      '잡지 않는다',
+      'for (const type of visibilityEventNames) scope.listen(document, type, f);',
+      false,
+    ],
+    ['잡지 않는다', "scope.listen(window, 'resize', f);", false],
+    ['잡지 않는다', "document.removeEventListener('visibilitychange', f);", false],
+    ['잡지 않는다', "if (document.visibilityState !== 'visible') return;", false],
+    ['잡지 않는다', 'input.focus();', false],
+  ])('%s: %s', async (_label, code, expected) => {
+    const restrictions = (await restrictionsFor('src/page/runtime.ts')).filter(isShielded);
+    expect(reported(restrictions, code) > 0).toBe(expected);
+  });
+});

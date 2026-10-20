@@ -1,19 +1,30 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { v } from '../../contracts/index.ts';
-import { createScope } from '../../dom/index.ts';
+import { createScope, visibilityNoticeEventName } from '../../dom/index.ts';
 import { type AppError, type Result, appError, err, ok } from '../../shared/index.ts';
 import type { Snapshot } from '../../storage/index.ts';
-import { armEventName, nativeDetail, nativeEventName, parseArm } from './core/shield.ts';
+import { armEventName, parseArm } from './core/shield.ts';
 import { hiddenCommand, pointCommand } from './feature.ts';
 import { page } from './page.ts';
 
-// 페이지 활성 상태 유지의 페이지 쪽(TAB-2, 결정 0041). 실행 틀이 이 탭에서 켜졌다고 할 때 시작한다.
+// 페이지 활성 상태 유지의 페이지 쪽(TAB-2, 결정 0041). 실행 틀이 이 탭에서 켜졌다고 할 때 시작한다. 문서의 실제 보임은 시험이
+// 정한다(headless Chromium의 문서는 늘 visible이다).
 
 const closers: (() => void)[] = [];
 const emptySnapshot: Snapshot = { features: new Map(), sites: new Map() };
+let visibility: DocumentVisibilityState = 'visible';
+
+beforeEach(() => {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => visibility,
+  });
+});
 
 afterEach(() => {
   for (const close of closers.splice(0)) close();
+  Reflect.deleteProperty(document, 'visibilityState');
+  visibility = 'visible';
 });
 
 function start(topFrame: boolean) {
@@ -67,12 +78,17 @@ describe('페이지 활성 상태 유지의 페이지 쪽', () => {
     expect(inner.arms).toEqual([true]);
   });
 
-  it('TAB-2.18 최상위 프레임은 방패가 알린 실제 숨김을 서비스 워커 쪽에 넘긴다. 모양이 틀린 알림은 버린다', async () => {
+  it('TAB-2.18 결정 0044 최상위 프레임은 문서의 실제 숨김과 보임을 서비스 워커 쪽에 넘긴다(방패가 막고 보낸 보임 알림이나 visibilitychange)', async () => {
     const top = start(true);
-    document.dispatchEvent(new CustomEvent(nativeEventName, { detail: nativeDetail(true) }));
-    document.dispatchEvent(new CustomEvent(nativeEventName, { detail: 'hidden' }));
+    visibility = 'hidden';
+    document.dispatchEvent(new Event(visibilityNoticeEventName));
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
     await Promise.resolve();
-    expect(top.sent).toEqual([{ name: hiddenCommand.name, payload: { hidden: true } }]);
+    expect(top.sent).toEqual([
+      { name: hiddenCommand.name, payload: { hidden: true } },
+      { name: hiddenCommand.name, payload: { hidden: false } },
+    ]);
   });
 
   it('TAB-2.11 최상위 프레임은 가짜 입력을 보낼 안전한 두 점으로 답한다. 지난번 두 점이 안전하면 그대로다', () => {
@@ -89,7 +105,8 @@ describe('페이지 활성 상태 유지의 페이지 쪽', () => {
 
   it('iframe에서는 방패만 켜고 숨김을 넘기거나 점에 답하지 않는다', async () => {
     const inner = start(false);
-    document.dispatchEvent(new CustomEvent(nativeEventName, { detail: nativeDetail(true) }));
+    visibility = 'hidden';
+    document.dispatchEvent(new Event(visibilityNoticeEventName));
     await Promise.resolve();
     expect(inner.sent).toEqual([]);
     expect(inner.answers.size).toBe(0);

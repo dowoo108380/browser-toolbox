@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { visibilityNoticeEventName } from '../../dom/index.ts';
 import { armDetail, armEventName } from './core/shield.ts';
 import { installShield } from './main.ts';
 
@@ -110,6 +111,19 @@ describe('페이지 쪽 방패', () => {
     expect(page.events).toContain('focusout');
     page.window.dispatchEvent(new FocusEvent('blur'));
     expect(page.events).toContain('blur:false');
+  });
+
+  it('결정 0044 켜진 동안 페이지가 보낸 visibilitychange는 막지 않고 보임 알림으로 바꾸지도 않는다(막은 신뢰된 것만 알린다)', async () => {
+    const page = await shielded();
+    page.arm(true);
+    const notices: string[] = [];
+    page.window.document.addEventListener(visibilityNoticeEventName, (event) => {
+      notices.push(event.type);
+    });
+    page.events.length = 0;
+    page.window.document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    expect(page.events).toEqual(['visibilitychange:false']);
+    expect(notices).toEqual([]);
   });
 
   it('끄면 원래 함수와 접근자로 돌아가고, 페이지가 마지막으로 본 것과 실제가 다르면 그 이벤트를 한 번 보낸다', async () => {
