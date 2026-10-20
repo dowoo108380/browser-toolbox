@@ -15,7 +15,7 @@ import {
   createScope,
   elementTimeoutMs,
 } from '../dom/index.ts';
-import type { AppError, ErrorKind, Result } from '../shared/index.ts';
+import { type AppError, type ErrorKind, type Result, runMachine } from '../shared/index.ts';
 import type { SettingsReaderHandlers, Snapshot } from '../storage/index.ts';
 import {
   type Lifecycle,
@@ -84,7 +84,6 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
 
   // 기능의 켜기·끄기 수명은 상태 기계(lifecycle.ts)가 정하고, 실행 틀은 그 할 일만 한다(quality 062).
   // 상태 기계는 실행 번호만 알고, 그 실행의 자원 범위는 여기 둔다. 'start'와 'watch'가 만들고 'close'가 닫고 지운다.
-  let lifecycle: Lifecycle<Start, Unmet> = initialLifecycle;
   const scopes = new Map<number, Scope>();
 
   const report = (problem: PageProblem) => {
@@ -105,25 +104,17 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     return false;
   };
 
-  // 사건은 하나씩 끝까지 처리한다(run-to-completion). 할 일을 하는 도중에 생긴 사건(시작 도중의 실패, 연결이 끊겨
-  // 물러남)은 줄에 두었다가 지금 사건의 할 일을 모두 마친 뒤 처리한다. 그러지 않으면 바로 처리한 사건 뒤에 남은
-  // 할 일이 그 사건이 만든 상태와 어긋난다(예: 모두 멈춘 뒤에 남은 'start'가 기능을 시작해 정리되지 않고 남음).
-  const queue: LifecycleEvent<Start, Unmet>[] = [];
-  let dispatching = false;
-  const dispatch = (event: LifecycleEvent<Start, Unmet>) => {
-    queue.push(event);
-    if (dispatching) return;
-    dispatching = true;
-    try {
-      for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-        const result = transition(lifecycle, next);
-        lifecycle = result.state;
-        for (const effect of result.effects) perform(effect);
-      }
-    } finally {
-      dispatching = false;
-    }
-  };
+  // 사건은 하나씩 끝까지 처리한다(run-to-completion, shared의 runMachine). 할 일을 하는 도중에 생긴 사건(시작 도중의
+  // 실패, 연결이 끊겨 물러남)은 지금 사건의 할 일을 모두 마친 뒤 처리한다(예: 모두 멈춘 뒤에 남은 'start'가 기능을
+  // 시작해 정리되지 않고 남는 일을 막는다, 결정 0020).
+  const lifecycle = runMachine<
+    Lifecycle<Start, Unmet>,
+    LifecycleEvent<Start, Unmet>,
+    LifecycleEffect<Start, Unmet>
+  >(initialLifecycle, transition, (effect) => {
+    perform(effect);
+  });
+  const { dispatch } = lifecycle;
 
   // 실행 run의 자원 범위를 만든다. 범위가 알린 실패는 그 실행의 실패다. 시작 도중 콜백이 실패해도 'close'가 이 범위를
   // 찾을 수 있게 먼저 맵에 둔다.
@@ -291,7 +282,7 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
 
   // 팝업이 열릴 때 서비스 워커가 최상위 프레임에 묻는다(결정 0026, 0034). 상태 기계의 지금 상태에서 계산한다.
   const stopStatus = deps.listenStatus(() => ({
-    unmet: unmetOf(lifecycle).map(({ featureId, unmet }) => ({
+    unmet: unmetOf(lifecycle.state()).map(({ featureId, unmet }) => ({
       featureId,
       reason: unmet.reason,
       element: { id: unmet.element.id, name: unmet.element.name },

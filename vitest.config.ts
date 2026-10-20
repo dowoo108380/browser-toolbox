@@ -39,12 +39,14 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       // 핵심 로직(quality 015, 102): 설정 해석과 형식 이전, 기능의 core/와 여러 기능이 함께 쓰는 그 계산(결정 0039), 상태
-      // 기계(quality 062), 화면 조각이 정한 값과 그 저장의 차례(결정 0036, 0037).
+      // 기계(quality 062)와 그것을 사건 하나씩 끝까지 돌리는 도우미(결정 0020), 화면 조각이 정한 값과 그 저장의 차례(결정
+      // 0036, 0037).
       include: [
         'src/storage/**/*.ts',
         'src/features/*/core/**/*.ts',
         'src/shared/applied-width.ts',
         'src/shared/integer.ts',
+        'src/shared/machine.ts',
         'src/page/lifecycle.ts',
         'src/ui/choices.ts',
       ],

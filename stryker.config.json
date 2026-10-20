@@ -10,6 +10,7 @@
     "src/features/*/core/**/*.ts",
     "src/shared/applied-width.ts",
     "src/shared/integer.ts",
+    "src/shared/machine.ts",
     "src/page/lifecycle.ts",
     "src/ui/choices.ts",
     "!src/**/*.test.ts",
