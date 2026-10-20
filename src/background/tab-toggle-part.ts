@@ -56,8 +56,8 @@ export interface TabToggleRunner extends TabToggleEvents {
   // 그 탭들의 Chrome 상태를 지금 켜짐에 맞춘다. 기능이 자기 줄에서 차례로 하고, 끝을 기다리지 않는다.
   readonly sync: (tabIds: readonly number[]) => void;
   // 서비스 워커가 시작할 때 앞 서비스 워커나 다시 불러오기 전의 판이 남긴 Chrome 상태를 기능의 기록으로 맞춘다. 공용 부분이
-  // 기록을 읽은 뒤에 부른다.
-  readonly recover: () => Promise<void>;
+  // 기록을 읽은 뒤, 그 시작의 sync보다 먼저 부른다. sync처럼 기능이 자기 줄에서 하고, 끝을 기다리지 않는다.
+  readonly recover: () => void;
   // 페이지 쪽이 보낸 이 기능의 명령(feature.command). 이름과 내용은 기능이 검증한다.
   readonly command: (
     name: string,

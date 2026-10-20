@@ -41,8 +41,9 @@ import type {
 
 // 탭마다 켜고 끄기의 공용 부분(TAB-2 기대 동작 1·10, 결정 0043). 탭마다 고른 것과 기능의 알림을 storage.session의 기록에
 // 두고(쓰는 곳은 여기 하나), "모든 탭" 스위치(설정)와 합쳐 탭마다의 켜짐을 정한다. 켜짐이 바뀐 탭에는 그 탭의 모든 프레임에
-// 알리고(tabState.changed) 기능의 sync를 부른다. 기록의 읽고-고치고-쓰기는 들어온 차례대로 하나씩 한다. 기능의 sync는 그 줄
-// 밖(기능의 줄)에서 돈다. 기능이 sync 도중 turnOff를 부르면 이 줄에 서기 때문이다.
+// 알리고(tabState.changed) 기능의 sync를 부른다. 기록의 읽고-고치고-쓰기는 들어온 차례대로 하나씩 한다. 기능의 sync와
+// recover는 그 줄 밖(기능의 줄)에서 돌고, 이 줄은 그 끝을 기다리지 않는다. 기능이 그 일 도중 turnOff·disable·notice를 부르면
+// 이 줄에 서기 때문이다(기다리면 서로 기다려 멈춘다).
 
 export interface TabTogglesDeps {
   readonly features: readonly TabToggleFeature[];
@@ -266,7 +267,7 @@ export function createTabToggles(deps: TabTogglesDeps): TabToggles {
         ? await allTabIds()
         : [];
     if (first) {
-      for (const part of runners.values()) await part.recover();
+      for (const part of runners.values()) part.recover();
     }
     // 처음이 아닌 스위치의 바뀜은 모든 탭의 켜짐을 바꾼다. 처음(서비스 워커가 시작함)에는 탭이 이미 자기 상태를 안다.
     const switched = first ? [] : changed;

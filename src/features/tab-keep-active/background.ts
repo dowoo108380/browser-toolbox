@@ -292,12 +292,13 @@ export const background = defineTabTogglePart(tabKeepActive, (host, services) =>
     sync: (tabIds) => {
       for (const tabId of tabIds) run(() => syncTab(tabId, false));
     },
-    recover: () =>
-      enqueue(async () => {
+    recover: () => {
+      run(async () => {
         const ledger = await loadLedger();
         held = new Set(heldTabs(ledger));
         for (const tabId of heldTabs(ledger)) await syncTab(tabId, true);
-      }),
+      });
+    },
     command: async (name, payload, sender): Promise<Result<unknown, AppError>> => {
       if (name !== hiddenCommand.name)
         return err(appError('invalid-input', strings.unknownCommand));

@@ -42,6 +42,16 @@ async function settle() {
   for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
 }
 
+// 답을 몇 차례만 기다린다. 서로 기다려 멈춘 요청이 시험의 제한 시간까지 매달리지 않고 '답 없음'으로 실패하게 한다.
+async function answered<T>(pending: Promise<T>): Promise<T | '답 없음'> {
+  let result: T | '답 없음' = '답 없음';
+  void pending.then((value) => {
+    result = value;
+  });
+  await settle();
+  return result;
+}
+
 async function startWorld(
   browser = createFakeBrowser(),
   store = createFakeStore(),
@@ -357,6 +367,30 @@ describe('TAB-2 서비스 워커의 다시 시작과 확장 다시 불러오기(
     const second = await startWorld(first.browser, first.store, createFakeStore());
     expect(second.browser.attached()).toEqual([2, 3]);
     expect(second.browser.tab(1)?.autoDiscardable).toBe(false);
+  });
+
+  it('TAB-2.4 COM-7.5 서비스 워커가 다시 시작해 맞추는 중 붙이기를 거절하면 그 탭을 끄고 까닭을 남기며, 뒤의 켜기·끄기도 끝난다', async () => {
+    const first = await startWorld(threeTabs());
+    await setAllTabs(first, true);
+    expect(first.browser.attached()).toEqual([2, 3]);
+    // 확장을 다시 불러온 사이 탭 2의 페이지에 다른 확장의 화면(iframe)이 들어왔다. "모든 탭" 스위치는 설정이라 남는다.
+    first.browser.extensionReloaded();
+    first.browser.refuse(2);
+    const second = await startWorld(first.browser, first.store, createFakeStore());
+    expect(tabNotice(records(second), feature, 2)).toBe('attach-failed');
+    expect(tabIsOn(records(second), feature, 2, true)).toBe(false);
+    expect(second.browser.attached()).toEqual([3]);
+    // 맞추기가 공용 기록의 줄을 붙잡고 있으면 이 켜기·끄기는 답이 오지 않는다.
+    expect(
+      await answered(second.popup(tabToggleSet, { featureId: feature, tabIds: [3], on: false })),
+    ).toEqual(ok(null));
+    await settle();
+    expect(second.browser.attached()).toEqual([]);
+    expect(
+      await answered(second.popup(tabToggleSet, { featureId: feature, tabIds: [3], on: true })),
+    ).toEqual(ok(null));
+    await settle();
+    expect(second.browser.attached()).toEqual([3]);
   });
 
   it('결정 0038 앞 서비스 워커가 장부를 쓴 뒤 비우기를 막기 전에 멈췄어도 다음 시작이 맞춘다', async () => {
