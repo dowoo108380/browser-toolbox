@@ -109,7 +109,13 @@ describe('디버거 연결 상태 기계', () => {
     expect(detaching.effects).toEqual([]);
     const again = run([detached(1)], detaching.state);
     expect(again.effects).toEqual([{ type: 'attach', tabId: tab, run: 2 }]);
-    expect(run([release('capture')], detaching.state).effects).toEqual([]);
+  });
+
+  it('떼는 동안 다시 쓰겠다던 쪽이 그만 쓰면 기다림을 끝내고, 아무도 남지 않으면 떼기가 끝난 뒤 떨어진 채다', () => {
+    const detaching = run([acquire('keep'), attached(1), release('keep'), acquire('capture')]);
+    const withdrawn = run([release('capture')], detaching.state);
+    expect(withdrawn.effects).toEqual([{ type: 'withdrawn', tabId: tab, user: 'capture' }]);
+    expect(run([detached(1)], withdrawn.state)).toEqual({ state: emptyAfter(2), effects: [] });
   });
 
   it('번호가 다른 늦은 결과는 버린다', () => {
@@ -162,10 +168,13 @@ describe('디버거 연결 상태 기계', () => {
     expect(lost.state.tabs.size).toBe(0);
   });
 
-  it('붙이는 중에 온 끊김은 그 붙이기의 것이다. 기다리던 쪽에 알리고, 늦게 온 붙이기의 결과는 버린다', () => {
+  it('붙이는 중에 온 끊김은 그 붙이기의 것이다. 기다림을 끝내고 끊김을 알리며, 늦게 온 붙이기의 결과는 버린다', () => {
     const { state } = run([acquire('keep')]);
     const lost = transition(state, { type: 'lost', tabId: tab, loss: 'closed' });
-    expect(lost.effects).toEqual([{ type: 'lost', tabId: tab, users: ['keep'], loss: 'closed' }]);
+    expect(lost.effects).toEqual([
+      { type: 'interrupted', tabId: tab, users: ['keep'] },
+      { type: 'lost', tabId: tab, users: ['keep'], loss: 'closed' },
+    ]);
     expect(transition(lost.state, attached(1)).effects).toEqual([]);
     const nobody = run([acquire('keep'), release('keep')]).state;
     expect(transition(nobody, { type: 'lost', tabId: tab, loss: 'closed' }).effects).toEqual([]);

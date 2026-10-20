@@ -57,6 +57,8 @@ export type ConnectionEffect =
     }
   // 붙기를 기다리던 user가 그만 쓰겠다고 했다. 기다림을 끝낸다.
   | { readonly type: 'withdrawn'; readonly tabId: number; readonly user: string }
+  // 붙기를 기다리던 그 쪽들의 붙이기가 밖에서 끊겼다. 기다림을 실패로 끝낸다(끊김은 뒤따르는 lost가 알린다).
+  | { readonly type: 'interrupted'; readonly tabId: number; readonly users: readonly string[] }
   // 그 쪽들이 쓰던 연결이 밖에서 끊겼다.
   | {
       readonly type: 'lost';
@@ -113,9 +115,10 @@ export function transition(state: Connections, event: ConnectionEvent): Step {
           effects: [{ type: 'detach', tabId, run: current.run }],
         };
       }
+      // 붙이는 중이나 떼는 중의 쪽은 붙기를 기다린다. 그 기다림을 끝낸다.
       return {
         state: withTab(state, tabId, { ...current, users }),
-        effects: current.phase === 'attaching' ? [{ type: 'withdrawn', tabId, user }] : [],
+        effects: current.phase === 'attached' ? [] : [{ type: 'withdrawn', tabId, user }],
       };
     }
     case 'discard': {
@@ -166,14 +169,15 @@ export function transition(state: Connections, event: ConnectionEvent): Step {
       const { tabId, loss } = event;
       // 떼는 중이면 떼기의 결과(이미 떨어짐)가 곧 온다. 그때 기다리던 쪽을 위해 다시 붙인다.
       if (current === undefined || current.phase === 'detaching') return unchanged(state);
-      // 붙이는 중에 온 끊김은 이 붙이기의 것이다(Chrome은 이 확장이 스스로 뗀 연결의 끊김을 보내지 않는다). 늦게 오는 붙이기의
-      // 결과는 실행 번호가 맞지 않아 버린다.
+      // 붙이는 중에 온 끊김은 이 붙이기의 것이다(Chrome은 이 확장이 스스로 뗀 연결의 끊김을 보내지 않는다). 기다리던 쪽의
+      // 기다림을 먼저 끝낸다. 늦게 오는 붙이기의 결과는 그 탭의 연결이 없어 버린다.
+      const users = [...current.users];
+      if (users.length === 0) return { state: withTab(state, tabId, null), effects: [] };
+      const lost: ConnectionEffect = { type: 'lost', tabId, users, loss };
       return {
         state: withTab(state, tabId, null),
         effects:
-          current.users.size === 0
-            ? []
-            : [{ type: 'lost', tabId, users: [...current.users], loss }],
+          current.phase === 'attaching' ? [{ type: 'interrupted', tabId, users }, lost] : [lost],
       };
     }
   }

@@ -155,6 +155,8 @@ export const background = defineTabTogglePart(tabKeepActive, (host, services) =>
     }
     const acquired = await services.debuggers.acquire(tabId, user);
     if (!acquired.ok) {
+      // 붙이는 사이 끊긴 것(unavailable)은 끊김을 듣는 쪽이 맞춘다(안내 막대의 취소면 모두 끔).
+      if (acquired.error.kind === 'unavailable') return;
       // 이동하는 중이면 갈 곳 때문에 거절했을 수 있다(Chrome 내부 화면 등. 확장은 그 주소를 볼 수 없어 아직 옛 주소로 보인다,
       // 2026-10-21 시험에서 찾음). 끄지 않고 쉰다. 다 실으면 다시 맞춘다(웹 페이지가 아니면 쉬고, 다시 거절하면 끈다).
       if ((await services.tabInfo(tabId))?.loading !== true) {

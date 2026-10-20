@@ -57,6 +57,8 @@ export function createFakeBrowser() {
   const windows = new Map<number, FakeWindow>();
   const attached = new Set<number>();
   const refused = new Set<number>();
+  // 답을 늦추는 붙이기(holdAttaches의 동안). 그동안 붙이면 Chrome에는 붙었고 그 답만 아직 오지 않은 것이다.
+  let held: (() => void)[] | null = null;
   const commands: { readonly tabId: number; readonly method: string; readonly params: unknown }[] =
     [];
   const pushes: { readonly tabId: number; readonly state: TabState }[] = [];
@@ -97,7 +99,13 @@ export function createFakeBrowser() {
         return Promise.resolve(err(appError('permission', '이 탭에 디버거를 붙이지 못했다.')));
       }
       attached.add(tabId);
-      return Promise.resolve(ok(null));
+      const answers = held;
+      if (answers === null) return Promise.resolve(ok(null));
+      return new Promise((resolve) => {
+        answers.push(() => {
+          resolve(ok(null));
+        });
+      });
     },
     detachDebugger: (tabId: number): Promise<Result<null, AppError>> => {
       attached.delete(tabId);
@@ -275,6 +283,16 @@ export function createFakeBrowser() {
     // 그 탭에는 디버거를 붙이지 못하게 한다(페이지 안에 다른 확장의 화면이 있는 경우 등).
     refuse: (tabId: number) => {
       refused.add(tabId);
+    },
+    // 이제부터의 붙이기는 releaseAttaches까지 답하지 않는다(붙이는 사이의 끊김을 시험한다).
+    holdAttaches: () => {
+      held = [];
+    },
+    // 늦춘 붙이기에 모두 성공으로 답하고, 이제부터는 바로 답한다.
+    releaseAttaches: () => {
+      const answers = held ?? [];
+      held = null;
+      for (const answer of answers) answer();
     },
     // 서비스 워커가 탭의 최상위 프레임에 보낸 기능 명령에 답한다.
     answerCommands: (next: typeof answer) => {

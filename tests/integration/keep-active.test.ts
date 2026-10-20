@@ -248,6 +248,24 @@ describe('TAB-2 보는 탭과 보지 않는 탭(결정 0041)', () => {
     expect(world.browser.attached()).toEqual([]);
   });
 
+  it('TAB-2.7 붙이기의 답이 오기 전에 안내 막대에서 취소해도 그 탭까지 까닭이 취소로 남고, 다시 켜면 붙인다', async () => {
+    const world = await startWorld(threeTabs());
+    await turn(world, [2], true);
+    world.browser.holdAttaches();
+    await turn(world, [3], true);
+    world.browser.cancelDebugging();
+    await settle();
+    world.browser.releaseAttaches();
+    await settle();
+    for (const tabId of [2, 3]) {
+      expect(tabNotice(records(world), feature, tabId)).toBe('cancelled');
+    }
+    expect(world.browser.attached()).toEqual([]);
+    // 붙이는 사이 끊긴 붙이기를 기다리느라 이 기능의 줄이 멈추면 다시 켜도 붙이지 않는다.
+    await turn(world, [3], true);
+    expect(world.browser.attached()).toEqual([3]);
+  });
+
   it('TAB-2.8 탭을 닫으면 그 탭의 기록과 장부가 남지 않는다', async () => {
     const world = await startWorld(threeTabs());
     await turn(world, [2], true);

@@ -107,6 +107,39 @@ describe('디버거 관리(결정 0042)', () => {
     expect(attaches.map((call) => call.tabId)).toEqual([5, 5]);
   });
 
+  it('붙이는 중에 Chrome이 끊으면 기다리던 쪽에 실패로 답하고 끊김도 알린다. 늦게 온 붙이기의 성공은 버린다', async () => {
+    const { manager, attaches, lost } = setup();
+    const results: Result<null, AppError>[] = [];
+    void manager.acquire(9, 'keep').then((result) => results.push(result));
+    manager.lost(9, 'closed');
+    attaches[0]?.resolve(ok(null));
+    await flush();
+    manager.release(9, 'keep');
+    await flush();
+    expect(results.map((result) => (result.ok ? null : result.error.kind))).toEqual([
+      'unavailable',
+    ]);
+    expect(lost).toEqual([{ user: 'keep', tabId: 9, loss: 'closed' }]);
+    const late = await manager.send(9, 'Page.setWebLifecycleState', { state: 'active' });
+    expect(late.ok ? null : late.error.kind).toBe('unavailable');
+  });
+
+  it('떼는 동안 다시 쓰겠다던 쪽이 떼기가 끝나기 전에 그만 쓰면 기다림이 cancelled로 끝나고 다시 붙이지 않는다', async () => {
+    const { manager, attaches, detaches } = setup();
+    const first = manager.acquire(10, 'keep');
+    attaches[0]?.resolve(ok(null));
+    await first;
+    manager.release(10, 'keep');
+    const results: Result<null, AppError>[] = [];
+    void manager.acquire(10, 'capture').then((result) => results.push(result));
+    manager.release(10, 'capture');
+    await flush();
+    expect(results.map((result) => (result.ok ? null : result.error.kind))).toEqual(['cancelled']);
+    detaches[0]?.resolve(ok(null));
+    await flush();
+    expect(attaches).toHaveLength(1);
+  });
+
   it('결정 0038 쓰는 쪽이 없는 탭에 남았을 수 있는 연결을 뗀다', async () => {
     const { manager, detaches } = setup();
     manager.discard(6);

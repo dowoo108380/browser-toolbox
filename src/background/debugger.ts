@@ -29,7 +29,8 @@ export interface DebuggerDeps {
 
 export interface DebuggerManager {
   // user가 그 탭에 붙여 쓴다. 이미 붙어 있으면 바로, 아니면 붙인 뒤 답한다. 붙이지 못하면 그 까닭이다. 기다리는 동안 user가
-  // 그만 쓰면 cancelled다.
+  // 그만 쓰면 cancelled이고, 붙이는 사이 Chrome이 끊으면 unavailable이다(그 까닭은 onLost로도 알린다). 붙이기와 떼기에 제한
+  // 시간이 있어 기다림은 늘 끝난다.
   readonly acquire: (tabId: number, user: string) => Promise<Result<null, AppError>>;
   // user가 그 탭을 그만 쓴다. 쓰는 쪽이 없어지면 뗀다(떼기는 기다리지 않는다).
   readonly release: (tabId: number, user: string) => void;
@@ -41,7 +42,7 @@ export interface DebuggerManager {
     method: string,
     params?: Readonly<Record<string, unknown>>,
   ) => Promise<Result<unknown, AppError>>;
-  // user가 쓰던 연결이 밖에서 끊기면 알린다(user마다 하나).
+  // user가 쓰던(붙기를 기다리던 것 포함) 연결이 밖에서 끊기면 알린다(user마다 하나).
   readonly onLost: (user: string, listener: (tabId: number, loss: DebuggerLoss) => void) => void;
   // Chrome이 그 탭의 연결을 끊었다(debugger.onDetach를 듣는 곳이 부른다).
   readonly lost: (tabId: number, loss: DebuggerLoss) => void;
@@ -113,6 +114,11 @@ export function createDebuggerManager(deps: DebuggerDeps): DebuggerManager {
         return;
       case 'withdrawn':
         answer(effect.tabId, effect.user, err(appError('cancelled', strings.debuggerWithdrawn)));
+        return;
+      case 'interrupted':
+        for (const user of effect.users) {
+          answer(effect.tabId, user, err(appError('unavailable', strings.debuggerInterrupted)));
+        }
         return;
       case 'lost':
         for (const user of effect.users) lostListeners.get(user)?.(effect.tabId, effect.loss);

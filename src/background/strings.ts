@@ -27,6 +27,7 @@ export const strings = {
   // 디버거 관리(결정 0042). 기능이 이 까닭을 받아 그 기능의 알림으로 바꿔 보인다.
   debuggerUnexpected: '디버거를 다루다 예상하지 못한 오류가 났다.',
   debuggerWithdrawn: '디버거가 붙기 전에 그만 쓰기로 했다.',
+  debuggerInterrupted: '디버거를 붙이는 사이 연결이 끊겼다.',
   debuggerNotAttached: '디버거가 이 탭에 붙어 있지 않다.',
   // 탭마다 켜고 끄기(결정 0043).
   notTabToggle: '탭마다 켜고 끄는 기능이 아니다.',
