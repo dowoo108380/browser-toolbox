@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, Worker } from '@playwright/test';
 import {
   expect,
   fixtureOrigin,
@@ -7,6 +7,7 @@ import {
   openPopup,
   openPopupOn,
   reloadExtension,
+  serviceWorkerOf,
   tabStatusOf,
   test,
 } from './support/extension.ts';
@@ -15,7 +16,8 @@ import {
 // 그 문서를 그대로 되살린다. 옛 콘텐츠 스크립트의 세계와 그것이 더한 요소도 함께다. 그래서 새 판이 그런 문서를 만나면 옛
 // 요소가 남거나(COM-7.2) 옛 판과 새 판의 요소가 겹칠 수 있다(COM-7.3). 2026-10-17 실험(Chromium 156)에서 Chrome은
 // bfcache에 든 동안 확장을 다시 불러오면 그 문서를 버리고 뒤로 가기에서 새로 실었고, 다시 불러온 뒤에 떠난 문서는 정리를
-// 마친 채 되살렸다(새 판의 스크립트는 실리지 않음). 이 시험이 그 두 길을 지킨다.
+// 마친 채 되살렸다(새 판의 스크립트는 실리지 않음). 이 시험이 그 두 길과, bfcache에 든 동안 바꾼 설정을 되살아난 문서가
+// 따르는 것(2026-10-21 실험, 아키텍처 7장 "뒤로·앞으로 캐시에서 되살아남")을 지킨다.
 
 test.use({ browserDebugging: true, backForwardCache: true });
 
@@ -93,4 +95,35 @@ test('COM-7.2 COM-7 기대 동작 2 다시 불러온 뒤에 떠났다가 bfcache
   await expect(viewer.getByText('쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음')).toBeVisible();
   expect(await indicatorTexts(page)).toEqual([]);
   expect(await page.evaluate(() => document.querySelector('video')?.playbackRate)).toBe(2);
+});
+
+// 서비스 워커가 저장한 미디어 배속의 켜짐.
+const savedSpeed = (worker: Worker) =>
+  worker.evaluate(async () => {
+    const { settings }: Record<string, unknown> = await chrome.storage.local.get('settings');
+    const field = (value: unknown, key: string): unknown =>
+      typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined;
+    return field(field(field(settings, 'features'), 'media-speed'), 'enabled') === true;
+  });
+
+test('COM-1.2 COM-1.3 bfcache에 든 동안 설정을 끄고 켜면 되살아난 문서가 따른다(저장소 바뀜은 Chrome이 되살아난 문서에 전한다. 메시지로 오는 탭마다의 켜짐은 e2e/keep-active가 본다)', async ({
+  context,
+  extensionId,
+}) => {
+  const worker = await serviceWorkerOf(context);
+  const page = await context.newPage();
+  await openVideoWithIndicators(page, extensionId);
+  const popup = await openPopup(context, extensionId);
+  const speed = popup.getByRole('switch', { name: '미디어 배속' });
+  for (const on of [false, true]) {
+    await markDocument(page);
+    await page.goto(`${fixtureOrigin}/blank.html`);
+    // 문서가 bfcache에 든 동안 저장까지 마친다.
+    await (on ? speed.check() : speed.uncheck());
+    await expect.poll(() => savedSpeed(worker)).toBe(on);
+    await goBack(page);
+    await expect.poll(() => isSameDocument(page)).toBe(true);
+    await expect.poll(() => indicatorTexts(page)).toEqual(on ? ['1×', '1×'] : []);
+  }
+  await popup.close();
 });

@@ -450,3 +450,63 @@ test('COM-6.1 COM-6.7 결정 0044 너비 기능과 함께 켠 뒤쪽 탭에서 �
   const at = typeof record === 'object' && record !== null && 'at' in record ? record.at : null;
   expect(typeof at === 'number' && at >= turnedAt + elementTimeoutMs).toBe(true);
 });
+
+// 페이지에서 돈다. 이 문서에 표식을 남긴다. 뒤로 가기에서 같은 표식이 보이면 뒤로·앞으로 캐시(bfcache)가 그 문서를 되살린
+// 것이다(새로 실었으면 없다).
+function markDocument(): null {
+  Reflect.set(window, 'documentMark', 'before');
+  return null;
+}
+
+function isMarked(): boolean {
+  return Reflect.get(window, 'documentMark') === 'before';
+}
+
+// 같은 탭에서 다른 페이지로 가(앞 문서는 bfcache에 든다) away를 하고 뒤로 가기로 돌아온다. 돌아온 것이 bfcache에서 되살아난
+// 그 문서인지 먼저 확인한다(이 시험이 보려는 것). 표식은 사용자가 누른 것으로 쳐서 남긴다. 사용자가 쓰지 않은 페이지는 Chrome이
+// 뒤로 가기에서 건너뛴다(tabs.goBack이 "Cannot find a next page in history"로 거절함).
+async function changeWhileCached(raw: RawChromium, tab: RawTab, away: () => Promise<void>) {
+  await raw.evaluate(tab, markDocument, null, { userGesture: true });
+  await navigate(raw, tab, blankUrl);
+  await expect
+    .poll(() => raw.evaluate(tab, () => [location.href, document.readyState], null))
+    .toEqual([blankUrl, 'complete']);
+  await away();
+  await raw.sw(async (id) => {
+    await chrome.tabs.goBack(id);
+  }, tab.tabId);
+  await expect.poll(() => raw.evaluate(tab, isMarked, null)).toBe(true);
+}
+
+test('결정 0043 TAB-2.5 켜진 탭에서 다른 페이지로 가 끈 뒤 뒤로 가기로 돌아오면, 뒤로·앞으로 캐시에서 되살아난 문서도 꺼져 방패가 없다', async ({
+  raw,
+}) => {
+  const tab = await openViewed(raw);
+  await turn(raw, [tab], true);
+  const page = recorder(raw, tab);
+  await page.waitShield(true);
+  await changeWhileCached(raw, tab, async () => {
+    await page.waitShield(true);
+    await turn(raw, [tab], false);
+    await page.waitShield(false);
+  });
+  await page.waitShield(false);
+  await popupStates(raw, (states) => {
+    expect(states[String(tab.tabId)]).toBe(stateText.off);
+  });
+});
+
+test('결정 0043 꺼진 탭에서 다른 페이지로 가 켠 뒤 뒤로 가기로 돌아오면, 뒤로·앞으로 캐시에서 되살아난 문서도 켜져 방패가 있다', async ({
+  raw,
+}) => {
+  const tab = await openViewed(raw);
+  const page = recorder(raw, tab);
+  await changeWhileCached(raw, tab, async () => {
+    await turn(raw, [tab], true);
+    await page.waitShield(true);
+  });
+  await page.waitShield(true);
+  await popupStates(raw, (states) => {
+    expect(states[String(tab.tabId)]).toBe(stateText.on);
+  });
+});

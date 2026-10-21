@@ -62,6 +62,15 @@ export function startContentScript(parts: readonly FeaturePagePart[], bundle: Pa
               receive(state);
               return ok(null);
             }),
+          restored: (handle) => {
+            const onPageShow = (event: PageTransitionEvent) => {
+              if (event.persisted) handle();
+            };
+            window.addEventListener('pageshow', onPageShow);
+            return () => {
+              window.removeEventListener('pageshow', onPageShow);
+            };
+          },
           featureIds: parts
             .filter((part) => part.toggledBy === 'tab')
             .map((part) => part.featureId),
