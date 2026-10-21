@@ -51,10 +51,11 @@ export function createNoticeBoard(context: PageContext): NoticeBoard {
     show: (text) => {
       if (context.document.visibilityState !== 'visible') return;
       close();
-      const { host, root, remove } = createIsolatedHost(context.document, {
+      const { root, remove } = createIsolatedHost(context.document, {
         name: 'task-notice',
         css,
         parent: context.document.documentElement,
+        topLayer: {},
       });
       const box = context.document.createElement('div');
       box.className = 'notice';
@@ -62,8 +63,6 @@ export function createNoticeBoard(context: PageContext): NoticeBoard {
       box.setAttribute('role', 'status');
       box.textContent = text;
       root.append(box);
-      host.setAttribute('popover', 'manual');
-      host.showPopover();
       shown = { remove, timer: context.window.setTimeout(close, noticeMs) };
     },
     close,

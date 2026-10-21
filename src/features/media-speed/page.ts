@@ -59,10 +59,12 @@ export const page = definePagePart(mediaSpeed, (_settings, { document, scope }) 
   const attach = (video: HTMLVideoElement) => {
     if (indicators.has(video)) return;
     const own = scope.child();
-    const { host, root, remove } = createIsolatedHost(document, {
+    // 최상위 층에 띄우고 이 영상을 앵커로 삼는다. 영상에는 아무것도 적지 않는다. host를 지우면 popover도 닫힌다.
+    const { root, remove } = createIsolatedHost(document, {
       name: 'media-speed-indicator',
       css,
       parent: document.documentElement,
+      topLayer: { source: video },
     });
     own.defer(remove);
     const label = document.createElement('div');
@@ -75,9 +77,6 @@ export const page = definePagePart(mediaSpeed, (_settings, { document, scope }) 
     };
     showRate();
     own.listen(video, 'ratechange', showRate);
-    // 최상위 층에 띄우고 이 영상을 앵커로 삼는다. 영상에는 아무것도 적지 않는다. host를 지우면 popover도 닫힌다.
-    host.setAttribute('popover', 'manual');
-    host.showPopover({ source: video });
   };
 
   // 영상은 문서 트리에도, 사용자 정의 요소 등의 열린 shadow root 안(겹친 것 포함)에도 있다(결정 0019).
