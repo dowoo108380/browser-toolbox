@@ -154,7 +154,8 @@ test('N-15 설정을 쓰는 도중 서비스 워커가 강제로 멈춰도 저�
         { a: valueA, b: valueB },
       );
       await new Promise((resolve) => setTimeout(resolve, 20 + Math.floor(Math.random() * 300)));
-      await workerStatus.stop();
+      // 멈춘 것만 본다. 오가던 쓰기가 곧 다시 깨워도 새 서비스 워커는 쓰기를 이어 하지 않는다(이슈 #5).
+      await workerStatus.interrupt();
       // 서비스 워커가 아닌 곳(확장 화면)에서 읽는다.
       const reader = await context.newPage();
       await reader.goto(`chrome-extension://${extensionId}/popup.html`);

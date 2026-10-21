@@ -163,6 +163,14 @@ export async function watchServiceWorker(page: Page) {
       await session.send('ServiceWorker.stopAllWorkers');
       await reach('stopped');
     },
+    // 강제로 멈추고, 그 뒤에 멈춘 상태를 한 번 받은 것을 본다. 멈춘 뒤 곧 다시 깨어나도 된다. 저장소에 쓰는 도중에 멈추는
+    // 시험(N-15)이 쓴다: 멈추는 순간 오가던 쓰기가 서비스 워커를 다시 깨우곤 한다(2026-10-21, 12번 중 8번. 깨우는 것이
+    // 그 쓰기의 바뀜 알림인지는 확인하지 않음, 이슈 #5). 멈춘 채여야 하는 시험은 stop을 쓴다.
+    interrupt: async () => {
+      const from = statuses.length;
+      await session.send('ServiceWorker.stopAllWorkers');
+      await expect.poll(() => statuses.slice(from).join(' → ')).toMatch(/(^| → )stopped( → |$)/);
+    },
     last: () => statuses.at(-1),
   };
 }
