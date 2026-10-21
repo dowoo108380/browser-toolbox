@@ -30,15 +30,41 @@ export interface TabContractResult {
   readonly active: Readonly<Record<keyof TabIds, boolean>>;
   // 닫힌 탭에 배지를 달고 지울 때 던진 오류. 던지지 않았으면 null이다.
   readonly closedBadgeError: string | null;
-  // 탭마다 켜고 끄는 기능이 보는 탭의 사정(결정 0041): 닫힌 탭이면 null, 열린 탭은 창에 나와 있는지와 싣는 중인지.
+  // 탭마다 켜고 끄는 기능이 보는 탭의 사정(결정 0041, 0045): 닫힌 탭이면 null, 열린 탭은 창에 나와 있는지, 싣는 중인지,
+  // 쉬는지.
   readonly info: Readonly<
-    Record<keyof TabIds, { readonly shown: boolean; readonly loading: boolean } | null>
+    Record<
+      keyof TabIds,
+      { readonly shown: boolean; readonly loading: boolean; readonly asleep: boolean } | null
+    >
   >;
+  // Chrome이 비운 탭이 쉬는 것으로 보이는지(결정 0045). 얼린 탭은 이 시험의 브라우저(Playwright가 띄움)에서 디버거로 얼려도
+  // Chrome의 frozen이 바뀌지 않아 보지 않는다(직접 띄운 Chromium에서는 바뀌었다, 2026-10-21 실험).
+  readonly asleep: { readonly discarded: boolean | null };
   // 닫힌 창의 사정(null이어야 한다)과 지금 창의 사정.
   readonly closedWindow: unknown;
   readonly pageWindow: unknown;
   // 닫힌 탭의 autoDiscardable을 바꿀 때 던진 오류. 던지지 않았으면 null이다.
   readonly closedDiscardableError: string | null;
+}
+
+const pause = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+// 그 주소를 뒤쪽 탭으로 열어 다 실은 뒤 Chrome이 비우게 하고, 그 탭이 쉬는 것으로 보이는지 준다. 탭은 닫는다.
+async function asleepAfterDiscard(url: string): Promise<boolean | null> {
+  const opened = await chrome.tabs.create({ url, active: false });
+  if (opened.id === undefined) throw new Error('탭 id가 없다.');
+  for (let waited = 0; (await chrome.tabs.get(opened.id)).status !== 'complete'; waited += 50) {
+    if (waited > 5000) throw new Error('탭을 다 싣지 못했다.');
+    await pause(50);
+  }
+  const tabId = (await chrome.tabs.discard(opened.id))?.id ?? opened.id;
+  const asleep = (await tabInfo(tabId))?.asleep ?? null;
+  await chrome.tabs.remove(tabId);
+  return asleep;
 }
 
 export async function run(tabs: TabIds): Promise<TabContractResult> {
@@ -67,8 +93,13 @@ export async function run(tabs: TabIds): Promise<TabContractResult> {
   return {
     info: await each(async (tabId) => {
       const info = await tabInfo(tabId);
-      return info === null ? null : { shown: info.shown, loading: info.loading };
+      return info === null
+        ? null
+        : { shown: info.shown, loading: info.loading, asleep: info.asleep };
     }),
+    asleep: {
+      discarded: pageTab?.url === undefined ? null : await asleepAfterDiscard(pageTab.url),
+    },
     closedWindow: await windowInfo(closingWindow.id),
     pageWindow: pageTab === null ? null : await windowInfo(pageTab.windowId),
     closedDiscardableError,

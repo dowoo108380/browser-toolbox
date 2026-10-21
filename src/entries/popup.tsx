@@ -5,6 +5,7 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabRuntimes,
   tabStatus,
   tabToggleSet,
   taskSeen,
@@ -61,6 +62,7 @@ render(
     taskSeen={(tabId, taskId) => request(taskSeen, { tabId, taskId })}
     announceTab={announcePopup}
     windowTabs={currentWindowTabs}
+    tabRuntimes={(tabIds) => request(tabRuntimes, { tabIds: [...tabIds] })}
     watchTabToggles={(handlers) => watchTabToggles(session, handlers)}
     setTabToggle={(featureId, tabIds, on) =>
       request(tabToggleSet, { featureId, tabIds: [...tabIds], on })

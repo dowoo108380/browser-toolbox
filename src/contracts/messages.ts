@@ -106,13 +106,22 @@ const unmetSchema = v.array(
 // 실행 틀을 담은 콘텐츠 스크립트 묶음(결정 0029). 서비스 워커가 탐침으로 읽은 실행 틀의 표식 값을 이것으로 검증한다.
 export const pageBundleSchema = v.picklist(pageBundles);
 
-// 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지(결정 0023). ready: 이 확장의 실행 틀이 그 탭의 최상위 문서에서
-// 돈다. 그 실행 틀의 묶음(사이트 전용 기능을 그 탭에서 쓸 수 있는지, 결정 0029)과 외부 화면에 기대한 것이 어긋난
-// 기능(찾지 못함, 적용되지 않음, 결정 0026, 0034)을 함께 싣는다. reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시 불러오기 전에 연 페이지, 새로 고치면 쓸 수 있다).
-// denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
+// 그 탭의 최상위 문서에서 이 확장의 실행 틀이 도는지(결정 0023). ready: 돈다. 그 실행 틀의 묶음(사이트 전용 기능을 그
+// 탭에서 쓸 수 있는지, 결정 0029)을 싣는다. reload: 넣을 수는 있는데 실행 틀이 없다(설치·갱신·다시 불러오기 전에 연 페이지,
+// 새로 고치면 쓸 수 있다). denied: Chrome이 그 페이지에 넣기를 거절한다(확장이 접근할 수 없는 페이지).
+const unusableRuntimeSchema = v.object({ page: v.picklist(['reload', 'denied']) });
+const tabRuntimeSchema = v.union([
+  v.object({ page: v.literal('ready'), bundle: pageBundleSchema }),
+  unusableRuntimeSchema,
+]);
+
+export type TabRuntime = v.InferOutput<typeof tabRuntimeSchema>;
+
+// 지금 탭에서 페이지에 작용하는 기능을 쓸 수 있는지(결정 0023): 그 탭의 실행 틀(위)에, 돌면 외부 화면에 기대한 것이 어긋난
+// 기능(찾지 못함, 적용되지 않음, 결정 0026, 0034)을 함께 싣는다.
 const tabStatusSchema = v.union([
   v.object({ page: v.literal('ready'), bundle: pageBundleSchema, unmet: unmetSchema }),
-  v.object({ page: v.picklist(['reload', 'denied']) }),
+  unusableRuntimeSchema,
 ]);
 
 export type TabStatus = v.InferOutput<typeof tabStatusSchema>;
@@ -122,6 +131,16 @@ export const tabStatus = defineRequest({
   type: 'tab.status',
   payload: v.object({ tabId: v.int() }),
   value: tabStatusSchema,
+  senders: 'extension',
+});
+
+// 팝업이 자기 창의 탭들에서 실행 틀이 도는지 묻는다(탭마다 켜고 끄는 기능의 탭 목록, TAB-2 기대 동작 8, COM-7 기대 동작 2,
+// 결정 0045). 서비스 워커는 그 가운데 웹 페이지이고 싣는 중이 아니며 쉬지 않는(버려지거나 얼려지지 않은) 탭에만 탐침을 넣고,
+// 정한 시간 안에 답한 탭만 싣는다. 싣지 않은 탭은 모르는 것이다.
+export const tabRuntimes = defineRequest({
+  type: 'tab.runtimes',
+  payload: v.object({ tabIds: v.array(v.int()) }),
+  value: v.array(v.object({ tabId: v.int(), runtime: tabRuntimeSchema })),
   senders: 'extension',
 });
 
@@ -192,6 +211,7 @@ export const requests = [
   problemReport,
   popupRemember,
   tabStatus,
+  tabRuntimes,
   taskStart,
   taskSeen,
   tabToggleSet,

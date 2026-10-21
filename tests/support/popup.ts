@@ -7,6 +7,7 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabRuntimes,
   tabStatus,
   tabToggleSet,
   taskSeen,
@@ -92,6 +93,7 @@ export async function renderTestPopup(
         taskSeen: (tab, taskId) => request(taskSeen, { tabId: tab, taskId }),
         announceTab,
         windowTabs: async () => ok(await windowTabs()),
+        tabRuntimes: (tabIds) => request(tabRuntimes, { tabIds: [...tabIds] }),
         watchTabToggles: (handlers) => watchTabToggles(session, handlers),
         setTabToggle: (featureId, tabIds, on) =>
           request(tabToggleSet, { featureId, tabIds: [...tabIds], on }),

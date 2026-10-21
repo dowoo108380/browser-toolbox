@@ -22,6 +22,8 @@ interface TabToggleItemProps {
   readonly onAllTabs: (on: boolean) => void;
   // 이 창의 탭. 아직 모르거나 받지 못했으면 null이다(받지 못한 까닭은 알림 줄이 보인다).
   readonly tabs: readonly TabRow[] | null;
+  // 탭마다 쓸 수 없는 이유를 아직 확인하는 중인지(결정 0045). 그동안 목록은 바쁨(aria-busy)이고 이유가 곧 더해질 수 있다.
+  readonly checking: boolean;
   readonly onApply: (tabIds: readonly number[], on: boolean) => Promise<void>;
 }
 
@@ -31,6 +33,7 @@ export function TabToggleItem({
   disabled,
   onAllTabs,
   tabs,
+  checking,
   onApply,
 }: TabToggleItemProps) {
   const nameId = `feature-name-${feature.id}`;
@@ -90,7 +93,7 @@ export function TabToggleItem({
         {tabs === null ? (
           <p>{strings.loading}</p>
         ) : (
-          <ul>
+          <ul aria-busy={checking ? 'true' : undefined}>
             {tabs.map((tab) => {
               const stateId = `tab-state-${feature.id}-${String(tab.id)}`;
               return (

@@ -260,7 +260,8 @@ export async function waitAttached(raw: RawChromium, tab: RawTab, on: boolean): 
   await expect.poll(() => attached(raw, tab), { timeout: 10_000 }).toBe(on);
 }
 
-// 팝업에서 돈다. "탭" 범주를 고르고, 이 기능의 탭 목록이 그려졌으면 탭마다 상태 글자를 준다(아직이면 null).
+// 팝업에서 돈다. "탭" 범주를 고르고, 이 기능의 탭 목록이 그려졌고 탭마다 쓸 수 없는 이유를 확인했으면(목록이 바쁘지 않음,
+// 결정 0045) 탭마다 상태 글자를 준다(아직이면 null).
 function readTabStates(): Record<string, string> | null {
   const category = [...document.querySelectorAll<HTMLElement>('[role=tab]')].find(
     (tab) => tab.textContent === '탭',
@@ -268,13 +269,14 @@ function readTabStates(): Record<string, string> | null {
   if (category?.getAttribute('aria-selected') !== 'true') category?.click();
   const rows = [...document.querySelectorAll<HTMLElement>('.tab-toggle [data-tab]')];
   if (rows.length === 0) return null;
+  if (document.querySelector('.tab-toggle [aria-busy="true"]') !== null) return null;
   return Object.fromEntries(
     rows.map((row) => [row.dataset['tab'] ?? '', row.querySelector('.state')?.textContent ?? '']),
   );
 }
 
-// 그 창(없으면 처음 창)에서 팝업을 새로 열어 탭 목록의 상태 글자가 check를 통과할 때까지 기다린다. 팝업은 연 때의 탭을
-// 보이므로, 탭이 바뀐 뒤에는 새로 연다(사용자가 팝업을 다시 여는 것과 같다).
+// 그 창(없으면 처음 창)에서 팝업을 새로 열어 탭 목록의 상태 글자가 check를 통과할 때까지 기다린다. 통과하지 못하면 마지막
+// 실패를 낸다. 팝업은 연 때의 탭을 보이므로, 탭이 바뀐 뒤에는 새로 연다(사용자가 팝업을 다시 여는 것과 같다).
 export async function popupStates(
   raw: RawChromium,
   check: (states: Readonly<Record<string, string>>) => void,
@@ -282,17 +284,11 @@ export async function popupStates(
 ): Promise<void> {
   const popup = await raw.popup(windowId);
   try {
-    await expect
-      .poll(
-        async () => {
-          const states = await popup.evaluate(readTabStates, null);
-          if (states === null) return false;
-          check(states);
-          return true;
-        },
-        { timeout: 10_000 },
-      )
-      .toBe(true);
+    await expect(async () => {
+      const states = await popup.evaluate(readTabStates, null);
+      expect(states, '탭 목록이 그려지고 이유를 확인했다').not.toBeNull();
+      check(states ?? {});
+    }).toPass({ timeout: 10_000 });
   } finally {
     await closeTab(raw, popup.tab);
   }
@@ -335,6 +331,7 @@ export const stateText = {
   on: '켜짐',
   off: '꺼짐',
   notWeb: (on: boolean) => `${on ? '켜짐' : '꺼짐'} · 쓸 수 없음: 웹 페이지에서만 쓸 수 있음`,
+  reload: (on: boolean) => `${on ? '켜짐' : '꺼짐'} · 쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음`,
   notice: (name: keyof typeof tabKeepActive.notices, on: boolean) =>
     `${on ? '켜짐' : '꺼짐'} · ${tabKeepActive.notices[name] ?? ''}`,
 };

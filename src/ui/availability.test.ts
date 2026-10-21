@@ -6,7 +6,7 @@ import {
   defineFeature,
   v,
 } from '../contracts/index.ts';
-import { unavailableReason } from './availability.ts';
+import { runtimeReason, unavailableReason } from './availability.ts';
 
 function featureWith(content: FeatureDefinition['content']) {
   return defineFeature({
@@ -61,6 +61,26 @@ describe('결정 0023 지금 탭에서 쓸 수 없는 이유', () => {
     for (const tab of [ready, reload, denied, unmet('sample'), null]) {
       expect(unavailableReason(offPages, tab)).toBeNull();
     }
+  });
+});
+
+describe('결정 0045 탭 목록의 탭마다 실행 틀 때문에 쓸 수 없는 이유', () => {
+  it('COM-7 기대 동작 2 TAB-2 기대 동작 8 새로 고쳐야 하는 탭과 확장이 접근할 수 없는 탭은 그 이유를, 돌면 이유가 없다', () => {
+    expect(runtimeReason(onPages, { page: 'reload' })).toBe(
+      '쓸 수 없음: 이 탭을 새로 고쳐야 쓸 수 있음',
+    );
+    expect(runtimeReason(onPages, { page: 'denied' })).toBe(
+      '쓸 수 없음: 확장이 이 페이지에 접근할 수 없음',
+    );
+    expect(runtimeReason(onPages, { page: 'ready', bundle: 'common' })).toBeNull();
+    expect(runtimeReason(onChatgpt, { page: 'ready', bundle: 'common' })).toBe(
+      '쓸 수 없음: chatgpt.com에서만 쓸 수 있음',
+    );
+  });
+
+  it('모르는 탭과 페이지에 작용하지 않는 기능은 이유가 없다', () => {
+    expect(runtimeReason(onPages, null)).toBeNull();
+    expect(runtimeReason(offPages, { page: 'reload' })).toBeNull();
   });
 });
 

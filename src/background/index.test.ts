@@ -6,6 +6,7 @@ import {
   type PageStatus,
   defineFeature,
   problemReport,
+  tabRuntimes,
   tabStatus,
   taskStart,
 } from '../contracts/index.ts';
@@ -286,6 +287,94 @@ describe('결정 0023 지금 탭의 상태(tab.status)', () => {
       });
       expect(answered.recorded).toEqual(recorded);
     }
+  });
+});
+
+describe('결정 0045 탭 목록의 탭마다 실행 틀(tab.runtimes)', () => {
+  // 창 1의 탭: 1·2·3·8은 웹 페이지, 4는 Chrome 내부 화면, 5는 Chrome이 비우거나 얼린 탭, 6은 싣는 중인 탭, 7은 묻지 않은 탭.
+  function windowWithTabs() {
+    const browser = createFakeBrowser();
+    for (const id of [1, 2, 3, 5, 6, 7, 8]) browser.open({ id, active: id === 1 });
+    browser.open({ id: 4, url: 'chrome://newtab/' });
+    browser.sleep(5, true);
+    browser.startNavigation(6, 'https://next.test/');
+    return browser;
+  }
+
+  const probes: Readonly<Record<number, PageProbe>> = {
+    1: { status: 'ran', marker: 'common' },
+    2: { status: 'ran', marker: null },
+    3: { status: 'unavailable' },
+    8: { status: 'failed' },
+  };
+
+  function startWith(
+    browser: ReturnType<typeof createFakeBrowser>,
+    probePage: (tabId: number) => Promise<PageProbe>,
+  ) {
+    const store = createFakeStore();
+    const probed: number[] = [];
+    const request = startTestBackground({
+      store,
+      features: specs,
+      startTime: 1_790_000_000_000,
+      browser,
+      probePage: (tabId) => {
+        probed.push(tabId);
+        return probePage(tabId);
+      },
+    });
+    return { store, probed, request };
+  }
+
+  it('COM-7 기대 동작 2 물은 탭 가운데 웹 페이지이고 싣는 중이 아니며 쉬지 않는 탭에만 탐침을 넣고, 탭마다 ready·reload·denied로 답한다. 알려지지 않은 거절은 denied로 답하고 platform으로 기록한다', async () => {
+    const world = startWith(windowWithTabs(), (tabId) =>
+      Promise.resolve(probes[tabId] ?? { status: 'failed' }),
+    );
+    const result = await world.request(tabRuntimes, { tabIds: [1, 2, 3, 4, 5, 6, 8, 99] });
+    expect(result).toEqual(
+      ok([
+        { tabId: 1, runtime: { page: 'ready', bundle: 'common' } },
+        { tabId: 2, runtime: { page: 'reload' } },
+        { tabId: 3, runtime: { page: 'denied' } },
+        { tabId: 8, runtime: { page: 'denied' } },
+      ]),
+    );
+    expect(world.probed.toSorted((a, b) => a - b)).toEqual([1, 2, 3, 8]);
+    await settle();
+    expect(recordedKinds(world.store)).toEqual(['platform']);
+  });
+
+  it('1초 안에 답하지 않는 탭(주 스레드를 붙잡은 페이지)은 답에 넣지 않고, 다른 탭은 그것을 기다리지 않는다', async () => {
+    vi.useFakeTimers();
+    try {
+      const world = startWith(windowWithTabs(), (tabId) =>
+        tabId === 2
+          ? new Promise<PageProbe>(() => undefined)
+          : Promise.resolve(probes[tabId] ?? { status: 'failed' }),
+      );
+      let answer: unknown = null;
+      void world.request(tabRuntimes, { tabIds: [1, 2] }).then((result) => {
+        answer = result;
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(answer).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer).toEqual(ok([{ tabId: 1, runtime: { page: 'ready', bundle: 'common' } }]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Chrome이 탭 목록을 주지 않으면 탐침을 넣지 않고 platform으로 답한다', async () => {
+    const browser = windowWithTabs();
+    const world = startWith(
+      { ...browser, deps: { ...browser.deps, allTabInfos: () => Promise.reject(new Error('탭')) } },
+      (tabId) => Promise.resolve(probes[tabId] ?? { status: 'failed' }),
+    );
+    const result = await world.request(tabRuntimes, { tabIds: [1] });
+    expect(result.ok ? null : result.error.kind).toBe('platform');
+    expect(world.probed).toEqual([]);
   });
 });
 

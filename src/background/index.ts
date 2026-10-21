@@ -1,6 +1,7 @@
 import {
   type FeatureDefinition,
   type PageStatus,
+  type TabRuntime,
   type TabState,
   featureCommand,
   featuresWithSettings,
@@ -10,6 +11,7 @@ import {
   repairNoticeDismiss,
   settingsUpdate,
   storageEnsureReady,
+  tabRuntimes,
   tabStateGet,
   tabStatus,
   tabToggleFeatures,
@@ -34,7 +36,16 @@ import type {
   TabInfo,
   TabResponse,
 } from '../platform/index.ts';
-import { type AppError, type ErrorKind, type Result, appError, err, ok } from '../shared/index.ts';
+import {
+  type AppError,
+  type ErrorKind,
+  type Result,
+  appError,
+  err,
+  isWebPage,
+  ok,
+  withTimeout,
+} from '../shared/index.ts';
 import {
   type SettingsFormat,
   type Snapshot,
@@ -123,6 +134,15 @@ export interface BackgroundDeps {
 
 // 실행 틀에 묻는 제한 시간. 팝업의 tab.status 요청(5초) 안에 탐침과 함께 끝나게 짧게 둔다(결정 0026).
 const askPageTimeoutMs = 1000;
+
+// 탭 목록의 탭마다 탐침을 기다리는 시간(결정 0045). 페이지가 주 스레드를 붙잡고 있으면 Chrome은 풀릴 때까지 함수를 돌리지
+// 못한다. 넘기면 그 탭은 모르는 것으로 둔다. 탭들을 함께 기다리므로 팝업의 요청(5초) 안에 끝난다.
+const tabRuntimeTimeoutMs = 1000;
+
+// 탭 목록에서 탐침을 넣을 탭(결정 0045): 웹 페이지이고(아니면 넣을 수 없다. 사이트 접근을 거둔 탭은 Chrome이 주소를 주지 않아
+// 여기 든다), 싣는 중이 아니며(곧 새 문서가 실린다), 쉬지 않는다(비운 탭에 넣은 함수는 빈 문서에서 돌아 새로 고쳐야 한다고
+// 잘못 답하고, 얼린 탭에 넣은 함수는 녹을 때까지 기다린다. 2026-10-21 실험).
+const probeable = (tab: TabInfo) => isWebPage(tab.url) && !tab.loading && !tab.asleep;
 
 export function startBackground(deps: BackgroundDeps): void {
   const problems = createProblemLog({ store: deps.store, now: deps.now });
@@ -248,6 +268,28 @@ export function startBackground(deps: BackgroundDeps): void {
         return [];
     }
   };
+  // 그 탭의 최상위 문서에서 이 확장의 실행 틀이 도는지(결정 0023, 0029).
+  const runtimeOf = async (tabId: number): Promise<TabRuntime> => {
+    const probe = await deps.probePage(tabId);
+    switch (probe.status) {
+      case 'ran': {
+        if (probe.marker === null) return { page: 'reload' };
+        // 표식은 같은 판의 실행 틀만 둔다(옛 판은 다른 세계다). 묶음 이름이 아니면 일어나면 안 되는 상태다.
+        const bundle = v.safeParse(pageBundleSchema, probe.marker);
+        if (!bundle.success) {
+          record({ featureId: null, kind: 'unexpected' });
+          return { page: 'reload' };
+        }
+        return { page: 'ready', bundle: bundle.output };
+      }
+      case 'unavailable':
+        return { page: 'denied' };
+      case 'failed':
+        // 알려지지 않은 거절도 그 페이지에는 넣을 수 없는 것이다. 쓸 수 없다고 답하되 숨기지 않고 기록한다(quality 067).
+        record({ featureId: null, kind: 'platform' });
+        return { page: 'denied' };
+    }
+  };
   const router = createRouter(
     [
       route(settingsUpdate, (payload) => settings.updateFeature(payload.featureId, payload.patch)),
@@ -259,29 +301,29 @@ export function startBackground(deps: BackgroundDeps): void {
       }),
       route(popupRemember, (payload) => popupState.remember(payload.category)),
       route(tabStatus, async (payload) => {
-        const probe = await deps.probePage(payload.tabId);
-        switch (probe.status) {
-          case 'ran': {
-            if (probe.marker === null) return ok({ page: 'reload' });
-            // 표식은 같은 판의 실행 틀만 둔다(옛 판은 다른 세계다). 묶음 이름이 아니면 일어나면 안 되는 상태다.
-            const bundle = v.safeParse(pageBundleSchema, probe.marker);
-            if (!bundle.success) {
-              record({ featureId: null, kind: 'unexpected' });
-              return ok({ page: 'reload' });
-            }
-            return ok({
-              page: 'ready',
-              bundle: bundle.output,
-              unmet: await unmetOn(payload.tabId),
-            });
-          }
-          case 'unavailable':
-            return ok({ page: 'denied' });
-          case 'failed':
-            // 알려지지 않은 거절도 그 페이지에는 넣을 수 없는 것이다. 쓸 수 없다고 답하되 숨기지 않고 기록한다(quality 067).
-            record({ featureId: null, kind: 'platform' });
-            return ok({ page: 'denied' });
+        const runtime = await runtimeOf(payload.tabId);
+        return ok(
+          runtime.page === 'ready' ? { ...runtime, unmet: await unmetOn(payload.tabId) } : runtime,
+        );
+      }),
+      route(tabRuntimes, async (payload) => {
+        let tabs: readonly TabInfo[];
+        try {
+          tabs = await deps.allTabInfos();
+        } catch {
+          // 팝업이 이 실패를 알림 줄에 보인다.
+          return err(appError('platform', strings.tabRuntimesFailed));
         }
+        const asked = new Set(payload.tabIds);
+        const answers = await Promise.all(
+          tabs
+            .filter((tab) => asked.has(tab.id) && probeable(tab))
+            .map(async (tab) => {
+              const probed = await withTimeout(tabRuntimeTimeoutMs, () => runtimeOf(tab.id));
+              return probed.done ? [{ tabId: tab.id, runtime: probed.value }] : [];
+            }),
+        );
+        return ok(answers.flat());
       }),
       route(taskStart, (payload) => tasks.start(payload.featureId, payload.tabId)),
       route(taskSeen, (payload) => tasks.seen(payload.tabId, payload.taskId)),

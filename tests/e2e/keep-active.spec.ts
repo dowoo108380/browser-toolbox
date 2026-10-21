@@ -345,7 +345,7 @@ test('TAB-2.25 켜진 탭이 분할 보기로 활성 탭과 나란히 놓이면 
   expect(behind.away).toEqual([]);
 });
 
-test('TAB-2.23 COM-7.6 확장을 다시 불러오면 탭마다 켠 탭이 꺼지고 비우기가 원래 값으로 돌아온다. "모든 탭" 스위치를 켜 두었으면 다시 불러온 뒤와 브라우저를 다시 켠 뒤에도 열린 탭이 켜짐이다', async ({
+test('TAB-2.23 COM-7.6 COM-7 기대 동작 2 확장을 다시 불러오면 탭마다 켠 탭이 꺼지고 비우기가 원래 값으로 돌아오며, 새로 고치기 전의 탭은 지금 탭이 아니어도 탭 목록에 새로 고쳐야 한다는 이유가 보인다. "모든 탭" 스위치를 켜 두었으면 다시 불러온 뒤와 브라우저를 다시 켠 뒤에도 열린 탭이 켜짐이고, 새로 고치면 이유가 사라진다', async ({
   raw,
 }, testInfo) => {
   const tab = await openViewed(raw);
@@ -353,8 +353,9 @@ test('TAB-2.23 COM-7.6 확장을 다시 불러오면 탭마다 켠 탭이 꺼지
   await openViewed(raw, blankUrl);
   await waitAttached(raw, tab, true);
   await raw.reloadExtension();
+  // 열린 탭에는 새 판의 실행 틀이 없다(COM-7). 팝업을 연 탭이 아니어도 그 까닭이 보인다.
   await popupStates(raw, (states) => {
-    expect(states[String(tab.tabId)]).toBe(stateText.off);
+    expect(states[String(tab.tabId)]).toBe(stateText.reload(false));
   });
   await waitAttached(raw, tab, false);
   expect(await autoDiscardable(raw, tab)).toBe(true);
@@ -362,9 +363,17 @@ test('TAB-2.23 COM-7.6 확장을 다시 불러오면 탭마다 켠 탭이 꺼지
   await waitAttached(raw, tab, true);
   await raw.reloadExtension();
   await popupStates(raw, (states) => {
-    expect(states[String(tab.tabId)]).toBe(stateText.on);
+    expect(states[String(tab.tabId)]).toBe(stateText.reload(true));
   });
   await waitAttached(raw, tab, true);
+  // 새로 고치면 새 판의 실행 틀이 돌아 까닭이 사라진다.
+  await raw.sw(async (id) => {
+    await chrome.tabs.reload(id);
+  }, tab.tabId);
+  await recorder(raw, tab).waitShield(true);
+  await popupStates(raw, (states) => {
+    expect(states[String(tab.tabId)]).toBe(stateText.on);
+  });
   // 브라우저를 다시 켠다(같은 프로필). 스위치는 설정이라 남는다.
   await raw.close();
   const restarted = await launchRawChromium(testInfo.outputPath('profile'));

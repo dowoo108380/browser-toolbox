@@ -52,7 +52,7 @@ async function openTabs(context: BrowserContext): Promise<TabIds> {
   return { page: await tabIdOfFront(), internal: internalId, closed: closedId };
 }
 
-test('COM-10 결정 0024 결정 0041 탭에 보내기는 콘텐츠 스크립트가 있는 페이지만 delivered이고, Chrome 내부 페이지와 닫힌 탭은 unreachable이며, 닫힌 탭과 닫힌 창의 사정은 null이고 닫힌 탭을 다뤄도 던지지 않는다', async ({
+test('COM-10 결정 0024 결정 0041 결정 0045 탭에 보내기는 콘텐츠 스크립트가 있는 페이지만 delivered이고, Chrome 내부 페이지와 닫힌 탭은 unreachable이며, 닫힌 탭과 닫힌 창의 사정은 null이고 닫힌 탭을 다뤄도 던지지 않으며, Chrome이 비운 탭은 쉬는 것으로 보인다', async ({
   context,
 }) => {
   const tabs = await openTabs(context);
@@ -67,10 +67,11 @@ test('COM-10 결정 0024 결정 0041 탭에 보내기는 콘텐츠 스크립트�
     active: { page: true, internal: false, closed: false },
     closedBadgeError: null,
     info: {
-      page: { shown: true, loading: false },
-      internal: { shown: false, loading: false },
+      page: { shown: true, loading: false, asleep: false },
+      internal: { shown: false, loading: false, asleep: false },
       closed: null,
     },
+    asleep: { discarded: true },
     closedWindow: null,
     pageWindow: { minimized: false, focused: true },
     closedDiscardableError: null,

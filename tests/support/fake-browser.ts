@@ -35,6 +35,8 @@ interface FakeTab {
   loading: boolean;
   // 가는 중인 주소(이동하는 중이 아니면 null).
   pending: string | null;
+  // Chrome이 비웠거나 얼렸는지.
+  asleep: boolean;
 }
 
 interface FakeWindow {
@@ -84,6 +86,7 @@ export function createFakeBrowser() {
     title: tab.title,
     autoDiscardable: tab.autoDiscardable,
     loading: tab.loading,
+    asleep: tab.asleep,
   });
 
   const lose = (tabId: number, why: DebuggerLoss) => {
@@ -191,6 +194,7 @@ export function createFakeBrowser() {
         autoDiscardable,
         loading: false,
         pending: null,
+        asleep: false,
       };
       tabs.set(id, tab);
       if (active) makeActive(tab);
@@ -259,6 +263,10 @@ export function createFakeBrowser() {
       tab.pending = null;
       tab.loading = false;
       activity?.updated(tabId);
+    },
+    // Chrome이 그 탭을 메모리 절약으로 비우거나 얼린다(asleep), 또는 다시 싣거나 녹인다. 탭 사건은 보내지 않는다.
+    sleep: (tabId: number, asleep: boolean) => {
+      tabOf(tabId).asleep = asleep;
     },
     close: (tabId: number) => {
       lose(tabId, 'closed');

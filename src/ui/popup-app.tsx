@@ -3,6 +3,7 @@ import type {
   ActionFeature,
   Category,
   FeatureDefinition,
+  TabRuntime,
   TabStatus,
   TabToggleFeature,
   ToggleFeature,
@@ -27,7 +28,7 @@ import {
   tabNotice,
 } from '../storage/index.ts';
 import { ActionItem } from './action-item.tsx';
-import { unavailableReason } from './availability.ts';
+import { runtimeReason, unavailableReason } from './availability.ts';
 import { visibleCategories } from './categories.ts';
 import { CategoryTabs, categoryPanelId, categoryTabId } from './category-tabs.tsx';
 import {
@@ -89,6 +90,12 @@ interface PopupProps {
   readonly announceTab: (tabId: number) => PopupAnnouncement;
   // 팝업이 붙은 창의 탭들(탭마다 켜고 끄는 기능의 탭 목록, 결정 0043).
   readonly windowTabs: () => Promise<Result<readonly TabInfo[], AppError>>;
+  // 그 탭들에서 이 확장의 실행 틀이 도는지 서비스 워커에 묻는다(결정 0045). 탐침을 넣은 탭만 답에 든다.
+  readonly tabRuntimes: (
+    tabIds: readonly number[],
+  ) => Promise<
+    Result<readonly { readonly tabId: number; readonly runtime: TabRuntime }[], AppError>
+  >;
   // 탭마다 켜고 끄는 기능의 기록(storage.session)을 받는다.
   readonly watchTabToggles: (handlers: TabTogglesWatchHandlers) => () => void;
   // 그 탭들에서 그 기능을 켜거나 끈다.
@@ -158,6 +165,7 @@ export function PopupApp({
   taskSeen,
   announceTab,
   windowTabs,
+  tabRuntimes,
   watchTabToggles,
   setTabToggle,
 }: PopupProps) {
@@ -323,6 +331,34 @@ export function PopupApp({
     setActive(null);
   };
 
+  // 탭 목록의 탭마다 이 확장의 실행 틀이 도는지(결정 0045). 목록이 처음 보일 때(탭마다 켜고 끄는 기능의 범주를 연 때) 한 번
+  // 묻는다. 그 범주를 열지 않으면 탭에 탐침을 넣지 않는다. 답을 받기 전에는 null이고 목록은 확인하는 중이다. 답에 들지 않은
+  // 탭(탐침을 넣지 않았거나 늦은 탭)은 모르는 것이라 이유를 보이지 않는다. 받지 못하면 모두 모르는 것이고, 그 까닭은 알림 줄이
+  // 보인다.
+  const [runtimes, setRuntimes] = useState<ReadonlyMap<number, TabRuntime> | null>(null);
+  const runtimesAsked = useRef(false);
+  const tabListShown =
+    stored !== null &&
+    categoryRead &&
+    !searching &&
+    features.some((feature) => feature.kind === 'tab-toggle' && feature.category === category);
+  useEffect(() => {
+    if (!tabListShown || openTabs === null || runtimesAsked.current) return;
+    runtimesAsked.current = true;
+    const webTabs = openTabs.filter((tab) => isWebPage(tab.url)).map((tab) => tab.id);
+    if (webTabs.length === 0) {
+      setRuntimes(new Map());
+      return;
+    }
+    const order = nextOrder();
+    void tabRuntimes(webTabs).then((result) => {
+      setRuntimes(
+        new Map(result.ok ? result.value.map(({ tabId, runtime }) => [tabId, runtime]) : []),
+      );
+      if (!result.ok) report(result.error.message, order);
+    });
+  }, [tabListShown, openTabs, tabRuntimes]);
+
   const root = useRef<HTMLElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   // 검색에서 간 기능. 그 기능 항목을 그린 뒤 첫 조작 요소에 초점을 둔다.
@@ -453,7 +489,8 @@ export function PopupApp({
   };
 
   // 탭마다 켜고 끄는 기능의 탭 목록의 줄(TAB-2 기대 동작 8): 켜짐(고른 것, 없으면 스위치)과 까닭. 그 기능이 남긴 까닭이 먼저이고,
-  // 웹 페이지가 아닌 탭은 쓸 수 없는 이유를 보인다.
+  // 웹 페이지가 아닌 탭은 쓸 수 없는 이유를, 웹 페이지는 그 탭의 실행 틀 때문에 쓸 수 없는 이유(새로 고쳐야 함, 접근할 수 없음,
+  // 결정 0045)를 보인다. 그 기능의 페이지 쪽은 실행 틀 안에서 돌기 때문이다.
   const tabRows = (feature: TabToggleFeature, allTabs: boolean): readonly TabRow[] | null =>
     openTabs?.map((tab) => {
       const notice = tabNotice(toggleRecords, feature.id, tab.id);
@@ -464,7 +501,10 @@ export function PopupApp({
         title: tab.title ?? strings.untitledTab,
         on: tabIsOn(toggleRecords, feature.id, tab.id, allTabs),
         reason:
-          noticeText ?? (isWebPage(tab.url) ? null : strings.unavailable(strings.webPageOnly)),
+          noticeText ??
+          (isWebPage(tab.url)
+            ? runtimeReason(feature, runtimes?.get(tab.id) ?? null)
+            : strings.unavailable(strings.webPageOnly)),
       };
     }) ?? null;
 
@@ -534,6 +574,7 @@ export function PopupApp({
               void save(feature.id, { enabled });
             }}
             tabs={tabRows(feature, allTabs)}
+            checking={runtimes === null}
             onApply={(tabIds, on) => applyTabs(feature, tabIds, on)}
           />
         );

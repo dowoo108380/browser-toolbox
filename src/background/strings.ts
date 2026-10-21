@@ -34,6 +34,9 @@ export const strings = {
   tabTogglesWriteFailed: '탭마다 켠 기능의 기록을 남기지 못해 바꾸지 않았다. 다시 한다.',
   commandFromPage: '기능의 명령은 그 기능의 페이지 쪽만 보낸다.',
   tabStateFromPage: '탭의 상태는 그 탭의 페이지만 묻는다.',
+  // 탭 목록의 탭마다 새로 고쳐야 하는지(결정 0045).
+  tabRuntimesFailed:
+    '이 창의 탭을 Chrome에서 받지 못해 새로 고쳐야 하는 탭을 확인하지 못했다. 팝업을 닫았다가 다시 연다.',
   // 끝났고 아직 보지 않은 작업이 있는 탭의 확장 아이콘 제목(결정 0024). 배지 글자만으로는 화면 낭독기가 알 수 없다.
   badgeTitle: {
     succeeded: (name: string) => `Browser Toolbox: ${name} 끝남`,

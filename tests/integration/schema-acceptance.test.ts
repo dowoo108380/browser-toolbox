@@ -12,6 +12,7 @@ import {
   storageEnsureReady,
   tabStateChanged,
   tabStateGet,
+  tabRuntimes,
   tabStatus,
   tabToggleSet,
   featureCommand,
@@ -552,6 +553,7 @@ describe('메시지의 받아들임과 거절', () => {
       'problem.report',
       'popup.remember',
       'tab.status',
+      'tab.runtimes',
       'task.start',
       'task.seen',
       'tabToggle.set',
@@ -663,6 +665,14 @@ describe('메시지의 받아들임과 거절', () => {
       ['탭 Infinity', { tabId: Number.POSITIVE_INFINITY }, 'rejected'],
       ['탭 "1"', { tabId: '1' }, 'rejected'],
       ['탭 없음', {}, 'rejected'],
+    ]);
+    payloads(tabRuntimes, [
+      ['탭 둘', { tabIds: [1, 2] }, accepted({ tabIds: [1, 2] })],
+      ['빈 목록', { tabIds: [] }, accepted({ tabIds: [] })],
+      ['탭 1.5', { tabIds: [1.5] }, 'rejected'],
+      ['탭 "1"', { tabIds: ['1'] }, 'rejected'],
+      ['목록 아님', { tabIds: 1 }, 'rejected'],
+      ['목록 없음', {}, 'rejected'],
     ]);
     payloads(taskStart, [
       ['맞는 값', { featureId: 'f', tabId: 2 }, accepted({ featureId: 'f', tabId: 2 })],
@@ -825,6 +835,31 @@ describe('메시지의 받아들임과 거절', () => {
         { ...ready, unmet: [{ featureId: 'f', reason: 'timeout', element }] },
         'failed',
       ],
+    ]);
+    await values(tabRuntimes, [
+      [
+        '탭마다 실행 틀',
+        [
+          { tabId: 1, runtime: ready },
+          { tabId: 2, runtime: { page: 'reload' } },
+          { tabId: 3, runtime: { page: 'denied' } },
+        ],
+        accepted([
+          { tabId: 1, runtime: ready },
+          { tabId: 2, runtime: { page: 'reload' } },
+          { tabId: 3, runtime: { page: 'denied' } },
+        ]),
+      ],
+      ['빈 목록', [], accepted([])],
+      [
+        '실행 틀의 어긋남은 빠짐',
+        [{ tabId: 1, runtime: { ...ready, unmet: [] } }],
+        accepted([{ tabId: 1, runtime: ready }]),
+      ],
+      ['실행 틀에 묶음 없음', [{ tabId: 1, runtime: { page: 'ready' } }], 'failed'],
+      ['모르는 단계', [{ tabId: 1, runtime: { page: 'nope' } }], 'failed'],
+      ['탭 1.5', [{ tabId: 1.5, runtime: ready }], 'failed'],
+      ['목록 아님', { tabId: 1, runtime: ready }, 'failed'],
     ]);
     await values(taskStart, [
       ['작업 id', { taskId: 'task-1' }, accepted({ taskId: 'task-1' })],

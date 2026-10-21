@@ -90,6 +90,10 @@ export interface TabInfo {
   readonly autoDiscardable: boolean;
   // 문서를 싣는 중인지(다른 주소로 이동하는 중 포함). 다 실으면 tabs.onUpdated가 알린다.
   readonly loading: boolean;
+  // Chrome이 메모리 절약으로 비웠거나(discarded) 얼렸는지(frozen). 그 문서에서는 스크립트가 돌지 않고, 탭을 열면 다시 싣거나
+  // 녹인다. 비운 탭에 넣은 함수는 빈 문서에서 돌고, 얼린 탭에 넣은 함수는 녹을 때까지 기다린다(녹이지 않는다, 2026-10-21 실험,
+  // 결정 0045).
+  readonly asleep: boolean;
 }
 
 // 분할 보기에 들지 않은 탭의 splitViewId(chrome.tabs.SPLIT_VIEW_ID_NONE).
@@ -113,6 +117,7 @@ function infoOf(tab: chrome.tabs.Tab, windowTabs: readonly chrome.tabs.Tab[]): T
     title: tab.title,
     autoDiscardable: tab.autoDiscardable,
     loading: tab.status === 'loading',
+    asleep: tab.discarded || tab.frozen,
   };
 }
 

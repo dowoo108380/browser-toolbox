@@ -7,6 +7,7 @@ import {
   settingsUpdate,
   storageEnsureReady,
   tabStateGet,
+  tabRuntimes,
   tabStatus,
   tabToggleSet,
   taskSeen,
@@ -34,6 +35,7 @@ function setup(onUpdate: () => Promise<unknown> = () => Promise.resolve()) {
       route(tabStatus, () =>
         Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, unmet: [] })),
       ),
+      route(tabRuntimes, () => Promise.resolve(ok([]))),
       route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
       route(taskSeen, () => Promise.resolve(ok(null))),
       route(tabToggleSet, () => Promise.resolve(ok(null))),
@@ -79,15 +81,19 @@ describe('요청 검증(결정 0006)', () => {
     if (!unknown.ok) expect(unknown.error.kind).toBe('invalid-input');
   });
 
-  it('결정 0023 지금 탭의 상태는 확장 화면만 물을 수 있다', async () => {
+  it('결정 0023 결정 0045 지금 탭의 상태와 탭들의 실행 틀은 확장 화면만 물을 수 있다', async () => {
     const { router } = setup();
     const status = { type: 'tab.status', payload: { tabId: 3 } };
+    const runtimes = { type: 'tab.runtimes', payload: { tabIds: [3] } };
     expect(await router(status, extension)).toEqual(
       ok({ page: 'ready', bundle: 'common', unmet: [] }),
     );
-    const fromContent = await router(status, content);
-    expect(fromContent.ok).toBe(false);
-    if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+    expect(await router(runtimes, extension)).toEqual(ok([]));
+    for (const message of [status, runtimes]) {
+      const fromContent = await router(message, content);
+      expect(fromContent.ok).toBe(false);
+      if (!fromContent.ok) expect(fromContent.error.kind).toBe('permission');
+    }
   });
 
   it('결정 0024 작업의 시작과 결과 확인은 확장 화면만 보낼 수 있다', async () => {
@@ -180,6 +186,7 @@ describe('일어나면 안 되는 일의 기록(quality 066)', () => {
         route(tabStatus, () =>
           Promise.resolve(ok({ page: 'ready' as const, bundle: 'common' as const, unmet: [] })),
         ),
+        route(tabRuntimes, () => Promise.resolve(ok([]))),
         route(taskStart, () => Promise.resolve(ok({ taskId: 't' }))),
         route(taskSeen, () => Promise.resolve(ok(null))),
         route(tabToggleSet, () => Promise.resolve(ok(null))),

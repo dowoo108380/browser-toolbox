@@ -194,6 +194,7 @@ async function show({
         taskSeen={seens}
         announceTab={announceTab}
         windowTabs={() => Promise.resolve(ok([]))}
+        tabRuntimes={() => Promise.resolve(ok([]))}
         watchTabToggles={() => () => undefined}
         setTabToggle={() => Promise.resolve(ok(null))}
       />,
@@ -1495,6 +1496,7 @@ describe('결정 0011·0016 저장된 설정을 읽을 수 없을 때 팝업이 
           taskSeen={() => Promise.resolve(ok(null))}
           announceTab={() => ({ renew: () => undefined, close: () => undefined })}
           windowTabs={() => Promise.resolve(ok([]))}
+          tabRuntimes={() => Promise.resolve(ok([]))}
           watchTabToggles={() => () => undefined}
           setTabToggle={() => Promise.resolve(ok(null))}
         />,
