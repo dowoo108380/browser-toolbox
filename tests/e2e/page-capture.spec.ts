@@ -7,6 +7,7 @@ import {
   bandColors,
   clipboardPng,
   clipboardText,
+  clipboardTypes,
   countAttaches,
   debuggerAttached,
   finished,
@@ -82,7 +83,7 @@ async function onlyFile(worker: Worker): Promise<Buffer> {
 }
 
 test.describe('전체 캡처', () => {
-  test('PAGE-1.1 PAGE-1.2 PAGE-1.9 PAGE-1.20 PAGE-1.23 중간까지 스크롤한 긴 페이지를 찍으면 배율을 곱한 크기에 표식이 모두 있고 고정 헤더가 맨 위에 한 번 나오며, 클립보드에도 같은 그림이 있고 끝나면 스크롤 자리가 돌아오고 디버거가 떨어진다', async ({
+  test('PAGE-1.1 PAGE-1.2 PAGE-1.9 PAGE-1.20 PAGE-1.23 중간까지 스크롤한 긴 페이지를 찍으면 배율을 곱한 크기에 표식이 모두 있고 고정 헤더가 맨 위에 한 번 나오며, 클립보드에는 HTML 없이 같은 그림만 있고 끝나면 스크롤 자리가 돌아오고 디버거가 떨어진다', async ({
     context,
     extensionId,
   }) => {
@@ -114,6 +115,7 @@ test.describe('전체 캡처', () => {
     const copied = await clipboardPng(page);
     if (copied === null) throw new Error('클립보드에 그림이 없다.');
     expect(await pngInfo(page, copied, points)).toEqual(info);
+    expect(await clipboardTypes(page)).toEqual([['image/png']]);
     expect(await page.evaluate(() => scrollY)).toBe(2500);
     expect(await debuggerAttached(worker, tabId)).toBe(false);
     expect(await attaches()).toBe(1);
@@ -300,7 +302,7 @@ test.describe('영역 캡처', () => {
 
   const bodyOf = (page: Page) => page.evaluate(() => document.body.outerHTML);
 
-  test('PAGE-1.3 PAGE-1.14 PAGE-1.18 PAGE-1.20 보이는 화면 안에서 끌어 고르면 디버거 없이 그 영역만 저장·복사하고, 페이지 위에 결과가 보이며 고르는 화면은 남지 않는다', async ({
+  test('PAGE-1.3 PAGE-1.14 PAGE-1.18 PAGE-1.20 보이는 화면 안에서 끌어 고르면 디버거 없이 그 영역만 저장하고 HTML 없이 그림만 복사하며, 페이지 위에 결과가 보이며 고르는 화면은 남지 않는다', async ({
     context,
     extensionId,
     profileDirectory,
@@ -335,6 +337,7 @@ test.describe('영역 캡처', () => {
     const copied = await clipboardPng(page);
     if (copied === null) throw new Error('클립보드에 그림이 없다.');
     expect(await pngInfo(page, copied, points)).toEqual(info);
+    expect(await clipboardTypes(page)).toEqual([['image/png']]);
     await expect
       .poll(() => indicatorTexts(page))
       .toEqual([`영역 캡처: 끝났다. ${summaryOf(record)}`]);

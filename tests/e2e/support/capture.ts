@@ -251,6 +251,17 @@ export async function clipboardPng(page: Page): Promise<Buffer | null> {
   return null;
 }
 
+// 클립보드의 항목마다 그 형식들. 캡처는 그림(image/png) 하나만 넣는다: HTML(text/html)이 함께 있으면 HTML을 먼저 받는
+// 프로그램(Word 등)이 그림 대신 HTML을 붙인다(결정 0049).
+export async function clipboardTypes(page: Page): Promise<string[][]> {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: new URL(page.url()).origin,
+  });
+  return page.evaluate(async () =>
+    (await navigator.clipboard.read()).map((item) => [...item.types].sort()),
+  );
+}
+
 // 클립보드에 글을 쓴다(캡처가 클립보드를 바꾸지 않았는지 보려고 먼저 둔다).
 export async function writeClipboardText(page: Page, text: string): Promise<void> {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {

@@ -74,11 +74,12 @@ async function fullCapture(raw: RawChromium, tab: RawTab): Promise<unknown> {
 
 const folderOf = (raw: RawChromium) => path.join(raw.downloads, 'full_page_screenshots');
 
-// 페이지에서 돈다. 클립보드의 그림과 그 PNG(base64)를 풀어 크기와 모든 점이 같은지 준다.
+// 페이지에서 돈다. 클립보드의 그림과 그 PNG(base64)를 풀어 크기와 모든 점이 같은지와, 클립보드의 항목마다 그 형식들을 준다.
 async function sameAsClipboard(base64: string) {
   const items = await navigator.clipboard.read();
   const item = items.find((candidate) => candidate.types.includes('image/png'));
-  if (item === undefined) return { copied: false, same: false };
+  const types = items.map((candidate) => [...candidate.types].sort());
+  if (item === undefined) return { copied: false, same: false, types };
   const pixels = async (blob: Blob) => {
     const bitmap = await createImageBitmap(blob);
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -96,7 +97,7 @@ async function sameAsClipboard(base64: string) {
     copied.width === saved.width &&
     copied.data.length === saved.data.length &&
     copied.data.every((value, index) => value === saved.data[index]);
-  return { copied: true, same };
+  return { copied: true, same, types };
 }
 const listed = (raw: RawChromium) =>
   existsSync(folderOf(raw)) ? readdirSync(folderOf(raw)).sort() : [];
@@ -159,7 +160,9 @@ test.describe('Chrome의 "낯선 사이트에서 JavaScript 최적화 끄기"가
   // 고급 세이프 브라우징과 Chrome의 실험이 켜는 설정이다. blob: 주소의 iframe을 다른 프로세스에 띄운다(결정 0047).
   test.use({ chromiumArgs: ['--enable-features=MigrateToBlockV8OptimizerOnUnfamiliarSites'] });
 
-  test('PAGE-1.20 전체 캡처의 클립보드에 저장한 파일과 같은 그림이 복사된다', async ({ raw }) => {
+  test('PAGE-1.20 전체 캡처의 클립보드에 저장한 파일과 같은 그림만 HTML 없이 복사된다', async ({
+    raw,
+  }) => {
     const tab = await openViewed(raw, blankUrl);
     expect(await fullCapture(raw, tab)).toMatchObject({
       status: 'succeeded',
@@ -169,7 +172,11 @@ test.describe('Chrome의 "낯선 사이트에서 JavaScript 최적화 끄기"가
     const saved = readFileSync(path.join(folderOf(raw), String(name))).toString('base64');
     await raw.grantClipboard(fixtureOrigin);
     await raw.activate(tab);
-    expect(await raw.evaluate(tab, sameAsClipboard, saved)).toEqual({ copied: true, same: true });
+    expect(await raw.evaluate(tab, sameAsClipboard, saved)).toEqual({
+      copied: true,
+      same: true,
+      types: [['image/png']],
+    });
   });
 });
 

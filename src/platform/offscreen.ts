@@ -124,7 +124,8 @@ function loadedOf(target: HTMLIFrameElement | HTMLImageElement): Promise<boolean
   });
 }
 
-// iframe에 이 확장의 빈 그림을 그림 문서로 열고, 그 문서의 그림을 그 주소의 그림으로 바꿔 싣는다. 그 문서를 준다(못 하면 null).
+// iframe에 이 확장의 빈 그림을 그림 문서로 열고, 그 문서의 그림을 그 주소의 그림으로 바꿔 싣는다(src 속성 없이 srcset으로,
+// copyImageInDocument). 그 문서를 준다(못 하면 null).
 async function imageDocumentOf(frame: HTMLIFrameElement, url: string): Promise<Document | null> {
   const opened = loadedOf(frame);
   frame.src = imageDocumentPath;
@@ -135,7 +136,8 @@ async function imageDocumentOf(frame: HTMLIFrameElement, url: string): Promise<D
   if (image?.contentType !== 'image/png' || element === undefined) return null;
   if (image.body.firstChild !== element) return null;
   const shown = loadedOf(element);
-  element.src = url;
+  element.srcset = url;
+  element.removeAttribute('src');
   return (await shown) ? image : null;
 }
 
@@ -148,9 +150,12 @@ async function imageDocumentOf(frame: HTMLIFrameElement, url: string): Promise<D
 // 다른 프로세스에 띄워 문서에 닿을 수 없게 한다. chrome-extension:// 주소는 낯익은 곳이다(Chromium
 // site_familiarity_fetcher.cc. 2026-10-21 실험: 실험 기능을 켠 Chromium에서 Blob 주소의 iframe은 문서가 null이었고 이 길은
 // 복사됐다). 그림을 바꿔 싣는 것은 문서를 여는 것이 아니라 그 검사를 거치지 않는다.
-// 클립보드에는 그림(PNG, 비트맵)과 함께 그 Blob 주소를 가리키는 HTML과 북마크가 들어간다(SystemClipboard::WriteImageWithTag).
-// clipboardWrite 권한이 없으면 복사가 거짓이다. 그림 문서의 img에 decode()를 부르면 Chromium 156의 렌더러가 죽었다(같은
-// 실험). 부르지 않는다. 복사한 그림 문서는 곧 거두지 않고 clipboardSettleMs 뒤에 거둔다(contracts/offscreen.ts). 답은 곧 한다.
+// 클립보드에는 그림만 넣는다(결정 0049). Chrome은 그림 요소의 src 속성이 있으면 그 주소를 가리키는 HTML과 북마크(글)도 함께
+// 쓰는데(Chromium editing_utilities.cc의 GetUrlStringFromNode, SystemClipboard::WriteImageWithTag), 그 Blob 주소는 곧
+// 사라지므로 HTML을 먼저 받는 프로그램(Word)은 그림 대신 글자 하나를 붙였다. 그래서 그림을 srcset으로 싣고 src 속성을
+// 뺀다(빈 값이 아니라 속성이 없어야 주소가 없다). clipboardWrite 권한이 없으면 복사가 거짓이다. 그림 문서의 img에 decode()를
+// 부르면 Chromium 156의 렌더러가 죽었다(0047 실험). 부르지 않는다. 복사한 그림 문서는 곧 거두지 않고 clipboardSettleMs 뒤에
+// 거둔다(contracts/offscreen.ts). 답은 곧 한다.
 async function copyImageInDocument(blob: Blob, title: string): Promise<boolean> {
   const url = URL.createObjectURL(blob);
   const frame = document.createElement('iframe');
