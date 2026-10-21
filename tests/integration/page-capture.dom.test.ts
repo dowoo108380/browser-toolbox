@@ -164,14 +164,30 @@ function captureWorld(script: PageScript = {}) {
   };
 }
 
-// 디버거의 찍기는 그 영역 크기(배율 dpr)의 PNG로 답한다.
-function answerShots(browser: FakeBrowser, dpr = 1) {
+// 디버거의 가짜는 Chrome과 같은 단위로 답한다(R-10, e2e/page-capture-scale이 실제 Chrome에서 본다): 페이지
+// 확대(zoom, CSS 픽셀 하나가 DIP 몇 개인지)를 Page.getLayoutMetrics로 알리고, 찍기는 그 영역(DIP)에 화면 배율(scale)을 곱한
+// 크기의 PNG로 답한다. 페이지가 재는 배율(devicePixelRatio)은 scale × zoom이다.
+// 그림의 색은 colorOf가 영역의 위(DIP)로 정한다(조각마다 색을 달리해 이은 자리를 본다).
+function answerShots(
+  browser: FakeBrowser,
+  {
+    scale = 1,
+    zoom = 1,
+    colorOf = () => '#3366cc',
+  }: {
+    readonly scale?: number;
+    readonly zoom?: number;
+    readonly colorOf?: (y: number) => string;
+  } = {},
+) {
   browser.answerDebugger(async (_tabId, method, params) => {
+    if (method === 'Page.getLayoutMetrics') return ok({ cssVisualViewport: { zoom } });
     if (method !== 'Page.captureScreenshot') return ok({});
     const clip: unknown = params['clip'];
     const width = Number(Reflect.get(Object(clip), 'width'));
     const height = Number(Reflect.get(Object(clip), 'height'));
-    const data = await png(Math.round(width * dpr), Math.round(height * dpr));
+    const color = colorOf(Number(Reflect.get(Object(clip), 'y')));
+    const data = await png(Math.round(width * scale), Math.round(height * scale), color);
     return ok({ data: data.slice(data.indexOf(',') + 1) });
   });
 }
@@ -237,12 +253,15 @@ describe('PAGE-1 전체 캡처의 연결', () => {
       'restore',
       'ping',
     ]);
+    // 화면 높이를 바꾸거나 찍기 전에 페이지 확대를 묻는다(디버거 명령의 길이는 DIP다).
     expect(browser.commands.map((call) => call.method)).toEqual([
+      'Page.getLayoutMetrics',
       'Emulation.setDeviceMetricsOverride',
       'Emulation.clearDeviceMetricsOverride',
+      'Page.getLayoutMetrics',
       'Page.captureScreenshot',
     ]);
-    expect(browser.commands[0]?.params).toEqual({
+    expect(browser.commands[1]?.params).toEqual({
       width: 0,
       height: 3000,
       deviceScaleFactor: 0,
@@ -250,6 +269,50 @@ describe('PAGE-1 전체 캡처의 연결', () => {
     });
     expect(browser.attached()).toEqual([]);
   });
+
+  it('PAGE-1.26 페이지를 확대한 탭(화면 배율 1.25, 확대 125%)에서는 화면 높이와 찍을 영역을 DIP(CSS 픽셀 × 확대)로 보내고, 조각을 페이지 배율의 자리에 이어 맨 끝까지 빈 줄이 없다', async () => {
+    const browser = createFakeBrowser();
+    browser.open({ id: 1, active: true, url: href });
+    // 둘째 조각은 Chrome이 크기를 따로 반올림해(5,508 × 1.5625 = 8,606.25 → 8,606) 그 자리(16,381–24,988)보다 1픽셀 작다.
+    answerShots(browser, {
+      scale: 1.25,
+      zoom: 1.25,
+      colorOf: (y) => (y === 0 ? '#ff0000' : '#0000ff'),
+    });
+    const tall = { width: 800, height: 15_992 };
+    const dpr = 1.5625;
+    const capture = captureWorld({
+      plan: { target: 'document', rect: { x: 0, y: 0, ...tall }, viewport, dpr },
+      measure: { rect: { x: 0, y: 0, ...tall }, overflow: 0, viewport, dpr },
+    });
+    const { popup, session } = await start(browser, capture);
+    await popup(taskStart, { featureId: 'page-capture', action: 'full', tabId: 1 });
+    expect((await ended(session, 1))?.status).toBe('succeeded');
+    const sent = (method: string) =>
+      browser.commands.filter((call) => call.method === method).map((call) => call.params);
+    expect(sent('Emulation.setDeviceMetricsOverride')).toEqual([
+      { width: 0, height: 19_990, deviceScaleFactor: 0, mobile: false },
+    ]);
+    expect(
+      sent('Page.captureScreenshot').map((params): unknown => Reflect.get(Object(params), 'clip')),
+    ).toEqual([
+      { x: 0, y: 0, width: 1000, height: 13_106.25, scale: 1 },
+      { x: 0, y: 13_105, width: 1000, height: 6885, scale: 1 },
+    ]);
+    const [file] = capture.saved;
+    if (file === undefined) throw new Error('저장하지 않았다.');
+    expect(await sizeOf(file.blob)).toEqual({ width: 1250, height: 24_988 });
+    expect(
+      await Promise.all(
+        [
+          [10, 16_380],
+          [10, 16_381],
+          [10, 24_987],
+          [1249, 24_987],
+        ].map(([x = 0, y = 0]) => colorAt(file.blob, x, y)),
+      ),
+    ).toEqual(['#ff0000', '#0000ff', '#0000ff', '#0000ff']);
+  }, 30_000);
 
   it('TAB-2.6 PAGE-1.23 결정 0042 활성 상태 유지가 붙인 연결을 함께 쓰고, 캡처가 끝나도 그 연결과 초점 흉내가 남는다', async () => {
     const browser = createFakeBrowser();
@@ -368,7 +431,7 @@ describe('PAGE-1 전체 캡처의 연결', () => {
   it('PAGE-1.21 복사 한도보다 큰 그림은 파일로만 저장하고 그 까닭을 남긴다', async () => {
     const browser = createFakeBrowser();
     browser.open({ id: 1, active: true, url: href });
-    answerShots(browser, 4);
+    answerShots(browser, { scale: 4 });
     const big = { width: 1300, height: 2600 };
     const capture = captureWorld({
       plan: { target: 'document', rect: { x: 0, y: 0, ...big }, viewport, dpr: 4 },

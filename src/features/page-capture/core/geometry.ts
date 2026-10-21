@@ -81,8 +81,18 @@ export function tilesOf(rect: Rect, dpr: number): readonly Rect[] {
   return tiles;
 }
 
-// 찍은 그림(shot)을 결과 그림(target을 그 배율로)에 놓을 자리(기기 픽셀). 결과 그림의 왼쪽 위가 원점이다. 그림이 결과보다
+// 찍은 그림(shot)이 결과 그림(target을 그 배율로)에서 차지하는 네모(기기 픽셀). 결과 그림의 왼쪽 위가 원점이다. 네 가장자리를
+// 따로 반올림하므로 이웃한 조각의 가장자리와 결과 그림의 끝(deviceSize)이 같은 값이 되어 그 사이에 틈이 생기지 않는다. Chrome이
+// 준 그림은 크기를 따로 반올림해 이 네모와 1픽셀 다를 수 있다(이어 붙일 때 작으면 이 네모까지 늘린다). 그림이 결과보다
 // 크면(보이는 화면 전체를 찍고 영역만 남김) 바깥은 잘린다.
-export function placeOf(shot: Rect, target: Rect, dpr: number): Point {
-  return { x: Math.round((shot.x - target.x) * dpr), y: Math.round((shot.y - target.y) * dpr) };
+export function placeOf(shot: Rect, target: Rect, dpr: number): Rect {
+  const edge = (css: number, origin: number) => Math.round((css - origin) * dpr);
+  const x = edge(shot.x, target.x);
+  const y = edge(shot.y, target.y);
+  return {
+    x,
+    y,
+    width: edge(shot.x + shot.width, target.x) - x,
+    height: edge(shot.y + shot.height, target.y) - y,
+  };
 }

@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import type { BrowserContext, Page, Worker } from '@playwright/test';
 import { strings } from '../../src/features/page-capture/strings.ts';
 import {
+  addScriptLazyLoading,
   bandColors,
   clipboardPng,
   clipboardText,
@@ -142,22 +143,7 @@ test.describe('전체 캡처', () => {
     context,
     extensionId,
   }) => {
-    // 사이트의 스크립트 지연 로딩: 화면에 들어오면 data-src를 src로 단다. 스크롤을 기록한다.
-    await context.addInitScript(() => {
-      const scrolls: number[] = [];
-      Reflect.set(window, '__scrolls', scrolls);
-      addEventListener('scroll', () => scrolls.push(scrollY));
-      addEventListener('DOMContentLoaded', () => {
-        const observer = new IntersectionObserver((entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting || !(entry.target instanceof HTMLImageElement)) continue;
-            entry.target.src = entry.target.dataset['src'] ?? '';
-            observer.unobserve(entry.target);
-          }
-        });
-        for (const image of document.querySelectorAll('img.late')) observer.observe(image);
-      });
-    });
+    await addScriptLazyLoading(context);
     const { worker, page, tabId } = await setup(context, 'capture-lazy.html');
     await run(context, extensionId, page, '전체 캡처');
     expect(await finished(worker, tabId)).toMatchObject({ status: 'succeeded' });
@@ -214,12 +200,15 @@ test.describe('전체 캡처', () => {
     }) => {
       const { worker, page, tabId } = await setup(context, file);
       // 보이는 화면의 높이는 찍는 동안 바뀐다: 디버거를 붙이면 Chrome이 디버깅 안내 막대를 띄워 화면이 그만큼 낮아진다(2026-10-21
-      // 실험: 706px → 650px. 떼고도 몇 초 남는다). 그래서 찍기 전과 찍는 동안의 높이를 모두 모아 그중 하나와 같은지 본다.
+      // 실험: 706px → 650px. 떼고도 몇 초 남는다). 그래서 찍기 전과 찍는 동안의 높이를 모두 모아 그중 하나와 같은지 본다. 높이는
+      // 정수로 반올림하지 않은 보이는 화면의 크기다(visualViewport. innerHeight 650이 649.6이었다).
       const width = await page.evaluate(() => {
-        const heights = [innerHeight];
+        const view = visualViewport;
+        if (view === null) throw new Error('visualViewport가 없다.');
+        const heights = [view.height];
         Reflect.set(window, '__heights', heights);
-        addEventListener('resize', () => heights.push(innerHeight));
-        return document.documentElement.clientWidth;
+        view.addEventListener('resize', () => heights.push(view.height));
+        return view.width;
       });
       await run(context, extensionId, page, '전체 캡처');
       const record = await finished(worker, tabId);

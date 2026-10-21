@@ -56,13 +56,21 @@ type Effect = CaptureEffect<Blob, Blob>;
 
 const folderOf = (path: string) => path.slice(0, path.indexOf('/'));
 
+// 디버거의 Page.getLayoutMetrics에서 쓰는 것: 페이지 확대(CSS 픽셀에서 DIP로의 비율, 양수).
+const metricsSchema = v.object({
+  cssVisualViewport: v.object({ zoom: v.pipe(v.number(), v.minValue(Number.MIN_VALUE)) }),
+});
+
 // 디버거가 준 PNG(base64)나 보이는 화면(data URL)을 Blob으로. 서비스 워커는 data URL을 fetch로 읽을 수 있다.
 async function blobOf(dataUrl: string): Promise<Blob> {
   return (await fetch(dataUrl)).blob();
 }
 
 // 찍은 그림들을 결과 그림 하나로 잇는다(R-10: 조각으로 찍어 캔버스에 잇는다). 서비스 워커에도 OffscreenCanvas가 있다
-// (2026-10-21 실험: 2400×50000을 0.8초에 잇고 0.2초에 PNG로 만들었다). 조각은 1 CSS 픽셀 겹치고 뒤 조각이 덮는다.
+// (2026-10-21 실험: 2400×50000을 0.8초에 잇고 0.2초에 PNG로 만들었다). 조각은 1 CSS 픽셀 겹치고 뒤 조각이 덮는다. 그림은
+// 그것이 덮는 네모(placeOf)의 왼쪽 위에 놓는다. Chrome은 그림의 크기를 따로 반올림하므로 그림이 그 네모보다 1픽셀 작을 수
+// 있다(그대로 놓으면 결과 그림의 끝에 빈 줄이 남는다). 작으면 네모까지 늘리고(점을 섞지 않아 한 줄을 되풀이할 뿐 흐려지지
+// 않는다), 크면 그대로 놓는다(넘친 줄은 뒤 조각이 덮거나 결과 그림 밖이라 잘린다).
 async function compose(
   target: Rect,
   dpr: number,
@@ -72,10 +80,17 @@ async function compose(
   const canvas = new OffscreenCanvas(size.width, size.height);
   const context = canvas.getContext('2d');
   if (context === null) throw new Error('캔버스를 만들지 못했다.');
+  context.imageSmoothingEnabled = false;
   for (const shot of shots) {
     const bitmap = await createImageBitmap(shot.data);
     const at = placeOf(shot.rect, target, dpr);
-    context.drawImage(bitmap, at.x, at.y);
+    context.drawImage(
+      bitmap,
+      at.x,
+      at.y,
+      Math.max(bitmap.width, at.width),
+      Math.max(bitmap.height, at.height),
+    );
     bitmap.close();
   }
   return canvas.convertToBlob({ type: 'image/png' });
@@ -164,6 +179,18 @@ function capture(
     const send = (method: string, params: Readonly<Record<string, unknown>> = {}) =>
       services.debuggers.send(tabId, method, params);
     const shotSchema = v.object({ data: v.string() });
+    // 페이지 확대(CSS 픽셀 하나가 DIP 몇 개인지, R-10). 디버거 명령의 길이(화면 높이, 찍을 영역)는 CSS 픽셀이
+    // 아니라 DIP이고, 찍은 그림은 그 DIP에 화면 배율을 곱한 크기다(CSS 픽셀로 보면 devicePixelRatio = 화면 배율 × 확대).
+    // 2026-10-21 실험(화면 배율 1.25, 확대 125%): 영역 100×400을 주면 125×500 그림에 80×320 CSS 픽셀이 담겼고, 화면 높이 2000을
+    // 주면 1600 CSS 픽셀이었다. 그래서 페이지가 잰 CSS 길이에 확대를 곱해 보낸다. 할 일마다 묻는다(명령과 같은 때의 값이다).
+    const zoomOf = async (): Promise<Result<number, AppError>> => {
+      const metrics = await send('Page.getLayoutMetrics');
+      if (!metrics.ok) return metrics;
+      const parsed = v.safeParse(metricsSchema, metrics.value);
+      return parsed.success
+        ? ok(parsed.output.cssVisualViewport.zoom)
+        : err(appError('unexpected', strings.metricsShape));
+    };
 
     // 할 일 하나를 하고 그 결과를 사건으로 넣는다. 일이 던지면(일어나면 안 됨) 그 차례의 실패로 넣는다.
     const later = (step: number, work: () => Promise<Result<Event, AppError>>) => {
@@ -230,10 +257,12 @@ function capture(
         case 'expand': {
           const { step, height } = effect;
           later(step, async () => {
-            // 너비와 배율은 그대로 두고(0은 바꾸지 않음) 높이만 바꾼다. 페이지는 화면이 그만큼 높은 것으로 배치한다.
+            const zoom = await zoomOf();
+            if (!zoom.ok) return zoom;
+            // 너비와 배율은 그대로 두고(0은 바꾸지 않음) 높이만 바꾼다. 페이지는 화면이 그만큼(CSS 픽셀) 높은 것으로 배치한다.
             const expanded = await send('Emulation.setDeviceMetricsOverride', {
               width: 0,
-              height: Math.ceil(height),
+              height: Math.ceil(height * zoom.value),
               deviceScaleFactor: 0,
               mobile: false,
             });
@@ -291,11 +320,20 @@ function capture(
         case 'shoot': {
           const { step, clip, beyond } = effect;
           later(step, async () => {
+            const zoom = await zoomOf();
+            if (!zoom.ok) return zoom;
+            const dip = (css: number) => css * zoom.value;
             const shot = await send('Page.captureScreenshot', {
               format: 'png',
               fromSurface: true,
               captureBeyondViewport: beyond,
-              clip: { ...clip, scale: 1 },
+              clip: {
+                x: dip(clip.x),
+                y: dip(clip.y),
+                width: dip(clip.width),
+                height: dip(clip.height),
+                scale: 1,
+              },
             });
             if (!shot.ok) return shot;
             const parsed = v.safeParse(shotSchema, shot.value);

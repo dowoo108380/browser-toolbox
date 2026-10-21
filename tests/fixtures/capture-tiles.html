@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 여러 조각</title>
+    <!--
+      조각 여럿으로 찍어 잇는 캡처(PAGE-1.2) 시험 페이지. 바탕은 어둡고(#202020) 내용은 없다. 시험이 200px마다 색이 다른 띠(표식)를
+      원하는 높이와 너비만큼 문서나 화면 높이의 스크롤 상자에 넣는다(tests/e2e/support/capture.ts의 drawBands).
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #202020;
+      }
+      .band {
+        height: 200px;
+      }
+      html.boxed,
+      html.boxed body {
+        height: 100%;
+        overflow: hidden;
+      }
+      #box {
+        height: 100vh;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body></body>
+</html>

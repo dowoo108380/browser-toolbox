@@ -115,16 +115,37 @@ describe('R-10 조각', () => {
     expect(tilesOf({ x: 0, y: 0, width: -5, height: 100 }, 1)).toEqual([]);
   });
 
-  it('찍은 그림을 결과 그림의 왼쪽 위에서 잰 기기 픽셀 자리에 놓는다', () => {
+  it('찍은 그림을 결과 그림의 왼쪽 위에서 잰 기기 픽셀 네모에 놓는다', () => {
     const target = { x: 100, y: 1000, width: 400, height: 300 };
     expect(placeOf({ x: 100, y: 1000, width: 400, height: 300 }, target, 1.25)).toEqual({
       x: 0,
       y: 0,
+      width: 500,
+      height: 375,
     });
     // 보이는 화면 전체를 찍고 고른 영역만 남긴다.
     expect(placeOf({ x: 0, y: 900, width: 1280, height: 720 }, target, 1.25)).toEqual({
       x: -125,
       y: -125,
+      width: 1600,
+      height: 900,
     });
+  });
+
+  it('PAGE-1.26 이웃한 조각의 네모가 겹치거나 맞닿고, 마지막 조각이 결과 그림의 끝까지 닿아 틈이 없다', () => {
+    // 배율 1.5625(화면 배율 1.25, 페이지 확대 125%)에서 둘째 조각의 위(16,381.25)와 높이(8,606.25)를 따로 반올림하면 끝이
+    // 24,987이고 결과 그림은 24,988이다(그림의 크기로 놓으면 맨 아래 한 줄이 빈다).
+    const dpr = 1.5625;
+    const target = { x: 0, y: 0, width: 1000, height: 15_992 };
+    const tiles = tilesOf(target, dpr);
+    expect(tiles.length).toBe(2);
+    const places = tiles.map((tile) => placeOf(tile, target, dpr));
+    const size = deviceSize(target, dpr);
+    expect(size.height).toBe(24_988);
+    const [first, second] = places;
+    expect(first?.y).toBe(0);
+    expect((second?.y ?? 0) <= (first?.y ?? 0) + (first?.height ?? 0)).toBe(true);
+    expect((second?.y ?? 0) + (second?.height ?? 0)).toBe(size.height);
+    expect(places.every((place) => place.x === 0 && place.width === size.width)).toBe(true);
   });
 });

@@ -165,7 +165,7 @@ describe('PAGE-1 전체 캡처의 대상(prepare)', () => {
     expect(page().prepare()).not.toMatchObject({ target: 'document' });
   });
 
-  it('보이는 화면은 지금 스크롤 자리에서 스크롤 막대를 뺀 크기다', () => {
+  it('보이는 화면은 지금 스크롤 자리에서 스크롤 막대를 뺀 크기다(소수를 반올림하지 않는 visualViewport)', () => {
     tallDocument(3000);
     window.scrollTo({ left: 0, top: 500, behavior: 'instant' });
     expect(page().measure('viewport').rect).toEqual({
@@ -173,6 +173,12 @@ describe('PAGE-1 전체 캡처의 대상(prepare)', () => {
       y: 500,
       width: document.documentElement.clientWidth,
       height: document.documentElement.clientHeight,
+    });
+    expect(page().measure('viewport').rect).toEqual({
+      x: visualViewport?.pageLeft,
+      y: visualViewport?.pageTop,
+      width: visualViewport?.width,
+      height: visualViewport?.height,
     });
   });
 

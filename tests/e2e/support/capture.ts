@@ -40,6 +40,26 @@ export async function startCapture(
   return popup;
 }
 
+// 사이트의 스크립트 지연 로딩을 모든 페이지에 넣는다(capture-lazy.html의 img.late): 화면에 들어오면 data-src를 src로 단다.
+// 페이지의 스크롤도 기록한다(window.__scrolls).
+export async function addScriptLazyLoading(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const scrolls: number[] = [];
+    Reflect.set(window, '__scrolls', scrolls);
+    addEventListener('scroll', () => scrolls.push(scrollY));
+    addEventListener('DOMContentLoaded', () => {
+      const observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || !(entry.target instanceof HTMLImageElement)) continue;
+          entry.target.src = entry.target.dataset['src'] ?? '';
+          observer.unobserve(entry.target);
+        }
+      });
+      for (const image of document.querySelectorAll('img.late')) observer.observe(image);
+    });
+  });
+}
+
 // 그 탭의 작업 기록(없으면 null).
 export function taskOf(worker: Worker, tabId: number): Promise<unknown> {
   return worker.evaluate(async (id) => {
@@ -88,6 +108,120 @@ export function pngInfo(page: Page, png: Buffer, points: readonly (readonly [num
       return { width: bitmap.width, height: bitmap.height, colors };
     },
     { base64: png.toString('base64'), at: points },
+  );
+}
+
+// capture-tiles.html에 200 CSS 픽셀마다 색이 다른 띠(bandColors를 되풀이)를 height만큼 넣는다. width가 있으면 띠가 그
+// 너비다(없으면 창 너비). box가 있으면 띠는 화면 높이의 스크롤 상자 안에 있고 문서는 스크롤되지 않는다(안쪽 상자를 펼쳐 찍는 길).
+// box가 'fixed'면 상자의 높이를 지금 화면 높이(px)로 정해 늘려도 펼쳐지지 않는다(보이는 화면만 찍는 길).
+export function drawBands(
+  page: Page,
+  options: { readonly height: number; readonly width?: number; readonly box?: 'grows' | 'fixed' },
+): Promise<void> {
+  return page.evaluate(
+    ({ height, width, box, colors }) => {
+      let parent = document.body;
+      if (box !== undefined) {
+        document.documentElement.classList.add('boxed');
+        parent = document.createElement('div');
+        parent.id = 'box';
+        if (box === 'fixed') parent.style.height = `${String(innerHeight)}px`;
+        document.body.append(parent);
+      }
+      for (let band = 0; band * 200 < height; band += 1) {
+        const div = document.createElement('div');
+        div.className = 'band';
+        div.style.background = colors[band % colors.length] ?? '';
+        // 마지막 띠는 남은 높이만큼이다(내용의 높이가 height다).
+        div.style.height = `${String(Math.min(200, height - band * 200))}px`;
+        if (width !== undefined) div.style.width = `${String(width)}px`;
+        parent.append(div);
+      }
+    },
+    { ...options, colors: bandColors },
+  );
+}
+
+// 그 탭의 페이지 확대를 정하고(Chrome이 사이트마다 기억하는 확대와 같다) 페이지가 그 배율이 되기를 기다린다.
+export async function setPageZoom(
+  worker: Worker,
+  page: Page,
+  tabId: number,
+  zoom: number,
+  dpr: number,
+): Promise<void> {
+  await worker.evaluate(({ id, factor }) => chrome.tabs.setZoom(id, factor), {
+    id: tabId,
+    factor: zoom,
+  });
+  await expect.poll(() => page.evaluate(() => devicePixelRatio)).toBe(dpr);
+}
+
+// 그 PNG의 세로 줄들(기기 픽셀 x)을 위에서 아래까지 모두 읽어, drawBands의 띠(200 CSS 픽셀마다 bandColors를 되풀이)와
+// 색이 다른 곳을 이어진 구간(기기 픽셀 from–to, 그 처음의 색과 불투명도)으로 준다. top은 그림의 맨 위가 문서에서 몇
+// CSS 픽셀인지, end는 띠가 끝나는 곳(문서의 CSS 픽셀)이다. 띠의 경계와 끝의 둘레(1.5 기기 픽셀)는 반올림에 따라 어느 쪽
+// 색이어도 되므로 보지 않는다. 그 밖의 모든 줄을 보므로 조각 사이나 맨 아래의 빈 띠(그리지 않은 자리)와 어긋나게 놓인 조각을
+// 놓치지 않는다.
+export function stripeGaps(
+  page: Page,
+  png: Buffer,
+  {
+    dpr,
+    top,
+    end,
+    xs,
+  }: {
+    readonly dpr: number;
+    readonly top: number;
+    readonly end: number;
+    readonly xs: readonly number[];
+  },
+) {
+  return page.evaluate(
+    async ({ base64, scale, offset, last, columns, colors }) => {
+      const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+      const bitmap = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (context === null) throw new Error('캔버스가 없다.');
+      context.drawImage(bitmap, 0, 0);
+      const hex = (data: Uint8ClampedArray, at: number) =>
+        `#${[0, 1, 2]
+          .map((part) => (data[at + part] ?? 0).toString(16).padStart(2, '0'))
+          .join('')}`;
+      const gaps: { x: number; from: number; to: number; color: string; alpha: number }[] = [];
+      for (const x of columns) {
+        const { data } = context.getImageData(x, 0, 1, bitmap.height);
+        let open: (typeof gaps)[number] | null = null;
+        for (let row = 0; row < bitmap.height; row += 1) {
+          const css = (row + 0.5) / scale + offset;
+          const nearest = Math.round(css / 200) * 200;
+          if (Math.abs(css - nearest) < 1.5 / scale || css > last - 1.5 / scale) continue;
+          const expected = colors[Math.floor(css / 200) % colors.length];
+          const color = hex(data, row * 4);
+          const alpha = data[row * 4 + 3] ?? 0;
+          if (color === expected && alpha === 255) {
+            open = null;
+            continue;
+          }
+          if (open === null) {
+            open = { x, from: row, to: row, color, alpha };
+            gaps.push(open);
+          } else {
+            open.to = row;
+          }
+        }
+      }
+      return { width: bitmap.width, height: bitmap.height, gaps };
+    },
+    {
+      base64: png.toString('base64'),
+      scale: dpr,
+      offset: top,
+      last: end,
+      columns: xs,
+      colors: bandColors,
+    },
   );
 }
 
@@ -167,6 +301,56 @@ export async function grantActiveTab(
   } finally {
     cdp.close();
   }
+}
+
+// 서비스 워커가 디버거로 찍는 조각을 적는다(그 뒤의 Page.captureScreenshot마다 요청한 영역과 Chrome이 준 그림의 크기). 그림의
+// 크기는 PNG의 머리(IHDR)에서 읽는다. 조각이 페이지의 배율대로 그려졌는지(늘린 그림이 아닌지) 보려고 쓴다.
+export async function recordShots(worker: Worker): Promise<
+  () => Promise<
+    {
+      readonly clip: { readonly width: number; readonly height: number };
+      readonly width: number;
+      readonly height: number;
+    }[]
+  >
+> {
+  await worker.evaluate(() => {
+    const original = chrome.debugger.sendCommand.bind(chrome.debugger);
+    const shots: unknown[] = [];
+    Reflect.set(globalThis, '__shots', shots);
+    const wrapped = async (
+      target: chrome.debugger.DebuggerSession,
+      method: string,
+      params?: Record<string, unknown>,
+    ) => {
+      const result: unknown = await original(target, method, params);
+      if (method === 'Page.captureScreenshot') {
+        const head = atob(String(Reflect.get(Object(result), 'data')).slice(0, 32));
+        const word = (at: number) =>
+          [0, 1, 2, 3].reduce((value, part) => value * 256 + head.charCodeAt(at + part), 0);
+        shots.push({ clip: params?.['clip'], width: word(16), height: word(20) });
+      }
+      return result;
+    };
+    Reflect.set(chrome.debugger, 'sendCommand', wrapped);
+  });
+  return () =>
+    worker.evaluate(() => {
+      const shots: unknown = Reflect.get(globalThis, '__shots');
+      return Array.isArray(shots)
+        ? shots.map((shot: unknown) => {
+            const clip: unknown = Reflect.get(Object(shot), 'clip');
+            return {
+              clip: {
+                width: Number(Reflect.get(Object(clip), 'width')),
+                height: Number(Reflect.get(Object(clip), 'height')),
+              },
+              width: Number(Reflect.get(Object(shot), 'width')),
+              height: Number(Reflect.get(Object(shot), 'height')),
+            };
+          })
+        : [];
+    });
 }
 
 // 서비스 워커의 디버거 붙이기를 센다(그 뒤의 chrome.debugger.attach 호출 수). 확장의 platform이 부를 때마다 이 전역을 읽는다.

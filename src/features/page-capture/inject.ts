@@ -418,13 +418,15 @@ function createPageApi(): PageApi {
         };
       }
       case 'viewport': {
+        // 페이지를 확대하면 보이는 화면이 CSS 픽셀로 소수인데 clientHeight는 정수로 반올림해 화면보다 클 수 있다(그 줄은 화면
+        // 밖이라 페이지 바탕색으로 찍혔다, 2026-10-21 시험). visualViewport는 소수 그대로다(스크롤 막대는 뺀다).
+        const view = window.visualViewport;
         const root = rootOf();
-        return {
-          rect: { ...scrollPoint(), width: root.clientWidth, height: root.clientHeight },
-          overflow: 0,
-          viewport,
-          dpr,
-        };
+        const rect =
+          view === null
+            ? { ...scrollPoint(), width: root.clientWidth, height: root.clientHeight }
+            : { x: view.pageLeft, y: view.pageTop, width: view.width, height: view.height };
+        return { rect, overflow: 0, viewport, dpr };
       }
     }
   };
