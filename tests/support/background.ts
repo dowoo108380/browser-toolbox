@@ -5,8 +5,16 @@ import {
   responseSchema,
   v,
 } from '../../src/contracts/index.ts';
-import { type TabTogglePart, type TaskPart, startBackground } from '../../src/background/index.ts';
-import { tabToggleParts as productTabToggleParts } from '../../src/entries/generated/sw.ts';
+import {
+  type BackgroundDeps,
+  type TabTogglePart,
+  type TaskPart,
+  startBackground,
+} from '../../src/background/index.ts';
+import {
+  tabToggleParts as productTabToggleParts,
+  taskParts as productTaskParts,
+} from '../../src/entries/generated/sw.ts';
 import type {
   Delivery,
   KeyValueStore,
@@ -19,7 +27,7 @@ import type {
   TabResponse,
 } from '../../src/platform/index.ts';
 import { createFakeStore } from '../../src/platform/fake.ts';
-import { appError, err } from '../../src/shared/index.ts';
+import { appError, err, ok } from '../../src/shared/index.ts';
 import { settingsFormat } from '../../src/storage/index.ts';
 import { type FakeBrowser, createFakeBrowser } from './fake-browser.ts';
 
@@ -38,7 +46,8 @@ export interface TestBackgroundOptions {
   readonly probePage?: (tabId: number) => Promise<PageProbe>;
   // 실행 틀에 지금 상태를 물은 답(결정 0026). 없으면 찾지 못한 기능이 없다고 답한다.
   readonly askPage?: (tabId: number, timeoutMs: number) => Promise<TabResponse<PageStatus>>;
-  // 작업 기록을 두는 세션 저장소와 실행 기능의 일(결정 0024). 없으면 빈 가짜 저장소와 일 없음이다.
+  // 작업 기록을 두는 세션 저장소와 실행 기능의 일(결정 0024). 없으면 빈 가짜 저장소와, 제품의 일 가운데 features에 든 기능의
+  // 것이다.
   readonly session?: KeyValueStore;
   readonly taskParts?: readonly TaskPart[];
   // 탭이 열려 있는지. 없으면 모든 탭이 있다.
@@ -55,7 +64,33 @@ export interface TestBackgroundOptions {
   readonly browser?: FakeBrowser;
   // 탭마다 켜고 끄는 기능의 일. 없으면 제품의 일 가운데 features에 든 기능의 것이다.
   readonly tabToggleParts?: readonly TabTogglePart[];
+  // 캡처가 쓰는 페이지 쪽 스크립트, 보이는 화면 찍기, 저장·클립보드의 가짜(결정 0046, 0047). 없으면 모두 거절한다.
+  readonly capture?: CaptureDeps;
 }
+
+export type CaptureDeps = Pick<
+  BackgroundDeps,
+  | 'injectScript'
+  | 'callInjected'
+  | 'captureVisibleTab'
+  | 'openOffscreen'
+  | 'closeOffscreen'
+  | 'offscreenRequest'
+  | 'downloadFile'
+>;
+
+const refused = () => Promise.resolve(err(appError('platform', '시험에서 쓰지 않는다.')));
+
+// 캡처를 쓰지 않는 시험의 기본값: 오프스크린 문서는 열리고 닫히며(서비스 워커가 시작할 때 닫는다), 나머지는 거절한다.
+const unusedCapture: CaptureDeps = {
+  injectScript: refused,
+  callInjected: refused,
+  captureVisibleTab: refused,
+  openOffscreen: () => Promise.resolve(ok(null)),
+  closeOffscreen: () => Promise.resolve(ok(null)),
+  offscreenRequest: refused,
+  downloadFile: refused,
+};
 
 // 확장 화면과 콘텐츠 스크립트가 쓰는 요청 함수를 돌려준다. chromeRequester처럼 메시지를 구조화 복제로 건네고,
 // 응답을 그 요청의 정의로 검증한다. 서비스 워커가 실패로 답한 것만 answered다.
@@ -100,7 +135,11 @@ function startBackgroundWith(
     format: settingsFormat,
     store: options.store,
     session: options.session ?? createFakeStore(),
-    taskParts: options.taskParts ?? [],
+    taskParts:
+      options.taskParts ??
+      productTaskParts.filter((part) =>
+        options.features.some((feature) => feature.id === part.featureId),
+      ),
     randomId: () => {
       taskCount += 1;
       return `task-${String(taskCount)}`;
@@ -131,6 +170,7 @@ function startBackgroundWith(
         options.features.some((feature) => feature.id === part.featureId),
       ),
     ...(options.browser ?? createFakeBrowser()).deps,
+    ...(options.capture ?? unusedCapture),
   });
   const deliver = options.deliver ?? ((_type, send) => send());
   return (message, sender = { kind: 'extension' }) => {

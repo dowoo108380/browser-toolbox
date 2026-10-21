@@ -88,7 +88,8 @@ export async function renderTestPopup(
         // 탐침 결과는 서비스 워커의 probePage가 정한다.
         currentTab,
         tabStatus: (tabId) => request(tabStatus, { tabId }),
-        startTask: (featureId, tab) => request(taskStart, { featureId, tabId: tab }),
+        startTask: (featureId, action, tab) =>
+          request(taskStart, { featureId, action, tabId: tab }),
         watchTask: (tab, handlers) => watchTask(session, tab, handlers),
         taskSeen: (tab, taskId) => request(taskSeen, { tabId: tab, taskId }),
         announceTab,

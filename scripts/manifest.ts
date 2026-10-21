@@ -7,9 +7,16 @@ export const minimumChromeVersion = '150';
 
 const pageMatches = ['http://*/*', 'https://*/*'];
 
-// 공용으로 쓰는 권한(결정 0009). storage: 설정, scripting: 옛 스크립트 정리(결정 0008).
-// 그 밖의 공용 권한(offscreen 등)은 처음 쓰는 기능을 만들 때 더한다.
-const commonPermissions = ['storage', 'scripting'];
+// 공용으로 쓰는 권한(결정 0009). storage: 설정, scripting: 옛 스크립트 정리(결정 0008), offscreen: 저장·클립보드의 오프스크린
+// 문서(결정 0047. 서비스 워커가 시작할 때 남은 문서를 닫는다).
+const commonPermissions = ['storage', 'scripting', 'offscreen'];
+
+// 누를 때 넣는 페이지 쪽 스크립트를 가진 기능(아키텍처 2장, 결정 0046). 파일은 contracts의 injectedScriptFile이 정한다.
+export function injectedFeatures(
+  features: readonly FeatureDefinition[],
+): readonly FeatureDefinition[] {
+  return features.filter((feature) => feature.injectedScript === true);
+}
 
 // 페이지의 세계(MAIN)에 싣는 페이지 쪽 스크립트를 가진 기능(아키텍처 2장, 결정 0043). 파일은 main-<기능 id>.js다.
 export function mainWorldFeatures(

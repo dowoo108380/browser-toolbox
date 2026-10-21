@@ -220,10 +220,11 @@ export default defineConfig(
     },
   },
   {
-    // 웹 페이지에서 도는 기능 코드와 그 도우미. 자원 범위 자체(scope.ts)와 테스트는 뺀다.
+    // 웹 페이지에서 도는 기능 코드와 그 도우미(누를 때 넣는 스크립트 포함, 결정 0046). 자원 범위 자체(scope.ts)와 테스트는 뺀다.
     files: [
       'src/features/*/page.ts',
       'src/features/*/page/**/*.ts',
+      'src/features/*/inject.ts',
       'src/sites/**/*.ts',
       'src/dom/**/*.ts',
     ],

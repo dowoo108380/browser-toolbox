@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 늦게 불러오는 이미지</title>
+    <!--
+      늦게 불러오는 이미지(PAGE-1 기대 동작 3) 시험 페이지. 높이 6000px에, 화면 밖에 브라우저의 지연 로딩 이미지(loading=lazy, 빨강) 둘과
+      스크롤해야 불러오는 스크립트 지연 로딩 이미지(data-src, 파랑) 둘이 있다. 스크립트 지연 로딩(IntersectionObserver로 보이면
+      src를 단다)은 시험이 넣는다(tests/lint/fixtures.test.ts). 이미지는 서버가 0.4초 늦게 보낸다(tests/server.ts).
+    -->
+    <style>
+      body {
+        margin: 0;
+      }
+      main {
+        position: relative;
+        height: 6000px;
+      }
+      img {
+        position: absolute;
+        left: 100px;
+        width: 200px;
+        height: 200px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img
+        alt=""
+        loading="lazy"
+        style="top: 2500px"
+        src="/image/ff0000.png?w=200&amp;h=200&amp;delay=400"
+      />
+      <img
+        alt=""
+        class="late"
+        style="top: 3500px"
+        data-src="/image/0000ff.png?w=200&amp;h=200&amp;delay=400"
+      />
+      <img
+        alt=""
+        loading="lazy"
+        style="top: 4500px"
+        src="/image/ff0000.png?w=200&amp;h=200&amp;delay=400"
+      />
+      <img
+        alt=""
+        class="late"
+        style="top: 5500px"
+        data-src="/image/0000ff.png?w=200&amp;h=200&amp;delay=400"
+      />
+    </main>
+  </body>
+</html>

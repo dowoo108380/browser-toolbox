@@ -38,19 +38,32 @@ export interface LaunchOptions {
   // 참이면 뒤로·앞으로 캐시(bfcache)를 켠다. Playwright는 Chromium을 --disable-back-forward-cache로 띄운다
   // (playwright-core 1.64.0의 기본 인자에서 확인). 그 인자를 빼면 Chrome의 기본대로 켜진다(2026-10-17 실험).
   readonly backForwardCache?: boolean;
+  // 참이면 Playwright가 화면 크기를 흉내 내지 않고(viewport: null) 창의 크기 그대로 둔다. 캡처(PAGE-1)는 디버거로 화면 높이를
+  // 바꾸는데, Playwright가 흉내 낸 크기도 같은 방법이라 캡처가 되돌릴 때 그 흉내도 함께 풀렸다(2026-10-21 실험).
+  readonly realViewport?: boolean;
+  // Chromium에 더 줄 인자(예: 화면 배율 --force-device-scale-factor).
+  readonly args?: readonly string[];
 }
 
 // 빌드한 확장을 올린 Chromium을 그 프로필로 띄운다. 닫은 뒤 같은 프로필로 다시 띄우면 브라우저를 다시 시작한 것이다.
 export function launchWithExtension(
   profileDirectory: string,
-  { browserDebugging = false, build = 'product', backForwardCache = false }: LaunchOptions = {},
+  {
+    browserDebugging = false,
+    build = 'product',
+    backForwardCache = false,
+    realViewport = false,
+    args = [],
+  }: LaunchOptions = {},
 ): Promise<BrowserContext> {
   const dist = distOf(build);
   return chromium.launchPersistentContext(profileDirectory, {
     // 이 채널이어야 headless에서도 확장이 돈다(Playwright 문서).
     channel: 'chromium',
     ignoreDefaultArgs: backForwardCache ? ['--disable-back-forward-cache'] : [],
+    ...(realViewport ? { viewport: null } : {}),
     args: [
+      ...args,
       `--disable-extensions-except=${dist}`,
       `--load-extension=${dist}`,
       `--host-resolver-rules=MAP ${new URL(insecureFixtureOrigin).hostname} 127.0.0.1`,
@@ -73,6 +86,9 @@ export const test = base.extend<{
   extensionBuild: ExtensionBuild;
   // 참이면 bfcache를 켠다(LaunchOptions). bfcache를 보는 시험만 켠다.
   backForwardCache: boolean;
+  // 화면 크기를 흉내 내지 않고, 이 인자로 띄운다(LaunchOptions). 캡처 시험이 쓴다.
+  realViewport: boolean;
+  chromiumArgs: string[];
   profileDirectory: string;
   context: BrowserContext;
   extensionId: string;
@@ -80,18 +96,29 @@ export const test = base.extend<{
   browserDebugging: [false, { option: true }],
   extensionBuild: ['product', { option: true }],
   backForwardCache: [false, { option: true }],
+  realViewport: [false, { option: true }],
+  chromiumArgs: [[], { option: true }],
   // eslint-disable-next-line no-empty-pattern -- Playwright는 첫 인자가 구조 분해 패턴이어야 의존하는 fixture를 안다.
   profileDirectory: async ({}, use, testInfo) => {
     await use(testInfo.outputPath('profile'));
   },
   context: async (
-    { browserDebugging, extensionBuild, backForwardCache, profileDirectory },
+    {
+      browserDebugging,
+      extensionBuild,
+      backForwardCache,
+      realViewport,
+      chromiumArgs,
+      profileDirectory,
+    },
     use,
   ) => {
     const context = await launchWithExtension(profileDirectory, {
       browserDebugging,
       build: extensionBuild,
       backForwardCache,
+      realViewport,
+      args: chromiumArgs,
     });
     await use(context);
     // 시험이 먼저 닫았어도 된다(다시 시작 시험). 닫힌 컨텍스트를 다시 닫으면 아무 일도 하지 않는다.

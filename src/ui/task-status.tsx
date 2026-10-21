@@ -20,13 +20,14 @@ function textOf(task: TaskRecord, name: string): string {
 interface TaskStatusProps {
   // 보일 작업. 없으면 칸이 빈다.
   readonly task: TaskRecord | null;
-  readonly nameOf: (featureId: string) => string;
+  // 그 작업의 이름(그 작업 종류의 이름, 결정 0046).
+  readonly nameOf: (task: TaskRecord) => string;
 }
 
 export function TaskStatus({ task, nameOf }: TaskStatusProps) {
   return (
     <div class="task" aria-live="polite">
-      {task !== null && <p>{textOf(task, nameOf(task.featureId))}</p>}
+      {task !== null && <p>{textOf(task, nameOf(task))}</p>}
     </div>
   );
 }

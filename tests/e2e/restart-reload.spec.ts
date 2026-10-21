@@ -88,6 +88,7 @@ test.describe('서비스 워커가 다시 시작함', () => {
       [String(tabId)]: {
         id: expect.any(String),
         featureId: fixtureTask.id,
+        action: 'run',
         status: 'succeeded',
         summary: fixtureSummary,
       },
@@ -131,6 +132,7 @@ test.describe('서비스 워커가 다시 시작함', () => {
         [String(tabId)]: {
           id: expect.any(String),
           featureId: fixtureTask.id,
+          action: 'run',
           status: 'failed',
           error: { kind: 'unexpected', message: interrupted },
         },
@@ -176,6 +178,7 @@ test.describe('서비스 워커가 다시 시작함', () => {
           [String(tabId)]: {
             id: 'earlier',
             featureId: fixtureTask.id,
+            action: 'run',
             status: 'succeeded',
             summary: fixtureSummary,
           },

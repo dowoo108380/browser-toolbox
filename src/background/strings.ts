@@ -6,6 +6,8 @@ import type { AppError } from '../shared/index.ts';
 
 export const strings = {
   notAction: '실행 기능이 아니라 작업을 시작할 수 없다.',
+  // 그 기능에 없는 작업 종류(결정 0046). 이 판의 팝업은 보내지 않는다.
+  unknownAction: '그 기능에 없는 작업이라 시작할 수 없다.',
   noTab: '작업을 시작할 탭이 없다.',
   tabUnknown: '작업을 시작할 탭을 확인하지 못했다. 다시 실행한다.',
   running: (name: string) => `이 탭에서 ${name} 진행 중이다. 끝난 뒤 다시 한다.`,
@@ -29,6 +31,8 @@ export const strings = {
   debuggerWithdrawn: '디버거가 붙기 전에 그만 쓰기로 했다.',
   debuggerInterrupted: '디버거를 붙이는 사이 연결이 끊겼다.',
   debuggerNotAttached: '디버거가 이 탭에 붙어 있지 않다.',
+  // 저장·클립보드 서비스(결정 0047).
+  copyRefused: 'Chrome이 클립보드에 쓰기를 허락하지 않았다.',
   // 탭마다 켜고 끄기(결정 0043).
   notTabToggle: '탭마다 켜고 끄는 기능이 아니다.',
   tabTogglesWriteFailed: '탭마다 켠 기능의 기록을 남기지 못해 바꾸지 않았다. 다시 한다.',

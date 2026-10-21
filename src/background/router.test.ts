@@ -98,7 +98,7 @@ describe('요청 검증(결정 0006)', () => {
 
   it('결정 0024 작업의 시작과 결과 확인은 확장 화면만 보낼 수 있다', async () => {
     const { router } = setup();
-    const start = { type: 'task.start', payload: { featureId: 'save', tabId: 3 } };
+    const start = { type: 'task.start', payload: { featureId: 'save', action: 'run', tabId: 3 } };
     const seen = { type: 'task.seen', payload: { tabId: 3, taskId: 't' } };
     expect(await router(start, extension)).toEqual(ok({ taskId: 't' }));
     expect(await router(seen, extension)).toEqual(ok(null));

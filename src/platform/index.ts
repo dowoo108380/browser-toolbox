@@ -8,7 +8,10 @@ export {
   listenRequests,
 } from './messaging.ts';
 export {
+  type InjectedAnswer,
   type PageProbe,
+  callInjected,
+  injectScriptFile,
   probePageRuntime,
   retireInAllFrames,
   retireInFrame,
@@ -53,3 +56,12 @@ export {
   listenDebuggerLoss,
   sendDebuggerCommand,
 } from './debugger.ts';
+export { type SavedFile, downloadFile } from './downloads.ts';
+export { captureVisibleTab } from './capture.ts';
+export {
+  type OffscreenRequester,
+  closeOffscreenDocument,
+  offscreenRequester,
+  openOffscreenDocument,
+  serveOffscreen,
+} from './offscreen.ts';

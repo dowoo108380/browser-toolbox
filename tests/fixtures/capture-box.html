@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 안쪽 상자</title>
+    <!--
+      안쪽 상자만 스크롤되는 페이지(PAGE-1.12) 시험 페이지. 2026-10-21에 흔한 대화·메일 화면의 모양을 본떴다(실제 사이트를 보지 않음,
+      실제 사이트는 tests/manual/page-capture.md): 문서는 스크롤되지 않고(html·body가 화면 높이에 넘침을 감춤), 위 머리(60px, 검정)와
+      옆 목록(200px, 회색) 아래 나머지가 스크롤 상자다. 상자 안에 고정 머리(40px, #123456), 400px 띠 12개, 아래에 붙는 입력란(100px,
+      #654321)이 있다. 상자의 높이는 화면 높이를 따른다(flex).
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      .app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      .top {
+        flex: none;
+        height: 60px;
+        background: #000;
+      }
+      .row {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      .side {
+        flex: none;
+        width: 200px;
+        background: #888;
+      }
+      .box {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .sticky {
+        position: sticky;
+        top: 0;
+        height: 40px;
+        background: #123456;
+      }
+      .composer {
+        position: sticky;
+        bottom: 0;
+        height: 100px;
+        background: #654321;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="top"></div>
+      <div class="row">
+        <div class="side"></div>
+        <div class="box" id="box">
+          <div class="sticky"></div>
+          <div class="band" style="height: 400px; background: #e6194b"></div>
+          <div class="band" style="height: 400px; background: #3cb44b"></div>
+          <div class="band" style="height: 400px; background: #ffe119"></div>
+          <div class="band" style="height: 400px; background: #4363d8"></div>
+          <div class="band" style="height: 400px; background: #f58231"></div>
+          <div class="band" style="height: 400px; background: #911eb4"></div>
+          <div class="band" style="height: 400px; background: #42d4f4"></div>
+          <div class="band" style="height: 400px; background: #f032e6"></div>
+          <div class="band" style="height: 400px; background: #bfef45"></div>
+          <div class="band" style="height: 400px; background: #fabed4"></div>
+          <div class="band" style="height: 400px; background: #469990"></div>
+          <div class="band" style="height: 400px; background: #dcbeff"></div>
+          <div class="composer"></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

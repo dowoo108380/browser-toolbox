@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 작은 상자</title>
+    <!--
+      화면 대부분이 아닌 스크롤 상자(PAGE-1.13) 시험 페이지. 문서는 화면에 다 들어가고, 화면 가운데의 400×300px 스크롤 상자 하나만
+      스크롤된다. 캡처는 화면을 3×3으로 나눈 칸의 가운데에서 상자를 찾으므로(결정 0048) 상자가 화면 가운데를 덮게 둔다.
+    -->
+    <style>
+      body {
+        margin: 0;
+      }
+      .box {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 400px;
+        height: 300px;
+        overflow-y: auto;
+        transform: translate(-50%, -50%);
+      }
+      .box div {
+        height: 2000px;
+        background: #4363d8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box"><div></div></div>
+  </body>
+</html>

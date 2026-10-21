@@ -67,6 +67,12 @@ export function createFakeBrowser() {
   let activity: TabActivityHandlers | undefined;
   let listening = true;
   let loss: ((tabId: number, loss: DebuggerLoss) => void) | undefined;
+  // 디버거 명령의 답. 시험이 정하지 않으면 빈 객체로 답한다.
+  let commandAnswer: (
+    tabId: number,
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ) => Promise<Result<unknown, AppError>> = () => Promise.resolve(ok({}));
   let answer: (
     tabId: number,
     message: { readonly featureId: string; readonly name: string; readonly payload: unknown },
@@ -76,6 +82,7 @@ export function createFakeBrowser() {
   const infoOf = (tab: FakeTab): TabInfo => ({
     id: tab.id,
     windowId: tab.windowId,
+    active: tab.active,
     shown:
       tab.active ||
       (tab.split !== null &&
@@ -123,7 +130,7 @@ export function createFakeBrowser() {
         return Promise.resolve(err(appError('platform', '디버거가 붙어 있지 않다.')));
       }
       commands.push({ tabId, method, params });
-      return Promise.resolve(ok({}));
+      return commandAnswer(tabId, method, params);
     },
     listenDebuggerLoss: (handler: (tabId: number, loss: DebuggerLoss) => void) => {
       loss = handler;
@@ -301,6 +308,10 @@ export function createFakeBrowser() {
       const answers = held ?? [];
       held = null;
       for (const answer of answers) answer();
+    },
+    // 디버거 명령에 답한다(캡처의 찍기 등).
+    answerDebugger: (next: typeof commandAnswer) => {
+      commandAnswer = next;
     },
     // 서비스 워커가 탭의 최상위 프레임에 보낸 기능 명령에 답한다.
     answerCommands: (next: typeof answer) => {

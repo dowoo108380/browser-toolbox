@@ -1,4 +1,5 @@
 export {
+  type ActionChoice,
   type ActionFeature,
   type Category,
   type ContentTarget,
@@ -10,9 +11,12 @@ export {
   type TabToggleFeature,
   type ToggleFeature,
   type ToggleSettings,
+  actionOf,
   categories,
   defineFeature,
   featuresWithSettings,
+  injectedApiKey,
+  injectedScriptFile,
   siteMatches,
   sites,
   tabToggleFeatures,
@@ -49,5 +53,16 @@ export {
   taskStart,
 } from './messages.ts';
 export { type PageBundle, pageBundles, pageRuntimeKey, retireEventName } from './events.ts';
+export {
+  type OffscreenRequest,
+  clipboardSettleMs,
+  offscreenAnswerSchema,
+  offscreenChannelName,
+  offscreenCopyImage,
+  offscreenEnvelopeSchema,
+  offscreenRevoke,
+  offscreenSettle,
+  offscreenUrl,
+} from './offscreen.ts';
 // 런타임 검증의 어휘(결정 0028). valibot은 contracts/schema.ts만 가져오고, 다른 곳은 이 v를 쓴다.
 export * as v from './schema.ts';

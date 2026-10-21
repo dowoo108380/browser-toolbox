@@ -23,10 +23,13 @@ import {
 import type {
   DebuggerLoss,
   Delivery,
+  InjectedAnswer,
   KeyValueStore,
+  OffscreenRequester,
   PageProbe,
   PopupWatch,
   Requester,
+  SavedFile,
   Sender,
   TabActivity,
   TabActivityHandlers,
@@ -53,6 +56,7 @@ import {
   startSettingsReader,
 } from '../storage/index.ts';
 import { createDebuggerManager } from './debugger.ts';
+import { createFileService } from './files.ts';
 import { createPopupState } from './popup-state.ts';
 import { createProblemLog } from './problems.ts';
 import { createRepairNoticeLog } from './repair-notice.ts';
@@ -64,7 +68,7 @@ import { createTabToggles } from './tab-toggles.ts';
 import type { TaskPart } from './task-part.ts';
 import { createTaskRunner } from './tasks.ts';
 
-export { type TaskPart, defineTaskPart } from './task-part.ts';
+export { type TaskPart, type TaskServices, defineTaskPart } from './task-part.ts';
 export {
   type TabTogglePart,
   type TabToggleRunner,
@@ -130,6 +134,21 @@ export interface BackgroundDeps {
     tabId: number,
     message: { readonly featureId: string; readonly name: string; readonly payload: unknown },
   ) => Promise<TabResponse<unknown>>;
+  // 누를 때 넣는 페이지 쪽 스크립트를 넣고 그 일을 부른다(결정 0046).
+  readonly injectScript: (tabId: number, file: string) => Promise<Result<null, AppError>>;
+  readonly callInjected: (
+    tabId: number,
+    key: string,
+    method: string,
+    args: readonly unknown[],
+  ) => Promise<Result<InjectedAnswer, AppError>>;
+  // 창의 지금 탭의 보이는 화면을 찍는다(결정 0048).
+  readonly captureVisibleTab: (windowId: number) => Promise<Result<string, AppError>>;
+  // 저장·클립보드의 오프스크린 문서와 다운로드(결정 0047).
+  readonly openOffscreen: () => Promise<Result<null, AppError>>;
+  readonly closeOffscreen: () => Promise<Result<null, AppError>>;
+  readonly offscreenRequest: OffscreenRequester;
+  readonly downloadFile: (url: string, path: string) => Promise<Result<SavedFile, AppError>>;
 }
 
 // 실행 틀에 묻는 제한 시간. 팝업의 tab.status 요청(5초) 안에 탐침과 함께 끝나게 짧게 둔다(결정 0026).
@@ -174,10 +193,37 @@ export function startBackground(deps: BackgroundDeps): void {
     },
   });
   const popups = deps.watchPopups();
+  // 디버거 관리(결정 0042). Chrome이 연결을 끊은 것은 처음 실행될 때 바로 듣는다. 실행 기능(캡처)과 탭마다 켜고 끄는 기능(활성
+  // 상태 유지)이 함께 쓴다.
+  const debuggers = createDebuggerManager({
+    attach: deps.attachDebugger,
+    detach: deps.detachDebugger,
+    send: deps.sendDebuggerCommand,
+    record,
+  });
+  deps.listenDebuggerLoss(debuggers.lost);
+  // 저장·클립보드 서비스(결정 0047).
+  const files = createFileService({
+    openDocument: deps.openOffscreen,
+    closeDocument: deps.closeOffscreen,
+    request: deps.offscreenRequest,
+    download: deps.downloadFile,
+    record,
+  });
   const tasks = createTaskRunner({
     session: deps.session,
     features: deps.features,
     parts: deps.taskParts,
+    services: {
+      debuggers,
+      files,
+      tabInfo: deps.tabInfo,
+      injectScript: deps.injectScript,
+      callInjected: deps.callInjected,
+      captureVisibleTab: deps.captureVisibleTab,
+      now: deps.now,
+      record,
+    },
     randomId: deps.randomId,
     tabExists: deps.tabExists,
     badge: deps.setTabBadge,
@@ -188,14 +234,6 @@ export function startBackground(deps: BackgroundDeps): void {
     record,
   });
   const popupState = createPopupState({ store: deps.store, record });
-  // 디버거 관리(결정 0042). Chrome이 연결을 끊은 것은 처음 실행될 때 바로 듣는다.
-  const debuggers = createDebuggerManager({
-    attach: deps.attachDebugger,
-    detach: deps.detachDebugger,
-    send: deps.sendDebuggerCommand,
-    record,
-  });
-  deps.listenDebuggerLoss(debuggers.lost);
   // 탭마다 켜고 끄기(결정 0043). 탭과 창의 사건은 처음 실행될 때 바로 듣고, 켜진 탭이 있을 수 있는 동안만 듣는다. 사건은 나중에
   // 오므로 그때 tabToggles는 만들어져 있다.
   const toggleFeatures = tabToggleFeatures(deps.features);
@@ -325,7 +363,7 @@ export function startBackground(deps: BackgroundDeps): void {
         );
         return ok(answers.flat());
       }),
-      route(taskStart, (payload) => tasks.start(payload.featureId, payload.tabId)),
+      route(taskStart, (payload) => tasks.start(payload.featureId, payload.action, payload.tabId)),
       route(taskSeen, (payload) => tasks.seen(payload.tabId, payload.taskId)),
       route(tabToggleSet, (payload) =>
         tabToggles.set(payload.featureId, payload.tabIds, payload.on),
@@ -356,8 +394,12 @@ export function startBackground(deps: BackgroundDeps): void {
         record({ featureId: null, kind: 'platform' });
       });
   });
-  // 앞 서비스 워커가 남긴 작업 기록을 고치고, 기록이 없으면 탭 사건 듣기를 그만둔다(결정 0024).
+  // 앞 서비스 워커가 남긴 작업 기록을 고치고, 기록이 없으면 탭 사건 듣기를 그만둔다(결정 0024). 연 채 남은 오프스크린 문서를
+  // 닫는다(결정 0047).
   tasks.recover().catch(() => {
+    record({ featureId: null, kind: 'unexpected' });
+  });
+  files.recover().catch(() => {
     record({ featureId: null, kind: 'unexpected' });
   });
   // 탭마다 켜고 끄는 기능의 "모든 탭" 스위치를 읽기 도우미로 받는다(결정 0011의 읽는 쪽 계약). 준비 부탁은 메시지 없이 이

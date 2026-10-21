@@ -114,7 +114,11 @@ interface Options {
   readonly remember?: (category: Category) => Promise<Result<unknown, AppError>>;
   readonly currentTab?: () => Promise<Result<number | null, AppError>>;
   readonly tabStatus?: (tabId: number) => Promise<Result<TabStatus, AppError>>;
-  readonly startTask?: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
+  readonly startTask?: (
+    featureId: string,
+    action: string,
+    tabId: number,
+  ) => Promise<Result<unknown, AppError>>;
   readonly taskSeen?: (tabId: number, taskId: string) => Promise<Result<unknown, AppError>>;
   // 그 탭의 작업 기록을 처음 받는 것을 시험이 붙잡는다(task로 보낸다). 붙잡지 않으면 듣자마자 작업이 없다고 받는다.
   readonly holdTaskRead?: boolean;
@@ -587,12 +591,14 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     content: null,
     permissions: [],
     task: { timeoutMs: 10_000 },
+    actions: [{ id: 'run', name: '자막 저장' }],
   });
   const onPage = defineFeature({
     ...saveTask,
     id: 'capture',
     name: '캡처',
     content: { sites: 'all', frames: 'top' },
+    actions: [{ id: 'run', name: '캡처' }],
   });
   // 깨어났는지 스위치로 보므로 켜고 끄기 기능도 둔다.
   const withToggle = [feature, saveTask, onPage];
@@ -617,7 +623,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     ).toBe('자막을 글로 저장한다.');
     expect(button('save').hasAttribute('aria-disabled')).toBe(false);
     await click(button('save'));
-    expect(popup.starts).toHaveBeenCalledWith('save', 7);
+    expect(popup.starts).toHaveBeenCalledWith('save', 'run', 7);
   });
 
   it('N-12 서비스 워커가 깨어나기 전에는 막혀 있고 눌러도 시작하지 않는다', async () => {
@@ -672,7 +678,13 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     expect(button('save').getAttribute('aria-disabled')).toBe('true');
     await click(button('save'));
     expect(popup.starts).not.toHaveBeenCalled();
-    await popup.task({ id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' });
+    await popup.task({
+      id: 't1',
+      featureId: 'save',
+      action: 'run',
+      status: 'succeeded',
+      summary: '영상.txt',
+    });
     expect(popup.taskText()).toBe('자막 저장: 끝났다. 영상.txt');
     expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
     expect(button('save').hasAttribute('aria-disabled')).toBe(false);
@@ -681,7 +693,13 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
   it('COM-10 기대 동작 3·6 기록을 받은 직후 작업 칸을 그린 화면이 나오기 전에는 막혀 있어 눌러도 시작하지 않고, 그 뒤에 쓸 수 있다', async () => {
     const popup = await show({ features: withToggle, holdTaskRead: true });
     await popup.awake();
-    popup.taskOutsideAct({ id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' });
+    popup.taskOutsideAct({
+      id: 't1',
+      featureId: 'save',
+      action: 'run',
+      status: 'succeeded',
+      summary: '영상.txt',
+    });
     await renderedOnly();
     // 다시 그렸지만 효과는 아직이다. 받은 결과를 보인 화면이 나오기 전이라 단추는 막혀 있다.
     expect(button('save').getAttribute('aria-disabled')).toBe('true');
@@ -698,7 +716,10 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
 
   it.each([
     ['다시 연 팝업이 처음 받은 결과', [] as const],
-    ['열린 동안 끝난 결과', [{ id: 't1', featureId: 'save', status: 'running' }] as const],
+    [
+      '열린 동안 끝난 결과',
+      [{ id: 't1', featureId: 'save', action: 'run', status: 'running' }] as const,
+    ],
   ])(
     'COM-10 기대 동작 3·6 %s의 확인은 작업 칸이 그 결과를 그린 뒤에 보낸다',
     async (_name, before) => {
@@ -714,7 +735,13 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
       });
       await popup.awake();
       for (const record of before) await popup.task(record);
-      await popup.task({ id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' });
+      await popup.task({
+        id: 't1',
+        featureId: 'save',
+        action: 'run',
+        status: 'succeeded',
+        summary: '영상.txt',
+      });
       expect(shownWhenSeen).toEqual(['자막 저장: 끝났다. 영상.txt']);
     },
   );
@@ -764,6 +791,90 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     expect(button('save').hasAttribute('aria-disabled')).toBe(false);
   });
 
+  describe('결정 0046 작업 종류가 여럿이고 누를 때 스크립트를 넣는 기능', () => {
+    const shots = defineFeature({
+      ...saveTask,
+      id: 'shots',
+      name: '찍기',
+      description: '페이지를 찍는다.',
+      injectedScript: true,
+      actions: [
+        { id: 'full', name: '전체 찍기' },
+        { id: 'area', name: '영역 찍기' },
+      ],
+    });
+    const actionButton = (action: string) => {
+      const found = container.querySelector<HTMLButtonElement>(
+        `button[data-feature="shots"][data-action="${action}"]`,
+      );
+      if (found === null) throw new Error(`${action}의 단추가 없다.`);
+      return found;
+    };
+
+    it('기능 이름 아래에 작업 종류마다 단추가 있고, 누른 종류로 지금 탭에서 시작한다', async () => {
+      const popup = await show({ features: [feature, shots] });
+      await popup.awake();
+      expect(container.querySelector('.action-item .name')?.textContent).toBe('찍기');
+      expect(actionButton('full').textContent).toBe('전체 찍기');
+      expect(actionButton('area').textContent).toBe('영역 찍기');
+      await vi.waitFor(() => {
+        expect(actionButton('area').hasAttribute('aria-disabled')).toBe(false);
+      });
+      await click(actionButton('area'));
+      expect(popup.starts).toHaveBeenCalledWith('shots', 'area', 7);
+    });
+
+    it('PAGE-1.8 확장이 접근할 수 없는 탭이면 두 단추를 막고 이유를 잇는다. 새로 고치기 전의 탭(실행 틀 없음)에서는 쓸 수 있다', async () => {
+      const denied = await show({
+        features: [feature, shots],
+        tabStatus: () => Promise.resolve(ok({ page: 'denied' as const })),
+      });
+      await denied.awake();
+      await vi.waitFor(() => {
+        expect(actionButton('full').getAttribute('aria-disabled')).toBe('true');
+      });
+      expect(actionButton('area').getAttribute('aria-disabled')).toBe('true');
+      expect(container.querySelector('#feature-unavailable-shots')?.textContent).toBe(
+        '쓸 수 없음: 확장이 이 페이지에 접근할 수 없음',
+      );
+      await click(actionButton('full'));
+      expect(denied.starts).not.toHaveBeenCalled();
+    });
+
+    it('새로 고치기 전의 탭에서도 막지 않는다', async () => {
+      const popup = await show({
+        features: [feature, shots],
+        tabStatus: () => Promise.resolve(ok({ page: 'reload' as const })),
+      });
+      await popup.awake();
+      await vi.waitFor(() => {
+        expect(actionButton('full').hasAttribute('aria-disabled')).toBe(false);
+      });
+      expect(container.querySelector('#feature-unavailable-shots')).toBeNull();
+    });
+
+    it('지금 탭에서 쓸 수 있는지 답을 받기 전에는 막혀 있다', async () => {
+      const popup = await show({
+        features: [feature, shots],
+        tabStatus: () => new Promise(() => undefined),
+      });
+      await popup.awake();
+      expect(actionButton('full').getAttribute('aria-disabled')).toBe('true');
+    });
+
+    it('작업 칸과 다른 단추의 이유는 그 작업 종류의 이름으로 부른다', async () => {
+      const popup = await show({ features: [feature, saveTask, shots] });
+      await popup.awake();
+      await popup.task({ id: 't1', featureId: 'shots', action: 'area', status: 'running' });
+      expect(popup.taskText()).toBe('영역 찍기: 진행 중이다.');
+      expect(container.querySelector('#feature-unavailable-save')?.textContent).toBe(
+        '쓸 수 없음: 이 탭에서 영역 찍기 진행 중',
+      );
+      await popup.task({ id: 't1', featureId: 'shots', action: 'video', status: 'running' });
+      expect(popup.taskText()).toBe('찍기: 진행 중이다.');
+    });
+  });
+
   it('작업을 시작하지 못하면 그 이유를 알린다', async () => {
     const running = appError('unavailable', '이 탭에서 캡처 진행 중이다. 끝난 뒤 다시 한다.');
     const popup = await show({
@@ -779,7 +890,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     const popup = await show({ features: withToggle });
     await popup.awake();
     expect(popup.watchedTabs).toEqual([7]);
-    await popup.task({ id: 't1', featureId: 'save', status: 'running' });
+    await popup.task({ id: 't1', featureId: 'save', action: 'run', status: 'running' });
     expect(popup.taskText()).toBe('자막 저장: 진행 중이다.');
     for (const id of ['save', 'capture']) {
       expect(button(id).getAttribute('aria-disabled')).toBe('true');
@@ -803,8 +914,14 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
   it('끝난 결과를 보이고 그 작업 id로 확인을 한 번만 보낸다. 기록이 지워져도 팝업을 닫을 때까지 보인다', async () => {
     const popup = await show({ features: withToggle });
     await popup.awake();
-    await popup.task({ id: 't1', featureId: 'save', status: 'running' });
-    const done = { id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' } as const;
+    await popup.task({ id: 't1', featureId: 'save', action: 'run', status: 'running' });
+    const done = {
+      id: 't1',
+      featureId: 'save',
+      action: 'run',
+      status: 'succeeded',
+      summary: '영상.txt',
+    } as const;
     await popup.task(done);
     expect(popup.taskText()).toBe('자막 저장: 끝났다. 영상.txt');
     expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
@@ -830,17 +947,29 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
     ],
   ])('%s한 결과는 그 이유와 함께 보인다', async (_name, error, text) => {
     const popup = await show({ features: withToggle });
-    await popup.task({ id: 't1', featureId: 'save', status: 'failed', error });
+    await popup.task({ id: 't1', featureId: 'save', action: 'run', status: 'failed', error });
     expect(popup.taskText()).toBe(text);
     expect(popup.seens).toHaveBeenCalledExactlyOnceWith(7, 't1');
   });
 
   it('결과를 보인 뒤 새 작업이 시작되면 그 작업을 보이고, 끝나면 그 결과도 확인한다', async () => {
     const popup = await show({ features: withToggle });
-    await popup.task({ id: 't1', featureId: 'save', status: 'succeeded', summary: null });
-    await popup.task({ id: 't2', featureId: 'capture', status: 'running' });
+    await popup.task({
+      id: 't1',
+      featureId: 'save',
+      action: 'run',
+      status: 'succeeded',
+      summary: null,
+    });
+    await popup.task({ id: 't2', featureId: 'capture', action: 'run', status: 'running' });
     expect(popup.taskText()).toBe('캡처: 진행 중이다.');
-    await popup.task({ id: 't2', featureId: 'capture', status: 'succeeded', summary: null });
+    await popup.task({
+      id: 't2',
+      featureId: 'capture',
+      action: 'run',
+      status: 'succeeded',
+      summary: null,
+    });
     expect(popup.taskText()).toBe('캡처: 끝났다.');
     expect(popup.seens.mock.calls).toEqual([
       [7, 't1'],
@@ -850,7 +979,7 @@ describe('COM-10 실행 기능의 단추(결정 0024)', () => {
 
   it('진행 중이던 작업이 기록에서 사라지면(탭이 닫힘) 작업 칸을 비운다', async () => {
     const popup = await show({ features: withToggle });
-    await popup.task({ id: 't1', featureId: 'save', status: 'running' });
+    await popup.task({ id: 't1', featureId: 'save', action: 'run', status: 'running' });
     await popup.task(null);
     expect(popup.taskText()).toBe('');
   });
@@ -1277,6 +1406,7 @@ describe('COM-3 기대 동작 3 결정 0036 알림 줄은 소식의 차례를 �
     content: null,
     permissions: [],
     task: { timeoutMs: 10_000 },
+    actions: [{ id: 'run', name: '캡처' }],
   });
   const taskFailed = appError('platform', '작업 기록을 읽지 못했다.');
 

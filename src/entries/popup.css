@@ -150,7 +150,8 @@ body {
   font-weight: 600;
 }
 
-/* 실행 기능: 기능 이름이 적힌 단추(결정 0024). 막혔으면(aria-disabled) 누를 수 없음을 모양으로도 보인다. */
+/* 실행 기능: 작업 종류마다의 단추(결정 0024, 0046). 종류가 여럿이면 기능 이름을 위에 보인다. 막혔으면(aria-disabled) 누를 수
+   없음을 모양으로도 보인다. */
 .feature .action {
   padding: 2px 10px;
   font: inherit;
@@ -161,6 +162,14 @@ body {
 .feature .action[aria-disabled='true'] {
   border-style: dashed;
   cursor: not-allowed;
+}
+
+.action-item .name {
+  margin: 0 0 4px;
+}
+
+.action-item .row {
+  flex-wrap: wrap;
 }
 
 .action-item .description {

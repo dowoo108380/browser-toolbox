@@ -82,6 +82,8 @@ function fakeChrome(
       },
       // 팝업의 연결(결정 0024)은 이 시험에서 오지 않는다.
       onConnect: { addListener: () => undefined },
+      // 서비스 워커가 시작할 때 앞 서비스 워커가 남긴 오프스크린 문서를 찾는다(결정 0047). 이 시험에는 없다.
+      getContexts: () => Promise.resolve([]),
     },
     tabs: {
       query: () => Promise.resolve(tabs),

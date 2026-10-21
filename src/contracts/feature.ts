@@ -16,8 +16,9 @@ export const categories = [
 export type Category = (typeof categories)[number];
 
 // 기능이 요청하는 Chrome 권한. 기능을 만들며 필요한 것을 더한다(결정 0009). debugger: 활성 상태 유지(TAB-2)의 초점
-// 흉내와 가짜 입력(결정 0041).
-type FeaturePermission = 'debugger';
+// 흉내와 가짜 입력(결정 0041), 캡처(PAGE-1)의 전체·큰 영역 찍기. downloads, clipboardWrite: 캡처를 파일로 저장하고 클립보드에
+// 복사함(결정 0047). activeTab: 팝업을 연 탭의 보이는 화면을 디버거 없이 찍음(chrome.tabs.captureVisibleTab, 결정 0048).
+type FeaturePermission = 'debugger' | 'downloads' | 'clipboardWrite' | 'activeTab';
 
 // 사이트 전용 기능이 작용하는 사이트(결정 0029). 사이트마다 콘텐츠 스크립트 묶음 하나가 그 주소에 실리고, 모든 사이트의
 // 묶음(공통)은 그 주소에 실리지 않는다. YouTube는 그 사이트의 기능을 만들 때 더한다.
@@ -58,6 +59,22 @@ interface FeatureBase {
   readonly category: Category;
   readonly content: ContentTarget | null;
   readonly permissions: readonly FeaturePermission[];
+  // 참이면 이 기능은 누를 때 그 탭의 최상위 문서에 넣는 페이지 쪽 스크립트(features/<기능>/inject.ts, 진입점
+  // entries/inject-<기능 id>.ts)를 가진다. 빌드가 injectedScriptFile의 이름으로 묶고, 넣는 것은 그 기능의 서비스 워커 쪽이다.
+  // 모든 페이지에 싣지 않으므로 웹 페이지에 비용을 더하지 않는다(아키텍처 2장, 결정 0046). 팝업은 확장이 접근할 수 없는
+  // 탭(tab.status의 denied)에서 그 기능을 쓸 수 없다고 보인다.
+  readonly injectedScript?: true;
+}
+
+// 누를 때 넣는 페이지 쪽 스크립트의 파일 이름(빌드가 만들고 기능의 서비스 워커 쪽이 넣는다).
+export function injectedScriptFile(featureId: string): string {
+  return `inject-${featureId}.js`;
+}
+
+// 누를 때 넣은 스크립트가 확장의 격리된 세계의 전역에 두는 일의 이름(Symbol.for의 키). 서비스 워커는 이 이름으로 그 일을
+// 부른다(platform의 callInjected). 페이지 전역에는 남지 않는다(격리된 세계는 페이지와 전역을 나누지 않는다).
+export function injectedApiKey(featureId: string): string {
+  return `browser-toolbox.inject.${featureId}`;
 }
 
 // 켜 두면 계속 작용한다. 켜짐 여부와 그 밖의 설정을 저장한다(COM-1, COM-3).
@@ -69,14 +86,22 @@ export interface ToggleFeature<S extends ToggleSettings = ToggleSettings> extend
   };
 }
 
+// 실행 기능의 작업 종류 하나(결정 0046). 팝업에 단추 하나로 보이고, 작업 기록과 결과 알림이 이 이름으로 그 작업을 부른다.
+export interface ActionChoice<A extends string = string> {
+  readonly id: A;
+  readonly name: string;
+}
+
 // 누를 때 그 탭에서 작업 하나를 끝까지 한다(COM-10, 결정 0024). 작업의 일은 기능의 background.ts에 있다.
 // 지금은 설정이 없다. 설정이 필요한 실행 기능이 생기면 그때 더한다.
-export interface ActionFeature extends FeatureBase {
+export interface ActionFeature<A extends string = string> extends FeatureBase {
   readonly kind: 'action';
   readonly task: {
     // 작업 하나의 제한 시간(ms). 넘기면 일에 멈춤 신호를 보내고 timeout으로 끝낸다(quality 068).
     readonly timeoutMs: number;
   };
+  // 작업 종류(결정 0046). 하나 이상이고 id가 겹치지 않는다. 팝업은 종류마다 단추를 보이고, 작업은 그 종류로 시작한다.
+  readonly actions: readonly [ActionChoice<A>, ...ActionChoice<A>[]];
 }
 
 // 탭마다 켜고 끄기(용어집, 결정 0043). 설정의 enabled는 "모든 탭" 스위치다: 켜면 열린 탭과 앞으로 여는 탭이 모두 켜지고, 끄면
@@ -117,7 +142,7 @@ export function defineFeature<S extends ToggleSettings>(
 export function defineFeature<S extends ToggleSettings>(
   definition: ToggleFeature<S>,
 ): ToggleFeature<S>;
-export function defineFeature(definition: ActionFeature): ActionFeature;
+export function defineFeature<A extends string>(definition: ActionFeature<A>): ActionFeature<A>;
 export function defineFeature<S extends ToggleSettings>(
   definition: PageTabToggleFeature<S>,
 ): PageTabToggleFeature<S>;
@@ -130,6 +155,14 @@ export function featuresWithSettings(
   features: readonly FeatureDefinition[],
 ): readonly SettingsFeature[] {
   return features.filter((feature) => feature.kind !== 'action');
+}
+
+// 그 실행 기능의 작업 종류. 없는 id면 null이다.
+export function actionOf<A extends string>(
+  feature: ActionFeature<A>,
+  actionId: string,
+): ActionChoice<A> | null {
+  return feature.actions.find((action) => action.id === actionId) ?? null;
 }
 
 // 탭마다 켜고 끄는 기능.

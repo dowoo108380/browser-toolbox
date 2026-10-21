@@ -17,14 +17,27 @@ import {
 
 // 탭마다 작업 하나의 기록(COM-10, 결정 0012, 0024).
 
-const running = { id: 'a', featureId: 'save', status: 'running' } as const;
-const succeeded = { id: 'a', featureId: 'save', status: 'succeeded', summary: '파일.txt' } as const;
+const running = { id: 'a', featureId: 'save', action: 'run', status: 'running' } as const;
+const succeeded = {
+  id: 'a',
+  featureId: 'save',
+  action: 'run',
+  status: 'succeeded',
+  summary: '파일.txt',
+} as const;
 const failed = {
   id: 'a',
   featureId: 'save',
+  action: 'run',
   status: 'failed',
   error: appError('unavailable', '자막이 없는 영상이다.'),
 } as const;
+
+describe('작업 기록의 키', () => {
+  it('storage.session의 tasks다(시험 도구와 팝업이 이 이름으로 읽는다)', () => {
+    expect(tasksKey).toBe('tasks');
+  });
+});
 
 describe('작업 기록 읽기', () => {
   it('없으면 빈 기록이다', () => {
@@ -45,6 +58,7 @@ describe('작업 기록 읽기', () => {
     ['객체가 아님', 'x'],
     ['배열', [running]],
     ['모르는 단계', { '1': { ...running, status: 'paused' } }],
+    ['작업 종류가 없음', { '1': { id: 'a', featureId: 'save', status: 'running' } }],
     ['진행 중인데 id가 없음', { '1': { featureId: 'save', status: 'running' } }],
     ['성공인데 짧은 결과가 없음', { '1': { id: 'a', featureId: 'save', status: 'succeeded' } }],
     ['실패인데 오류가 없음', { '1': { id: 'a', featureId: 'save', status: 'failed' } }],
@@ -57,24 +71,26 @@ describe('작업 기록 읽기', () => {
 describe('작업 시작', () => {
   it('기록이 없는 탭에서 진행 중인 작업을 남기고, 다른 탭의 기록은 그대로다', () => {
     const records: TaskRecords = { '2': succeeded };
-    const started = startTask(records, 1, { id: 'b', featureId: 'copy' });
+    const started = startTask(records, 1, { id: 'b', featureId: 'copy', action: 'run' });
     expect(started).toEqual(
-      ok({ '1': { id: 'b', featureId: 'copy', status: 'running' }, '2': succeeded }),
+      ok({ '1': { id: 'b', featureId: 'copy', action: 'run', status: 'running' }, '2': succeeded }),
     );
     // 받은 기록은 고치지 않는다.
     expect(records).toEqual({ '2': succeeded });
   });
 
   it('진행 중인 작업이 있으면 시작하지 않고 그 작업을 돌려준다(COM-10.7)', () => {
-    expect(startTask({ '1': running }, 1, { id: 'b', featureId: 'copy' })).toEqual(err(running));
+    expect(startTask({ '1': running }, 1, { id: 'b', featureId: 'copy', action: 'run' })).toEqual(
+      err(running),
+    );
   });
 
   it.each([
     ['성공', succeeded],
     ['실패', failed],
   ])('끝난 이전 결과(%s)는 새 작업으로 바뀐다', (_name, previous) => {
-    expect(startTask({ '1': previous }, 1, { id: 'b', featureId: 'copy' })).toEqual(
-      ok({ '1': { id: 'b', featureId: 'copy', status: 'running' } }),
+    expect(startTask({ '1': previous }, 1, { id: 'b', featureId: 'copy', action: 'run' })).toEqual(
+      ok({ '1': { id: 'b', featureId: 'copy', action: 'run', status: 'running' } }),
     );
   });
 
@@ -210,7 +226,13 @@ describe('서비스 워커가 다시 시작할 때 고친 기록(결정 0024)', 
       '4': failed,
     };
     const recovered = recoveredTasks(records, (tabId) => tabId !== 3 && tabId !== 4, stopped);
-    const ended = { id: 'a', featureId: 'save', status: 'failed', error: stopped } as const;
+    const ended = {
+      id: 'a',
+      featureId: 'save',
+      action: 'run',
+      status: 'failed',
+      error: stopped,
+    } as const;
     expect(recovered).toEqual({ records: { '1': ended, '2': succeeded }, interrupted: [ended] });
     expect(records['1']).toEqual(running);
   });

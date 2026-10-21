@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { distPath, insecureFixtureOrigin } from './extension.ts';
@@ -34,6 +34,8 @@ export interface Popup {
 
 export interface RawChromium {
   readonly extensionId: string;
+  // 다운로드가 저장되는 폴더(프로필 안). 사용자의 다운로드 폴더를 쓰지 않는다.
+  readonly downloads: string;
   // 처음 열린 창.
   readonly windowId: number;
   // 확장의 서비스 워커에서 함수를 계산한다.
@@ -68,6 +70,8 @@ export interface RawChromium {
   readonly reloadExtension: () => Promise<void>;
   // 다른 확장을 그 폴더에서 올리고 그 id를 준다.
   readonly loadOtherExtension: (folder: string) => Promise<string>;
+  // 그 출처의 페이지가 클립보드를 읽게 한다(캡처의 복사를 보는 시험). 읽는 페이지는 초점이 있어야 한다(activate).
+  readonly grantClipboard: (origin: string) => Promise<void>;
   // 서비스 워커를 강제로 멈춘다(Chrome이 쉬는 서비스 워커를 멈춘 것과 같다). 다음 사건이 다시 깨운다.
   readonly stopServiceWorkers: () => Promise<void>;
   // 브라우저를 닫는다. 이미 닫았으면 할 일이 없다.
@@ -117,6 +121,18 @@ export async function launchRawChromium(
   // 같은 프로필로 다시 띄우면(브라우저 다시 시작) 앞 실행이 남긴 주소를 읽지 않게 먼저 지운다.
   const portFile = path.join(profileDirectory, 'DevToolsActivePort');
   rmSync(portFile, { force: true });
+  // 다운로드(캡처, PAGE-1)는 프로필 안의 폴더에 묻지 않고 저장한다. 처음 띄울 때만 적는다(다시 띄우면 Chrome이 쓴 설정을 둔다).
+  // CDP로 다운로드를 맡기면 Chrome이 확장이 준 파일 이름과 하위 폴더를 쓰지 않으므로(2026-10-21 실험) 프로필의 설정으로 한다.
+  const downloads = path.join(profileDirectory, 'downloads');
+  const preferences = path.join(profileDirectory, 'Default', 'Preferences');
+  if (!existsSync(preferences)) {
+    mkdirSync(path.dirname(preferences), { recursive: true });
+    writeFileSync(
+      preferences,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Chrome 설정 파일의 이름이다.
+      JSON.stringify({ download: { default_directory: downloads, prompt_for_download: false } }),
+    );
+  }
   const child: ChildProcess = spawn(
     chromium.executablePath(),
     [
@@ -325,6 +341,7 @@ export async function launchRawChromium(
 
   return {
     extensionId,
+    downloads,
     windowId,
     sw,
     open,
@@ -380,6 +397,12 @@ export async function launchRawChromium(
       const loaded = field(await send('Extensions.loadUnpacked', { path: folder }), 'id');
       if (typeof loaded !== 'string') throw new Error('다른 확장을 올리지 못했다.');
       return loaded;
+    },
+    grantClipboard: async (origin) => {
+      await send('Browser.grantPermissions', {
+        permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
+        origin,
+      });
     },
     stopServiceWorkers: async () => {
       // ServiceWorker 도메인은 페이지의 세션에서 쓴다(Playwright로 하는 시험과 같은 길, support/extension.ts).

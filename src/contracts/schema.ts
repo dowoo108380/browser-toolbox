@@ -20,6 +20,7 @@ export type Schema<Output = unknown> = valibot.GenericSchema<unknown, Output>;
 
 export {
   array,
+  blob,
   boolean,
   literal,
   maxValue,

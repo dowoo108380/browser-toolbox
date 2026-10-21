@@ -71,6 +71,7 @@ const action = (id: string): FeatureDefinition =>
     content: null,
     permissions: [],
     task: { timeoutMs: 1000 },
+    actions: [{ id: 'run', name: id }],
   });
 
 describe('등록 목록의 생성 규칙(결정 0004)', () => {

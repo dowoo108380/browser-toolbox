@@ -23,8 +23,22 @@ describe('manifest', () => {
     expect(manifest).not.toHaveProperty('externally_connectable');
   });
 
-  it('결정 0005·0009·0041 지금 기능에 필요한 권한만 둔다(TAB-2의 debugger, unlimitedStorage 없음)', () => {
-    expect(manifest['permissions']).toEqual(['debugger', 'scripting', 'storage']);
+  it('결정 0005·0009·0041·0047·0048 지금 기능에 필요한 권한만 둔다(TAB-2와 PAGE-1의 debugger, PAGE-1의 저장·복사와 activeTab, 공용 offscreen, unlimitedStorage 없음)', () => {
+    expect(manifest['permissions']).toEqual([
+      'activeTab',
+      'clipboardWrite',
+      'debugger',
+      'downloads',
+      'offscreen',
+      'scripting',
+      'storage',
+    ]);
+  });
+
+  it('결정 0046 누를 때 넣는 페이지 쪽 스크립트는 manifest에 싣지 않고, 웹 페이지가 확장의 파일에 닿는 길(web_accessible_resources)도 두지 않는다', () => {
+    const scripts = JSON.stringify(manifest['content_scripts']);
+    expect(scripts).not.toContain('inject-');
+    expect(manifest).not.toHaveProperty('web_accessible_resources');
   });
 
   it('결정 0004 공통 콘텐츠 스크립트를 모든 http·https 페이지(content.sites "all")의 모든 프레임에 싣는다. 최상위에서만 작용하는 기능은 실행 틀이 거른다', () => {

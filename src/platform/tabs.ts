@@ -82,6 +82,8 @@ export async function isTabActive(tabId: number): Promise<boolean> {
 export interface TabInfo {
   readonly id: number;
   readonly windowId: number;
+  // 그 창의 활성 탭인지. 창의 보이는 화면을 찍으면(captureVisibleTab) 이 탭이 찍힌다.
+  readonly active: boolean;
   // 그 창에 나와 있는 탭인지: 창의 활성 탭이거나, 활성 탭과 분할 보기(Chrome 140부터)로 나란히 놓인 탭. 분할 보기의 활성이
   // 아닌 쪽도 화면에 보이고 페이지도 보임 상태다(초점만 없다, 2026-10-21 실험). 창이 최소화되었거나 가려졌는지는 보지 않는다.
   readonly shown: boolean;
@@ -112,6 +114,7 @@ function infoOf(tab: chrome.tabs.Tab, windowTabs: readonly chrome.tabs.Tab[]): T
   return {
     id: tab.id,
     windowId: tab.windowId,
+    active: tab.active,
     shown,
     url: tab.pendingUrl ?? tab.url,
     title: tab.title,

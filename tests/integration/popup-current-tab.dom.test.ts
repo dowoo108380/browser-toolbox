@@ -55,10 +55,14 @@ const saveFeature = defineFeature({
   content: null,
   permissions: [],
   task: { timeoutMs: 60_000 },
+  actions: [{ id: 'run', name: '자막 저장' }],
 });
 const features = [sizeFeature, saveFeature];
 // 이 시험은 단추를 누르지 않는다. 서비스 워커가 실행 기능마다 일을 하나 요구해서 둔다.
-const savePart = defineTaskPart(saveFeature, () => Promise.resolve(ok({ summary: null })));
+const savePart = defineTaskPart(saveFeature, () => ({
+  run: () => Promise.resolve(ok({ summary: null })),
+  interrupted: () => Promise.resolve(),
+}));
 
 // Chrome이 지금 탭을 묻는 데 주는 답을 정하고 팝업을 연다. 팝업이 서비스 워커에 보낸 요청(종류와 내용)을 남긴다.
 async function openPopup(query: () => Promise<unknown>) {

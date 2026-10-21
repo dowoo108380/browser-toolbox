@@ -18,6 +18,9 @@ import { defineTaskPart, startBackground } from './index.ts';
 
 // 서비스 워커가 시작할 때 하는 일(결정 0011 "형식 이전과 고쳐 쓰기", quality 067).
 
+// 이 시험에서 쓰지 않는 Chrome 경계(캡처의 것, 결정 0046, 0047).
+const unused = () => Promise.resolve(err(appError('platform', '시험에서 쓰지 않는다.')));
+
 // 돌려준 함수를 부르면 설치·갱신 이벤트가 온 것처럼 한다.
 function start(
   store: KeyValueStore,
@@ -52,6 +55,13 @@ function start(
     askPage: () => Promise.resolve({ delivery: 'delivered', value: { unmet: [] } }),
     tabToggleParts: [],
     ...createFakeBrowser().deps,
+    injectScript: unused,
+    callInjected: unused,
+    captureVisibleTab: unused,
+    openOffscreen: () => Promise.resolve(ok(null)),
+    closeOffscreen: () => Promise.resolve(ok(null)),
+    offscreenRequest: unused,
+    downloadFile: unused,
   });
   return () => {
     installed();
@@ -389,15 +399,19 @@ describe('결정 0024 실행 기능의 작업(task.start)', () => {
     content: null,
     permissions: [],
     task: { timeoutMs: 1000 },
+    actions: [{ id: 'run', name: '저장' }],
   });
 
   it('요청을 그 기능의 일로 보내 작업 id로 답하고, 끝을 세션 저장소의 작업 기록에 남긴다', async () => {
     const session = createFakeStore();
     const tabs: number[] = [];
-    const part = defineTaskPart(action, ({ tabId }) => {
-      tabs.push(tabId);
-      return Promise.resolve(ok({ summary: '끝' }));
-    });
+    const part = defineTaskPart(action, () => ({
+      run: ({ tabId }) => {
+        tabs.push(tabId);
+        return Promise.resolve(ok({ summary: '끝' }));
+      },
+      interrupted: () => Promise.resolve(),
+    }));
     const request = startTestBackground({
       store: createFakeStore(),
       features: [...specs, action],
@@ -405,12 +419,12 @@ describe('결정 0024 실행 기능의 작업(task.start)', () => {
       session,
       taskParts: [part],
     });
-    expect(await request(taskStart, { featureId: 'save', tabId: 3 })).toEqual(
+    expect(await request(taskStart, { featureId: 'save', action: 'run', tabId: 3 })).toEqual(
       ok({ taskId: 'task-1' }),
     );
     await vi.waitFor(() => {
       expect(session.peek(tasksKey)).toEqual({
-        '3': { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '끝' },
+        '3': { id: 'task-1', featureId: 'save', action: 'run', status: 'succeeded', summary: '끝' },
       });
     });
     expect(tabs).toEqual([3]);
@@ -438,8 +452,12 @@ describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
     content: null,
     permissions: [],
     task: { timeoutMs: 1000 },
+    actions: [{ id: 'run', name: '저장' }],
   });
-  const part = defineTaskPart(action, () => new Promise(() => undefined));
+  const part = defineTaskPart(action, () => ({
+    run: () => new Promise(() => undefined),
+    interrupted: () => Promise.resolve(),
+  }));
 
   function startWith(session: ReturnType<typeof createFakeStore>) {
     let handlers: TabEventHandlers | undefined;
@@ -461,7 +479,7 @@ describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
 
   it('시작할 때 앞 서비스 워커가 남긴 진행 중 작업을 끝내고, 기록이 남으면 탭 사건을 듣는다', async () => {
     const session = createFakeStore({
-      [tasksKey]: { '3': { id: 'old', featureId: 'save', status: 'running' } },
+      [tasksKey]: { '3': { id: 'old', featureId: 'save', action: 'run', status: 'running' } },
     });
     const { listening } = startWith(session);
     await vi.waitFor(() => {
@@ -488,14 +506,17 @@ describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
     };
     // 멈춤 신호를 받으면 취소로 끝나는 일.
     const signals: AbortSignal[] = [];
-    const stoppable = defineTaskPart(action, ({ signal }) => {
-      signals.push(signal);
-      return new Promise((resolve) => {
-        signal.addEventListener('abort', () => {
-          resolve(err(appError('cancelled', '탭이 닫혔다.')));
+    const stoppable = defineTaskPart(action, () => ({
+      run: ({ signal }) => {
+        signals.push(signal);
+        return new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve(err(appError('cancelled', '탭이 닫혔다.')));
+          });
         });
-      });
-    });
+      },
+      interrupted: () => Promise.resolve(),
+    }));
     // Chrome처럼 듣는 동안만 탭 닫힘을 넘긴다. 듣지 않는 동안 닫힌 탭의 사건은 오지 않는다(결정 0024의 실험 6).
     const open = new Set([3]);
     let handlers: TabEventHandlers | undefined;
@@ -525,7 +546,7 @@ describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
     await vi.waitFor(() => {
       expect(listening).toBe(false);
     });
-    const started = request(taskStart, { featureId: 'save', tabId: 3 });
+    const started = request(taskStart, { featureId: 'save', action: 'run', tabId: 3 });
     await vi.waitFor(() => {
       expect(writes).toBe(1);
     });
@@ -552,7 +573,9 @@ describe('결정 0024 작업 기록과 탭 사건의 연결', () => {
       expect(listening).toEqual([false]);
     });
     await session.set({
-      [tasksKey]: { '3': { id: 'a', featureId: 'save', status: 'succeeded', summary: null } },
+      [tasksKey]: {
+        '3': { id: 'a', featureId: 'save', action: 'run', status: 'succeeded', summary: null },
+      },
     });
     handlers.removed(3);
     await vi.waitFor(() => {

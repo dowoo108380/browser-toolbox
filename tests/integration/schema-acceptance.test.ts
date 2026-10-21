@@ -359,12 +359,13 @@ describe('저장된 값의 받아들임과 거절', () => {
     );
   });
 
-  it('결정 0024 작업 기록', () => {
-    const running = { id: 't', featureId: 'f', status: 'running' };
-    const succeeded = { id: 't', featureId: 'f', status: 'succeeded', summary: null };
+  it('결정 0024 0046 작업 기록', () => {
+    const running = { id: 't', featureId: 'f', action: 'a', status: 'running' };
+    const succeeded = { id: 't', featureId: 'f', action: 'a', status: 'succeeded', summary: null };
     const failed = {
       id: 't',
       featureId: 'f',
+      action: 'a',
       status: 'failed',
       error: { kind: 'timeout', message: '시간이 넘었다.' },
     };
@@ -387,7 +388,13 @@ describe('저장된 값의 받아들임과 거절', () => {
           { 1: { ...failed, error: { ...failed.error, at: 1 } } },
           { 1: failed },
         ],
-        ['성공에 요약 없음', { 1: { id: 't', featureId: 'f', status: 'succeeded' } }, null],
+        [
+          '성공에 요약 없음',
+          { 1: { id: 't', featureId: 'f', action: 'a', status: 'succeeded' } },
+          null,
+        ],
+        ['작업 종류 없음', { 1: { id: 't', featureId: 'f', status: 'running' } }, null],
+        ['작업 종류 수', { 1: { ...running, action: 1 } }, null],
         ['모르는 단계', { 1: { ...running, status: 'done' } }, null],
         ['모르는 오류 종류', { 1: { ...failed, error: { kind: 'nope', message: 'm' } } }, null],
         ['오류 설명 없음', { 1: { ...failed, error: { kind: 'timeout' } } }, null],
@@ -675,9 +682,20 @@ describe('메시지의 받아들임과 거절', () => {
       ['목록 없음', {}, 'rejected'],
     ]);
     payloads(taskStart, [
-      ['맞는 값', { featureId: 'f', tabId: 2 }, accepted({ featureId: 'f', tabId: 2 })],
-      ['탭 1.5', { featureId: 'f', tabId: 1.5 }, 'rejected'],
-      ['기능 없음', { tabId: 2 }, 'rejected'],
+      [
+        '맞는 값',
+        { featureId: 'f', action: 'a', tabId: 2 },
+        accepted({ featureId: 'f', action: 'a', tabId: 2 }),
+      ],
+      [
+        '작업 종류 64자',
+        { featureId: 'f', action: 'a'.repeat(64), tabId: 2 },
+        accepted({ featureId: 'f', action: 'a'.repeat(64), tabId: 2 }),
+      ],
+      ['작업 종류 65자', { featureId: 'f', action: 'a'.repeat(65), tabId: 2 }, 'rejected'],
+      ['작업 종류 없음', { featureId: 'f', tabId: 2 }, 'rejected'],
+      ['탭 1.5', { featureId: 'f', action: 'a', tabId: 1.5 }, 'rejected'],
+      ['기능 없음', { action: 'a', tabId: 2 }, 'rejected'],
     ]);
     payloads(taskSeen, [
       ['맞는 값', { tabId: 2, taskId: 't' }, accepted({ tabId: 2, taskId: 't' })],

@@ -1,6 +1,6 @@
 // 확장을 설치·갱신·다시 로드한 뒤, 열린 탭의 모든 프레임에서 옛 스크립트를 정리한다(결정 0008).
 
-import { type AppError, appError, withTimeout } from '../shared/index.ts';
+import { type AppError, type Result, appError, err, ok, withTimeout } from '../shared/index.ts';
 
 interface RetireMarkers {
   readonly eventName: string;
@@ -201,4 +201,88 @@ export async function retireInAllFrames(
       }
     }),
   );
+}
+
+// 누를 때 넣는 페이지 쪽 스크립트(아키텍처 2장, 결정 0046). 그 탭의 최상위 문서의 확장의 격리된 세계에 빌드가 만든 파일을 넣는다.
+// 그 파일은 한 문서에 여러 번 넣어도 일을 하나만 둔다. 넣을 수 없는 페이지(Chrome 내부 화면, 웹 스토어, 접근을 거둔 사이트
+// 등)는 unavailable이다. 그 문서를 다 싣기를 기다리지 않는다(정리와 같은 까닭).
+export async function injectScriptFile(
+  tabId: number,
+  file: string,
+): Promise<Result<null, AppError>> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      files: [file],
+      injectImmediately: true,
+    });
+    return ok(null);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return cannotProbe.some((known) => known.test(message))
+      ? err(appError('unavailable', '확장이 이 페이지에 접근할 수 없다.'))
+      : err(appError('platform', '페이지에 스크립트를 넣지 못했다.'));
+  }
+}
+
+// 프레임 안에서 돈다. 넣은 스크립트가 격리된 세계의 전역(Symbol.for(key))에 둔 일의 method를 args로 부르고, 그 값(Promise면 끝난
+// 값)과 그때 문서의 주소를 { value, href }로 돌려준다. 일이 없으면(넣기 전, 다른 문서) { missing: true }, 일이 던지면 { thrown: true }다. executeScript는
+// 함수가 돌려준 Promise를 기다린다. Chrome이 함수 본문만 옮겨 실행하므로 바깥의 이름을 쓰지 않는다.
+function callInjectedInFrame(key?: string, method?: string, args?: readonly unknown[]): unknown {
+  if (key === undefined || method === undefined || args === undefined) return { missing: true };
+  const api: unknown = Reflect.get(globalThis, Symbol.for(key));
+  const work: unknown = typeof api === 'object' && api !== null ? Reflect.get(api, method) : null;
+  if (typeof work !== 'function') return { missing: true };
+  try {
+    return Promise.resolve(Reflect.apply(work, api, args)).then(
+      (value: unknown) => ({ value, href: location.href }),
+      () => ({ thrown: true }),
+    );
+  } catch {
+    return { thrown: true };
+  }
+}
+
+// 넣은 스크립트의 답. documentId는 그 답을 낸 문서다(Chrome이 문서마다 붙임). 같은 탭이라도 다른 문서를 실으면 달라진다. href는
+// 답할 때의 그 문서의 주소다(같은 문서 안에서도 바뀐다).
+export interface InjectedAnswer {
+  readonly documentId: string;
+  readonly href: string;
+  readonly value: unknown;
+}
+
+// 넣은 스크립트의 일을 그 탭의 최상위 문서에서 부른다. 일이 없거나(그 문서에 넣지 않음, 다른 문서로 바뀜) 그 문서가 사라졌으면
+// unavailable, 넣을 수 없는 페이지면 unavailable, 일이 던지면 unexpected다. 값의 검증은 부르는 쪽이 한다.
+export async function callInjected(
+  tabId: number,
+  key: string,
+  method: string,
+  args: readonly unknown[],
+): Promise<Result<InjectedAnswer, AppError>> {
+  const changed = appError('unavailable', '페이지가 바뀌었다.');
+  try {
+    const [frame] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: callInjectedInFrame,
+      args: [key, method, [...args]],
+      injectImmediately: true,
+    });
+    // 결과가 없거나 null이면 그 문서가 기다리는 사이에 사라진 것이다(R-27).
+    const result: unknown = frame?.result;
+    if (frame === undefined || typeof result !== 'object' || result === null) return err(changed);
+    const href: unknown = Reflect.get(result, 'href');
+    if (Reflect.has(result, 'value') && typeof href === 'string') {
+      const value: unknown = Reflect.get(result, 'value');
+      return ok({ documentId: frame.documentId, href, value });
+    }
+    if (Reflect.has(result, 'thrown')) {
+      return err(appError('unexpected', '페이지에 넣은 스크립트가 일을 끝내지 못했다.'));
+    }
+    return err(changed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return cannotProbe.some((known) => known.test(message))
+      ? err(changed)
+      : err(appError('platform', '페이지에 넣은 스크립트를 부르지 못했다.'));
+  }
 }

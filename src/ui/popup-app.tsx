@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type {
-  ActionFeature,
-  Category,
-  FeatureDefinition,
-  TabRuntime,
-  TabStatus,
-  TabToggleFeature,
-  ToggleFeature,
+import {
+  type ActionChoice,
+  type ActionFeature,
+  type Category,
+  type FeatureDefinition,
+  type TabRuntime,
+  type TabStatus,
+  type TabToggleFeature,
+  type ToggleFeature,
+  actionOf,
 } from '../contracts/index.ts';
 import type { PopupAnnouncement, RequestError, TabInfo } from '../platform/index.ts';
 import { type AppError, type Result, appError, err, isWebPage } from '../shared/index.ts';
@@ -79,8 +81,12 @@ interface PopupProps {
   // 그 탭에서 페이지에 작용하는 기능을 쓸 수 있는지, 외부 화면에 기대한 것이 어긋난 기능이 있는지 서비스 워커에 묻는다(결정
   // 0023, 0026, 0034).
   readonly tabStatus: (tabId: number) => Promise<Result<TabStatus, AppError>>;
-  // 그 탭에서 실행 기능의 작업을 시작한다(결정 0024). 진행과 결과는 작업 기록으로 받는다.
-  readonly startTask: (featureId: string, tabId: number) => Promise<Result<unknown, AppError>>;
+  // 그 탭에서 실행 기능의 그 작업 종류(결정 0046)로 작업을 시작한다(결정 0024). 진행과 결과는 작업 기록으로 받는다.
+  readonly startTask: (
+    featureId: string,
+    action: string,
+    tabId: number,
+  ) => Promise<Result<unknown, AppError>>;
   // 그 탭의 작업 기록을 받는다(storage.session, 결정 0024).
   readonly watchTask: (tabId: number, handlers: TaskWatchHandlers) => () => void;
   // 그 탭의 끝난 작업(작업 id)을 보였다고 서비스 워커에 알린다(결정 0012).
@@ -314,6 +320,12 @@ export function PopupApp({
 
   const nameOf = (featureId: string) =>
     features.find((feature) => feature.id === featureId)?.name ?? featureId;
+  // 작업의 이름은 그 작업 종류의 이름이다(결정 0046). 이 판이 모르는 종류면 기능 이름이다.
+  const taskNameOf = (record: Pick<TaskRecord, 'featureId' | 'action'>) => {
+    const feature = features.find((candidate) => candidate.id === record.featureId);
+    const action = feature?.kind === 'action' ? actionOf(feature, record.action) : null;
+    return action?.name ?? nameOf(record.featureId);
+  };
 
   const selectCategory = (next: Category) => {
     setCategory(next);
@@ -514,24 +526,24 @@ export function PopupApp({
     reportResult(order, await setTabToggle(feature.id, tabIds, on));
   };
 
-  // 지금 탭에서 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
-  const run = async (feature: ActionFeature) => {
+  // 지금 탭에서 그 종류의 작업을 시작한다. 시작하지 못하면 이유를 알린다(예: 이 탭에서 다른 작업이 진행 중).
+  const run = async (feature: ActionFeature, action: ActionChoice) => {
     if (tabId === null) return;
     const order = nextOrder();
-    const result = await startTask(feature.id, tabId);
+    const result = await startTask(feature.id, action.id, tabId);
     reportResult(order, result);
   };
 
   // 실행 단추를 쓸 수 있는 때(결정 0024): 서비스 워커가 깨어났고(N-12), 지금 탭을 알고, 그 탭의 작업 기록을 처음 받았고,
-  // 받은 기록을 작업 칸에 보인 화면이 나왔고(위), 페이지에 작용하는 기능이면 그 탭에서 쓸 수 있는지 답도 받았다. 답을 받기
-  // 전에 누르면 쓸 수 없는 페이지에서 작업을 시작해, 막힌 단추와 이유 대신 실패를 보인다. 답을 받지 못했으면 이유 없이
-  // 연다(결정 0023).
+  // 받은 기록을 작업 칸에 보인 화면이 나왔고(위), 페이지에 작용하는 기능(실행 틀을 쓰거나 누를 때 스크립트를 넣는 기능, 결정
+  // 0046)이면 그 탭에서 쓸 수 있는지 답도 받았다. 답을 받기 전에 누르면 쓸 수 없는 페이지에서 작업을 시작해, 막힌 단추와 이유
+  // 대신 실패를 보인다. 답을 받지 못했으면 이유 없이 연다(결정 0023).
   const actionReady = (feature: ActionFeature) =>
     awake &&
     tabId !== null &&
     task.latest !== undefined &&
     drawnTask === task &&
-    (feature.content === null || tabState !== undefined);
+    ((feature.content === null && feature.injectedScript !== true) || tabState !== undefined);
 
   // 기능 항목은 종류마다 다르다: 켜고 끄기는 스위치(와 그 기능의 화면 조각), 실행은 단추다.
   const itemOf = (feature: FeatureDefinition, settings: Snapshot) => {
@@ -585,13 +597,13 @@ export function PopupApp({
             key={feature.id}
             feature={feature}
             waiting={!actionReady(feature)}
-            onRun={() => {
-              void run(feature);
+            onRun={(action) => {
+              void run(feature, action);
             }}
             unavailable={
               running === null
                 ? unavailableReason(feature, tabState ?? null)
-                : strings.unavailable(strings.runningHere(nameOf(running.featureId)))
+                : strings.unavailable(strings.runningHere(taskNameOf(running)))
             }
           />
         );
@@ -618,7 +630,7 @@ export function PopupApp({
 
   return (
     <main ref={root}>
-      <TaskStatus task={task.shown} nameOf={nameOf} />
+      <TaskStatus task={task.shown} nameOf={taskNameOf} />
       {stored === null || !categoryRead ? (
         <p>{notice?.message ?? strings.loading}</p>
       ) : (

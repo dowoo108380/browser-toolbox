@@ -11,7 +11,13 @@ import path from 'node:path';
 import { type BuildOptions, type Plugin, build } from 'esbuild';
 import { features as productFeatures } from '../src/features/list.ts';
 import { pageScriptBudgetBytes } from './budgets.ts';
-import { createManifest, mainWorldFeatures, minimumChromeVersion } from './manifest.ts';
+import { injectedScriptFile } from '../src/contracts/index.ts';
+import {
+  createManifest,
+  injectedFeatures,
+  mainWorldFeatures,
+  minimumChromeVersion,
+} from './manifest.ts';
 import { assertUniqueFeatureIds, contentBundles, syncGenerated } from './registry.ts';
 
 // dist/에 압축 해제된 확장을 만든다(결정 0002, 아키텍처 10장).
@@ -88,6 +94,7 @@ const builds: BuildOptions[] = [
     entryPoints: {
       sw: 'src/entries/sw.ts',
       popup: 'src/entries/popup.tsx',
+      offscreen: 'src/entries/offscreen.ts',
     },
     format: 'esm',
   },
@@ -114,6 +121,17 @@ const builds: BuildOptions[] = [
     ),
     format: 'iife',
   },
+  // 누를 때 그 탭에 넣는 페이지 쪽 스크립트(아키텍처 2장, 결정 0046). 기능마다 파일 하나다.
+  {
+    ...common,
+    entryPoints: Object.fromEntries(
+      injectedFeatures(features).map((feature) => [
+        injectedScriptFile(feature.id).replace(/.js$/, ''),
+        `src/entries/inject-${feature.id}.ts`,
+      ]),
+    ),
+    format: 'iife',
+  },
 ];
 
 for (const options of builds) await build(options);
@@ -122,6 +140,7 @@ for (const options of builds) await build(options);
 for (const file of [
   ...contentBundles(features).map((bundle) => `content-${bundle}.js`),
   ...mainWorldFeatures(features).map((feature) => `main-${feature.id}.js`),
+  ...injectedFeatures(features).map((feature) => injectedScriptFile(feature.id)),
 ]) {
   const size = statSync(path.join(outdir, file)).size;
   if (size > pageScriptBudgetBytes) {
@@ -132,7 +151,7 @@ for (const file of [
   console.log(`${file}: ${String(size)}바이트(예산 ${String(pageScriptBudgetBytes)})`);
 }
 
-for (const file of ['popup.html', 'popup.css']) {
+for (const file of ['popup.html', 'popup.css', 'offscreen.html', 'clipboard.png']) {
   copyFileSync(path.join(root, 'src', 'entries', file), path.join(outdir, file));
 }
 copyFileSync(path.join(root, 'LICENSE'), path.join(outdir, 'LICENSE'));

@@ -33,6 +33,8 @@ function fixtureFeature(id: string, name: string): ActionFeature {
     content: null,
     permissions: [],
     task: { timeoutMs: 20_000 },
+    // 작업 종류 하나. 단추에는 기능 이름을 쓴다(결정 0046).
+    actions: [{ id: 'run', name }],
   });
 }
 
@@ -81,5 +83,9 @@ function waitForRelease(featureId: string, signal: AbortSignal): Promise<TaskOut
 }
 
 export const fixtureParts: readonly TaskPart[] = [fixtureTask, fixtureOther].map((feature) =>
-  defineTaskPart(feature, ({ signal }) => waitForRelease(feature.id, signal)),
+  defineTaskPart(feature, () => ({
+    run: ({ signal }) => waitForRelease(feature.id, signal),
+    // 일은 서비스 워커의 메모리에서만 기다린다. 남기는 Chrome 상태가 없다.
+    interrupted: () => Promise.resolve(),
+  })),
 );

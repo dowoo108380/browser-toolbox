@@ -12,7 +12,7 @@ import {
   tasksKey,
 } from '../storage/index.ts';
 import type { Problem } from './problems.ts';
-import { type TaskContext, type TaskPart, defineTaskPart } from './task-part.ts';
+import { type TaskContext, type TaskPart, type TaskServices, defineTaskPart } from './task-part.ts';
 import { createTaskRunner } from './tasks.ts';
 
 // 실행 기능의 작업 실행(COM-10, 결정 0012, 0024). 저장소는 가짜이고, 일의 끝은 시험이 정한다.
@@ -31,9 +31,15 @@ const save = defineFeature({
   content: null,
   permissions: [],
   task: { timeoutMs: 10_000 },
+  actions: [{ id: 'run', name: '자막 저장' }],
 });
 
-const copy = defineFeature({ ...save, id: 'copy', name: 'URL 복사' });
+const copy = defineFeature({
+  ...save,
+  id: 'copy',
+  name: 'URL 복사',
+  actions: [{ id: 'run', name: 'URL 복사' }],
+});
 
 const toggle = defineFeature({
   id: 'speed',
@@ -48,22 +54,50 @@ const toggle = defineFeature({
 });
 
 // 시험이 끝을 정하는 일. 부를 때마다 받은 것을 남기고, finish로 끝낸다.
+// 서비스 워커가 다시 시작할 때 치우라고 부른 탭(interrupted)도 남긴다.
 function controlledPart(feature: typeof save) {
   const calls: { context: TaskContext; finish: (outcome: TaskOutcome) => void }[] = [];
-  const part = defineTaskPart(
-    feature,
-    (context) =>
+  const interrupted: number[] = [];
+  const part = defineTaskPart(feature, () => ({
+    run: (context) =>
       new Promise<TaskOutcome>((resolve) => {
         calls.push({ context, finish: resolve });
       }),
-  );
+    interrupted: (tabId) => {
+      interrupted.push(tabId);
+      return Promise.resolve();
+    },
+  }));
   const call = (index: number) => {
     const found = calls[index];
     if (found === undefined) throw new Error(`일이 ${String(index + 1)}번 불리지 않았다.`);
     return found;
   };
-  return { part, calls, call };
+  return { part, calls, call, interrupted };
 }
+
+// 이 시험의 일은 서비스를 쓰지 않는다. 부르면 결함이다.
+const unusedServices: TaskServices = {
+  debuggers: {
+    acquire: () => Promise.reject(new Error('쓰지 않는다')),
+    release: () => undefined,
+    discard: () => undefined,
+    send: () => Promise.reject(new Error('쓰지 않는다')),
+    onLost: () => undefined,
+    lost: () => undefined,
+  },
+  files: {
+    save: () => Promise.reject(new Error('쓰지 않는다')),
+    copyImage: () => Promise.reject(new Error('쓰지 않는다')),
+    recover: () => Promise.resolve(),
+  },
+  tabInfo: () => Promise.reject(new Error('쓰지 않는다')),
+  injectScript: () => Promise.reject(new Error('쓰지 않는다')),
+  callInjected: () => Promise.reject(new Error('쓰지 않는다')),
+  captureVisibleTab: () => Promise.reject(new Error('쓰지 않는다')),
+  now: () => 0,
+  record: () => undefined,
+};
 
 // 배지와 탭 사건 듣기는 시험이 받아 둔다.
 function setup(
@@ -87,6 +121,7 @@ function setup(
   const notices: [number, string][] = [];
   let ids = 0;
   const runner = createTaskRunner({
+    services: unusedServices,
     session,
     features: [toggle, save, copy],
     parts: options.parts ?? [saving.part, copying.part],
@@ -144,15 +179,23 @@ const storeFailures = [
 ] as const;
 
 // 끝났고 아직 보지 않은 작업 기록.
-const unseen = { id: 'a', featureId: 'save', status: 'succeeded', summary: null } as const;
+const unseen = {
+  id: 'a',
+  featureId: 'save',
+  action: 'run',
+  status: 'succeeded',
+  summary: null,
+} as const;
 
 const unavailable = (message: string): AppError => appError('unavailable', message);
 
 describe('작업 시작', () => {
   it('진행 중을 남기고 작업 id로 답한 뒤, 그 탭 id로 일을 시작한다', async () => {
     const { runner, saving, records } = setup();
-    expect(await runner.start('save', 4)).toEqual(ok({ taskId: 't1' }));
-    expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+    expect(await runner.start('save', 'run', 4)).toEqual(ok({ taskId: 't1' }));
+    expect(records()).toEqual({
+      '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+    });
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
@@ -163,7 +206,7 @@ describe('작업 시작', () => {
   it('실행 기능이 아니거나 모르는 기능이면 시작하지 않는다(invalid-input)', async () => {
     const { runner, records } = setup();
     for (const featureId of ['speed', 'nothing']) {
-      const result = await runner.start(featureId, 4);
+      const result = await runner.start(featureId, 'run', 4);
       expect(result.ok ? null : result.error.kind).toBe('invalid-input');
     }
     expect(records()).toBeUndefined();
@@ -171,34 +214,43 @@ describe('작업 시작', () => {
 
   it('탭이 없으면 시작하지 않는다(unavailable)', async () => {
     const { runner, records } = setup({ tabExists: () => Promise.resolve(false) });
-    expect(await runner.start('save', 4)).toEqual(err(unavailable('작업을 시작할 탭이 없다.')));
+    expect(await runner.start('save', 'run', 4)).toEqual(
+      err(unavailable('작업을 시작할 탭이 없다.')),
+    );
     expect(records()).toBeUndefined();
   });
 
   it('COM-10.7 그 탭에서 작업이 진행 중이면 다른 작업도 같은 작업도 시작하지 않고 이유에 진행 중인 기능 이름을 담는다', async () => {
     const { runner, copying, records } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     const reason = err(unavailable('이 탭에서 자막 저장 진행 중이다. 끝난 뒤 다시 한다.'));
-    expect(await runner.start('copy', 4)).toEqual(reason);
-    expect(await runner.start('save', 4)).toEqual(reason);
+    expect(await runner.start('copy', 'run', 4)).toEqual(reason);
+    expect(await runner.start('save', 'run', 4)).toEqual(reason);
     expect(copying.calls).toHaveLength(0);
-    expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+    expect(records()).toEqual({
+      '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+    });
   });
 
   it('겹쳐 온 시작 요청도 하나만 시작한다(줄에서 차례로 판단)', async () => {
     const { runner, records } = setup();
-    const results = await Promise.all([runner.start('save', 4), runner.start('copy', 4)]);
+    const results = await Promise.all([
+      runner.start('save', 'run', 4),
+      runner.start('copy', 'run', 4),
+    ]);
     expect(results.map((result) => result.ok)).toEqual([true, false]);
-    expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+    expect(records()).toEqual({
+      '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+    });
   });
 
   it('다른 탭에서는 따로 시작한다', async () => {
     const { runner, records } = setup();
-    await runner.start('save', 4);
-    expect(await runner.start('copy', 5)).toEqual(ok({ taskId: 't2' }));
+    await runner.start('save', 'run', 4);
+    expect(await runner.start('copy', 'run', 5)).toEqual(ok({ taskId: 't2' }));
     expect(records()).toEqual({
-      '4': { id: 't1', featureId: 'save', status: 'running' },
-      '5': { id: 't2', featureId: 'copy', status: 'running' },
+      '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+      '5': { id: 't2', featureId: 'copy', action: 'run', status: 'running' },
     });
   });
 
@@ -206,7 +258,7 @@ describe('작업 시작', () => {
     const { runner, saving, records, problems, listening } = setup({
       tabExists: () => Promise.reject(new Error('tabs')),
     });
-    const result = await runner.start('save', 4);
+    const result = await runner.start('save', 'run', 4);
     expect(result.ok ? null : result.error.kind).toBe('platform');
     expect(records()).toBeUndefined();
     expect(saving.calls).toHaveLength(0);
@@ -220,6 +272,7 @@ describe('작업 시작', () => {
     const session = { ...fake, set: () => Promise.reject(new Error('quota')) };
     const saving = controlledPart(save);
     const runner = createTaskRunner({
+      services: unusedServices,
       session,
       features: [save],
       parts: [saving.part],
@@ -232,7 +285,7 @@ describe('작업 시작', () => {
       notify: () => Promise.resolve('delivered' as const),
       record: () => undefined,
     });
-    const result = await runner.start('save', 4);
+    const result = await runner.start('save', 'run', 4);
     expect(result.ok ? null : result.error.kind).toBe('platform');
     expect(saving.calls).toHaveLength(0);
   });
@@ -240,8 +293,10 @@ describe('작업 시작', () => {
   it('읽은 기록의 모양이 틀리면 unexpected로 기록하고 빈 기록에서 다시 시작한다', async () => {
     const session = createFakeStore({ [tasksKey]: { '9': { status: 'odd' } } });
     const { runner, problems, records } = setup({ session });
-    expect(await runner.start('save', 4)).toEqual(ok({ taskId: 't1' }));
-    expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+    expect(await runner.start('save', 'run', 4)).toEqual(ok({ taskId: 't1' }));
+    expect(records()).toEqual({
+      '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+    });
     expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
   });
 });
@@ -249,14 +304,20 @@ describe('작업 시작', () => {
 describe('작업 끝남', () => {
   it('성공하면 짧은 결과를 남기고 문제로 기록하지 않는다', async () => {
     const { runner, saving, records, problems } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
     saving.call(0).finish(ok({ summary: '영상.txt' }));
     await vi.waitFor(() => {
       expect(records()).toEqual({
-        '4': { id: 't1', featureId: 'save', status: 'succeeded', summary: '영상.txt' },
+        '4': {
+          id: 't1',
+          featureId: 'save',
+          action: 'run',
+          status: 'succeeded',
+          summary: '영상.txt',
+        },
       });
     });
     expect(problems).toEqual([]);
@@ -273,7 +334,7 @@ describe('작업 끝남', () => {
     '실패(%s)를 남기고, 상황을 알리는 종류가 아니면 그 기능으로 문제 기록에 남긴다(%s)',
     async (kind, recorded) => {
       const { runner, saving, records, problems } = setup();
-      await runner.start('save', 4);
+      await runner.start('save', 'run', 4);
       await vi.waitFor(() => {
         expect(saving.calls).toHaveLength(1);
       });
@@ -281,7 +342,7 @@ describe('작업 끝남', () => {
       saving.call(0).finish(err(error));
       await vi.waitFor(() => {
         expect(records()).toEqual({
-          '4': { id: 't1', featureId: 'save', status: 'failed', error },
+          '4': { id: 't1', featureId: 'save', action: 'run', status: 'failed', error },
         });
       });
       expect(problems).toEqual(recorded ? [{ featureId: 'save', kind }] : []);
@@ -289,14 +350,18 @@ describe('작업 끝남', () => {
   );
 
   it('일이 던지면 unexpected로 끝내고 기록한다', async () => {
-    const throwing = defineTaskPart(save, () => Promise.reject(new Error('boom')));
+    const throwing = defineTaskPart(save, () => ({
+      run: () => Promise.reject(new Error('boom')),
+      interrupted: () => Promise.resolve(),
+    }));
     const { runner, records, problems } = setup({ parts: [throwing, controlledPart(copy).part] });
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(records()).toEqual({
         '4': {
           id: 't1',
           featureId: 'save',
+          action: 'run',
           status: 'failed',
           error: appError('unexpected', '작업 중에 예상하지 못한 오류가 났다.'),
         },
@@ -308,7 +373,7 @@ describe('작업 끝남', () => {
   it('제한 시간을 넘기면 일에 멈춤 신호를 보내고 timeout으로 끝내며, 늦게 온 결과는 버린다', async () => {
     vi.useFakeTimers();
     const { runner, saving, records, problems } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
@@ -317,6 +382,7 @@ describe('작업 끝남', () => {
       '4': {
         id: 't1',
         featureId: 'save',
+        action: 'run',
         status: 'failed',
         error: appError('timeout', '10초 안에 끝나지 않아 멈췄다.'),
       },
@@ -336,13 +402,15 @@ describe('작업 끝남', () => {
     async (_, operation) => {
       const { session, broken } = breakableStore();
       const { runner, saving, records, problems } = setup({ session });
-      await runner.start('save', 4);
+      await runner.start('save', 'run', 4);
       broken[operation] = true;
       await finishLast(saving, ok({ summary: null }));
       await vi.waitFor(() => {
         expect(problems).toEqual([{ featureId: 'save', kind: 'platform' }]);
       });
-      expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+      expect(records()).toEqual({
+        '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+      });
     },
   );
 
@@ -351,7 +419,7 @@ describe('작업 끝남', () => {
     const { runner, saving, problems } = setup({
       notify: () => Promise.reject(new Error('boom')),
     });
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
       expect(problems).toEqual([{ featureId: 'save', kind: 'unexpected' }]);
@@ -360,21 +428,23 @@ describe('작업 끝남', () => {
 
   it('그 탭의 기록이 바뀐 뒤(예: 지워짐)에 온 결과는 버리고 문제로 기록하지 않는다', async () => {
     const { runner, saving, session, records, problems } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
     session.replace(tasksKey, {});
     saving.call(0).finish(err(appError('platform', '탭이 닫혔다.')));
     // 줄이 빌 때까지 기다린다: 같은 줄에 선 다음 시작이 끝나면 앞의 끝도 처리되었다.
-    await runner.start('copy', 5);
-    expect(records()).toEqual({ '5': { id: 't2', featureId: 'copy', status: 'running' } });
+    await runner.start('copy', 'run', 5);
+    expect(records()).toEqual({
+      '5': { id: 't2', featureId: 'copy', action: 'run', status: 'running' },
+    });
     expect(problems).toEqual([]);
   });
 
   it('끝난 뒤에는 그 탭에서 새 작업을 시작하고 이전 결과는 새 작업으로 바뀐다', async () => {
     const { runner, saving, copying, records } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
@@ -382,8 +452,10 @@ describe('작업 끝남', () => {
     await vi.waitFor(() => {
       expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
     });
-    expect(await runner.start('copy', 4)).toEqual(ok({ taskId: 't2' }));
-    expect(records()).toEqual({ '4': { id: 't2', featureId: 'copy', status: 'running' } });
+    expect(await runner.start('copy', 'run', 4)).toEqual(ok({ taskId: 't2' }));
+    expect(records()).toEqual({
+      '4': { id: 't2', featureId: 'copy', action: 'run', status: 'running' },
+    });
     await vi.waitFor(() => {
       expect(copying.calls).toHaveLength(1);
     });
@@ -393,7 +465,7 @@ describe('작업 끝남', () => {
 describe('결과 확인(task.seen, 결정 0012)', () => {
   async function finished() {
     const context = setup();
-    await context.runner.start('save', 4);
+    await context.runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(context.saving.calls).toHaveLength(1);
     });
@@ -414,16 +486,20 @@ describe('결과 확인(task.seen, 결정 0012)', () => {
 
   it('COM-10.8 다음 작업이 시작된 뒤 늦게 닿은 확인은 그 작업을 지우지 않는다', async () => {
     const { runner, records } = await finished();
-    await runner.start('copy', 4);
+    await runner.start('copy', 'run', 4);
     expect(await runner.seen(4, 't1')).toEqual(ok(null));
-    expect(records()).toEqual({ '4': { id: 't2', featureId: 'copy', status: 'running' } });
+    expect(records()).toEqual({
+      '4': { id: 't2', featureId: 'copy', action: 'run', status: 'running' },
+    });
   });
 
   it('진행 중인 작업의 확인은 아무것도 하지 않는다', async () => {
     const { runner, records } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     expect(await runner.seen(4, 't1')).toEqual(ok(null));
-    expect(records()).toEqual({ '4': { id: 't1', featureId: 'save', status: 'running' } });
+    expect(records()).toEqual({
+      '4': { id: 't1', featureId: 'save', action: 'run', status: 'running' },
+    });
   });
 
   it.each(storeFailures)(
@@ -458,6 +534,7 @@ describe('결과 확인(task.seen, 결정 0012)', () => {
 describe('실행 기능과 일의 짝(quality 066)', () => {
   const start = (parts: readonly TaskPart[]) => () =>
     createTaskRunner({
+      services: unusedServices,
       session: createFakeStore(),
       features: [toggle, save],
       parts,
@@ -507,7 +584,7 @@ const failedBadge: TabBadge = {
 describe('배지와 제목은 기록에서 계산한다(결정 0012, 0024)', () => {
   it('시작하면 그 탭의 배지를 지우고, 끝나면 성공·실패를 달며, 보면 다시 지운다', async () => {
     const { runner, saving, badges } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     expect(badges).toEqual([[4, null]]);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
@@ -519,7 +596,7 @@ describe('배지와 제목은 기록에서 계산한다(결정 0012, 0024)', () 
     await runner.seen(4, 't1');
     expect(badges.at(-1)).toEqual([4, null]);
 
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, err(appError('unavailable', '자막이 없다.')));
     await vi.waitFor(() => {
       expect(badges.at(-1)).toEqual([4, failedBadge]);
@@ -529,7 +606,7 @@ describe('배지와 제목은 기록에서 계산한다(결정 0012, 0024)', () 
   it('탭이 다른 문서로 이동하면 끝났고 보지 않은 결과의 배지를 다시 단다. 진행 중이거나 기록이 없으면 달지 않는다', async () => {
     const { runner, saving, badges } = setup();
     await runner.tabNavigated(4);
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await runner.tabNavigated(4);
     expect(badges).toEqual([[4, null]]);
     await finishLast(saving, ok({ summary: null }));
@@ -558,7 +635,7 @@ describe('배지와 제목은 기록에서 계산한다(결정 0012, 0024)', () 
     const { runner, saving, records, problems } = setup({
       badge: () => Promise.reject(new Error('action')),
     });
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
       expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
@@ -576,7 +653,7 @@ describe('배지와 제목은 기록에서 계산한다(결정 0012, 0024)', () 
 describe('탭 사건은 기록이 있는 동안만 듣는다(결정 0024)', () => {
   it('기록을 쓸 때마다 기록이 있는지에 따라 듣거나 그만둔다', async () => {
     const { runner, saving, listening } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     // 시작은 탭이 있는지 보기 전에 듣기 시작하고, 진행 중을 쓴 뒤에도 듣는다.
     expect(listening).toEqual([true, true]);
     await finishLast(saving, ok({ summary: null }));
@@ -596,14 +673,14 @@ describe('탭 사건은 기록이 있는 동안만 듣는다(결정 0024)', () =
         return Promise.resolve(false);
       },
     });
-    await missing.runner.start('save', 4);
+    await missing.runner.start('save', 'run', 4);
     expect(listeningWhenChecked).toEqual([true]);
     expect(missing.listening).toEqual([true, false]);
 
     // 진행 중인 작업이 있어 시작하지 않으면 기록이 있으므로 계속 듣는다.
     const busy = setup();
-    await busy.runner.start('save', 4);
-    await busy.runner.start('copy', 4);
+    await busy.runner.start('save', 'run', 4);
+    await busy.runner.start('copy', 'run', 4);
     expect(busy.listening).toEqual([true, true, true, true]);
 
     // 기록을 쓰지 못하면 쓰기 전의 기록(없음)에 맞춰 그만둔다.
@@ -611,7 +688,7 @@ describe('탭 사건은 기록이 있는 동안만 듣는다(결정 0024)', () =
     const unwritable = setup({
       session: { ...fake, set: () => Promise.reject(new Error('quota')) },
     });
-    expect((await unwritable.runner.start('save', 4)).ok).toBe(false);
+    expect((await unwritable.runner.start('save', 'run', 4)).ok).toBe(false);
     expect(unwritable.listening).toEqual([true, false]);
   });
 });
@@ -619,18 +696,22 @@ describe('탭 사건은 기록이 있는 동안만 듣는다(결정 0024)', () =
 describe('COM-10.6 탭이 닫힘', () => {
   it('그 탭의 기록을 지우고 진행 중이던 일에 멈춤 신호를 보낸다. 늦게 온 결과는 버리고 문제로 기록하지 않는다', async () => {
     const { runner, saving, records, problems, badges, listening } = setup();
-    await runner.start('save', 4);
-    await runner.start('copy', 5);
+    await runner.start('save', 'run', 4);
+    await runner.start('copy', 'run', 5);
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
     await runner.tabRemoved(4);
     expect(saving.call(0).context.signal.aborted).toBe(true);
-    expect(records()).toEqual({ '5': { id: 't2', featureId: 'copy', status: 'running' } });
+    expect(records()).toEqual({
+      '5': { id: 't2', featureId: 'copy', action: 'run', status: 'running' },
+    });
     saving.call(0).finish(err(appError('platform', '탭이 없다.')));
     // 줄이 빌 때까지 기다린다: 같은 줄에 선 다음 일이 끝나면 앞의 끝도 처리되었다.
     await runner.tabRemoved(9);
-    expect(records()).toEqual({ '5': { id: 't2', featureId: 'copy', status: 'running' } });
+    expect(records()).toEqual({
+      '5': { id: 't2', featureId: 'copy', action: 'run', status: 'running' },
+    });
     expect(problems).toEqual([]);
     // 닫힌 탭에는 배지를 달지 않는다. 기록이 남아 있으므로 계속 듣는다.
     expect(badges).toEqual([
@@ -642,7 +723,7 @@ describe('COM-10.6 탭이 닫힘', () => {
 
   it('끝난 결과만 있던 탭이 닫혀도 지우고, 기록이 없어지면 듣기를 그만둔다', async () => {
     const { runner, saving, records, listening } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
       expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
@@ -679,12 +760,18 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
   );
 
   it('앞 서비스 워커의 진행 중 작업은 끝내고 실패 배지를 달며 기록한다. 닫힌 탭의 기록은 지우고 끝난 결과는 그대로 두며 그 배지를 다시 단다', async () => {
-    const done = { id: 'b', featureId: 'copy', status: 'succeeded', summary: null } as const;
+    const done = {
+      id: 'b',
+      featureId: 'copy',
+      action: 'run',
+      status: 'succeeded',
+      summary: null,
+    } as const;
     const session = createFakeStore({
       [tasksKey]: {
-        '4': { id: 'a', featureId: 'save', status: 'running' },
+        '4': { id: 'a', featureId: 'save', action: 'run', status: 'running' },
         '5': done,
-        '6': { id: 'c', featureId: 'save', status: 'running' },
+        '6': { id: 'c', featureId: 'save', action: 'run', status: 'running' },
       },
     });
     const { runner, records, problems, badges, listening } = setup({
@@ -693,7 +780,7 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     });
     await runner.recover();
     expect(records()).toEqual({
-      '4': { id: 'a', featureId: 'save', status: 'failed', error: interrupted },
+      '4': { id: 'a', featureId: 'save', action: 'run', status: 'failed', error: interrupted },
       '5': done,
     });
     expect(problems).toEqual([{ featureId: 'save', kind: 'unexpected' }]);
@@ -703,7 +790,7 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
     ]);
     expect(listening).toEqual([true]);
     // 끝낸 작업이 있던 탭에서 다시 시작할 수 있다.
-    expect((await runner.start('copy', 4)).ok).toBe(true);
+    expect((await runner.start('copy', 'run', 4)).ok).toBe(true);
   });
 
   it('고칠 것이 없으면 쓰지 않고, 기록이 없으면 배지를 건드리지 않고 탭 사건 듣기를 그만둔다', async () => {
@@ -718,7 +805,9 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
 
   it('끝난 결과만 있으면 쓰지 않고 듣기를 이어 가며, 앞 서비스 워커가 배지를 바꾸기 전에 멈췄을 수 있어 그 배지를 다시 단다(결정 0038)', async () => {
     const session = createFakeStore({
-      [tasksKey]: { '4': { id: 'a', featureId: 'save', status: 'succeeded', summary: null } },
+      [tasksKey]: {
+        '4': { id: 'a', featureId: 'save', action: 'run', status: 'succeeded', summary: null },
+      },
     });
     const writes = vi.spyOn(session, 'set');
     const { runner, listening, badges } = setup({ session });
@@ -749,7 +838,7 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
   });
 
   it('탭이 열려 있는지 묻지 못하면 platform으로 기록하고 고치지 않으며 듣기를 그대로 둔다', async () => {
-    const running = { id: 'a', featureId: 'save', status: 'running' } as const;
+    const running = { id: 'a', featureId: 'save', action: 'run', status: 'running' } as const;
     const session = createFakeStore({ [tasksKey]: { '4': running } });
     const writes = vi.spyOn(session, 'set');
     const { runner, problems, listening, badges } = setup({
@@ -764,13 +853,162 @@ describe('서비스 워커가 다시 시작함(결정 0024)', () => {
   });
 
   it('고친 기록을 쓰지 못하면 platform으로 기록하고, 끝내지 못한 작업은 다음 시작에 고칠 때 기록한다', async () => {
-    const running = { id: 'a', featureId: 'save', status: 'running' } as const;
+    const running = { id: 'a', featureId: 'save', action: 'run', status: 'running' } as const;
     const { session, broken } = breakableStore({ [tasksKey]: { '4': running } });
     const { runner, records, problems } = setup({ session });
     broken.set = true;
     await runner.recover();
     expect(problems).toEqual([{ featureId: null, kind: 'platform' }]);
     expect(records()).toEqual({ '4': running });
+  });
+
+  it('결정 0038 0046 진행 중이던 작업은 그 기능의 일이 그 탭에 남긴 상태를 먼저 치운 뒤 기록을 끝낸다(열린 탭만)', async () => {
+    const session = createFakeStore({
+      [tasksKey]: {
+        '4': { id: 'a', featureId: 'save', action: 'run', status: 'running' },
+        '5': { id: 'b', featureId: 'copy', action: 'run', status: 'succeeded', summary: null },
+        '6': { id: 'c', featureId: 'save', action: 'run', status: 'running' },
+      },
+    });
+    const order: string[] = [];
+    const watched: FakeStore = {
+      ...session,
+      set: (items) => {
+        order.push('write');
+        return session.set(items);
+      },
+    };
+    const cleaning = defineTaskPart(save, () => ({
+      run: () => new Promise<TaskOutcome>(() => undefined),
+      interrupted: (tabId) => {
+        order.push(`interrupted:${String(tabId)}`);
+        return Promise.resolve();
+      },
+    }));
+    const copying = controlledPart(copy);
+    const { runner } = setup({
+      session: watched,
+      parts: [cleaning, copying.part],
+      tabExists: (tabId) => Promise.resolve(tabId !== 6),
+    });
+    await runner.recover();
+    expect(order).toEqual(['interrupted:4', 'write']);
+    expect(copying.interrupted).toEqual([]);
+  });
+
+  it('결정 0038 치우기가 한도 안에 끝나지 않으면 기록하고 기록을 끝낸다', async () => {
+    vi.useFakeTimers();
+    const stuck = defineTaskPart(save, () => ({
+      run: () => new Promise<TaskOutcome>(() => undefined),
+      interrupted: () => new Promise<void>(() => undefined),
+    }));
+    const session = createFakeStore({
+      [tasksKey]: { '4': { id: 'a', featureId: 'save', action: 'run', status: 'running' } },
+    });
+    const { runner, records, problems } = setup({
+      session,
+      parts: [stuck, controlledPart(copy).part],
+    });
+    const recovering = runner.recover();
+    await vi.advanceTimersByTimeAsync(5000);
+    await recovering;
+    expect(problems).toContainEqual({ featureId: 'save', kind: 'timeout' });
+    expect(records()).toMatchObject({ '4': { status: 'failed' } });
+  });
+
+  it('치우다 던지면 기록하고 기록을 끝낸다', async () => {
+    const throwing = defineTaskPart(save, () => ({
+      run: () => new Promise<TaskOutcome>(() => undefined),
+      interrupted: () => Promise.reject(new Error('치우지 못함')),
+    }));
+    const session = createFakeStore({
+      [tasksKey]: { '4': { id: 'a', featureId: 'save', action: 'run', status: 'running' } },
+    });
+    const { runner, records, problems } = setup({
+      session,
+      parts: [throwing, controlledPart(copy).part],
+    });
+    await runner.recover();
+    expect(problems[0]).toEqual({ featureId: 'save', kind: 'unexpected' });
+    expect(records()).toMatchObject({ '4': { status: 'failed' } });
+  });
+});
+
+describe('결정 0046 작업 종류', () => {
+  const several = defineFeature({
+    ...save,
+    id: 'capture',
+    name: '캡처',
+    actions: [
+      { id: 'full', name: '전체 캡처' },
+      { id: 'area', name: '영역 캡처' },
+    ],
+  });
+
+  function severalSetup() {
+    const calls: TaskContext[] = [];
+    const finishes: ((outcome: TaskOutcome) => void)[] = [];
+    const part = defineTaskPart(several, () => ({
+      run: (context) =>
+        new Promise<TaskOutcome>((resolve) => {
+          calls.push(context);
+          finishes.push(resolve);
+        }),
+      interrupted: () => Promise.resolve(),
+    }));
+    const badges: [number, TabBadge | null][] = [];
+    const notices: [number, string][] = [];
+    const runner = createTaskRunner({
+      services: unusedServices,
+      session: createFakeStore(),
+      features: [several],
+      parts: [part],
+      randomId: () => 't1',
+      tabExists: () => Promise.resolve(true),
+      badge: (tabId, badge) => {
+        badges.push([tabId, badge]);
+        return Promise.resolve();
+      },
+      listenTabs: () => undefined,
+      popupViewing: () => false,
+      isTabActive: () => Promise.resolve(true),
+      notify: (tabId, text) => {
+        notices.push([tabId, text]);
+        return Promise.resolve('delivered');
+      },
+      record: () => undefined,
+    });
+    return { runner, calls, finishes, badges, notices };
+  }
+
+  it('그 기능의 작업 종류로 일을 부른다', async () => {
+    const { runner, calls } = severalSetup();
+    expect(await runner.start('capture', 'area', 4)).toEqual(ok({ taskId: 't1' }));
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]?.action).toBe('area');
+  });
+
+  it('그 기능에 없는 작업 종류는 시작하지 않는다', async () => {
+    const { runner, calls } = severalSetup();
+    expect(await runner.start('capture', 'video', 4)).toEqual(
+      err(appError('invalid-input', '그 기능에 없는 작업이라 시작할 수 없다.')),
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('배지의 제목과 페이지 위 알림은 그 작업 종류의 이름으로 부른다', async () => {
+    const { runner, finishes, badges, notices } = severalSetup();
+    await runner.start('capture', 'full', 4);
+    await vi.waitFor(() => {
+      expect(finishes).toHaveLength(1);
+    });
+    finishes[0]?.(ok({ summary: '저장했다.' }));
+    await vi.waitFor(() => {
+      expect(notices).toEqual([[4, '전체 캡처: 끝났다. 저장했다.']]);
+    });
+    expect(badges.at(-1)?.[1]?.title).toBe('Browser Toolbox: 전체 캡처 끝남');
   });
 });
 
@@ -796,8 +1034,14 @@ describe('이슈 #7 서비스 워커가 작업 기록과 배지 사이에서 멈
   // 본다. 탭 6은 닫혔다.
   const openTabs = [4, 5] as const;
   const closedTab = 6;
-  const other: TaskRecord = { id: 'b', featureId: 'copy', status: 'succeeded', summary: null };
-  const running: TaskRecord = { id: 'a', featureId: 'save', status: 'running' };
+  const other: TaskRecord = {
+    id: 'b',
+    featureId: 'copy',
+    action: 'run',
+    status: 'succeeded',
+    summary: null,
+  };
+  const running: TaskRecord = { id: 'a', featureId: 'save', action: 'run', status: 'running' };
 
   // 서비스 워커를 Chrome API 호출의 차례(0부터)의 앞이나 뒤에서 멈춘다. 뒤에서 멈추면 그 호출은 Chrome에 닿았다.
   interface StopPoint {
@@ -836,6 +1080,7 @@ describe('이슈 #7 서비스 워커가 작업 기록과 배지 사이에서 멈
       const saving = controlledPart(save);
       let ids = 0;
       const runner = createTaskRunner({
+        services: unusedServices,
         session: {
           ...session,
           get: (key) => call(() => session.get(key)),
@@ -881,7 +1126,7 @@ describe('이슈 #7 서비스 워커가 작업 기록과 배지 사이에서 멈
       records: { '5': other },
       badges: [[5, expectedOf(other)]],
       run: async ({ runner, saving }) => {
-        await runner.start('save', 4);
+        await runner.start('save', 'run', 4);
         saving.call(0).finish(ok({ summary: null }));
         await settle();
       },
@@ -902,7 +1147,7 @@ describe('이슈 #7 서비스 워커가 작업 기록과 배지 사이에서 멈
         [4, expectedOf(unseen)],
         [5, expectedOf(other)],
       ],
-      run: ({ runner }) => runner.start('copy', 4),
+      run: ({ runner }) => runner.start('copy', 'run', 4),
     },
     {
       name: '탭이 다른 문서로 이동해 Chrome이 지운 배지를 다시 닮',
@@ -964,7 +1209,7 @@ describe('이슈 #7 서비스 워커가 작업 기록과 배지 사이에서 멈
 describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
   it('그 탭을 보는 팝업이 없고 창의 지금 탭이면 끝난 결과를 그 탭에 보낸다', async () => {
     const { runner, saving, notices } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: '영상.txt' }));
     await vi.waitFor(() => {
       expect(notices).toEqual([[4, '자막 저장: 끝났다. 영상.txt']]);
@@ -982,7 +1227,7 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
     ],
   ])('실패(%o)는 그 이유를 담는다', async (error, text) => {
     const { runner, saving, notices } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, err(error));
     await vi.waitFor(() => {
       expect(notices).toEqual([[4, text]]);
@@ -995,12 +1240,12 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
       { isTabActive: () => Promise.resolve(false) },
     ]) {
       const { runner, saving, notices, records } = setup(options);
-      await runner.start('save', 4);
+      await runner.start('save', 'run', 4);
       await finishLast(saving, ok({ summary: null }));
       await vi.waitFor(() => {
         expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
       });
-      await runner.start('copy', 5);
+      await runner.start('copy', 'run', 5);
       expect(notices).toEqual([]);
     }
   });
@@ -1009,7 +1254,7 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
     const { runner, saving, notices, problems, badges } = setup({
       isTabActive: () => Promise.reject(new Error('tabs')),
     });
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
       expect(problems).toEqual([{ featureId: 'save', kind: 'platform' }]);
@@ -1020,13 +1265,13 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
 
   it('끝을 쓰지 않은 결과(탭이 닫힘)는 보내지 않는다', async () => {
     const { runner, saving, notices } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await vi.waitFor(() => {
       expect(saving.calls).toHaveLength(1);
     });
     await runner.tabRemoved(4);
     saving.call(0).finish(ok({ summary: null }));
-    await runner.start('copy', 5);
+    await runner.start('copy', 'run', 5);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(notices).toEqual([]);
   });
@@ -1046,7 +1291,7 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
           return Promise.resolve(delivery);
         },
       });
-      await runner.start('save', 4);
+      await runner.start('save', 'run', 4);
       await finishLast(saving, ok({ summary: null }));
       await vi.waitFor(() => {
         expect(sent).toHaveLength(1);
@@ -1058,18 +1303,18 @@ describe('COM-10 기대 동작 4 페이지 위 알림(결정 0024)', () => {
 
   it('알림이 늦게 답해도 다른 탭의 시작과 확인은 기다리지 않는다(줄 밖에서 보낸다)', async () => {
     const { runner, saving, records } = setup({ notify: () => new Promise(() => undefined) });
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: null }));
     await vi.waitFor(() => {
       expect(records()).toMatchObject({ '4': { status: 'succeeded' } });
     });
-    expect(await runner.start('copy', 5)).toEqual(ok({ taskId: 't2' }));
+    expect(await runner.start('copy', 'run', 5)).toEqual(ok({ taskId: 't2' }));
     expect(await runner.seen(4, 't1')).toEqual(ok(null));
   });
 
   it('글이 길면 알림의 한도에서 자른다', async () => {
     const { runner, saving, notices } = setup();
-    await runner.start('save', 4);
+    await runner.start('save', 'run', 4);
     await finishLast(saving, ok({ summary: '가'.repeat(600) }));
     await vi.waitFor(() => {
       expect(notices).toHaveLength(1);

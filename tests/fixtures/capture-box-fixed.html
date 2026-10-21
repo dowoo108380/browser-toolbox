@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 펼쳐지지 않는 상자</title>
+    <!--
+      늘려도 펼쳐지지 않는 상자(PAGE-1.13) 시험 페이지. capture-box.html과 같되 스크롤 상자의 높이가 화면 높이와 상관없이 600px로
+      정해져 있다(화면 대부분을 차지한다).
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      .app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      .top {
+        flex: none;
+        height: 60px;
+        background: #000;
+      }
+      .row {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      .side {
+        flex: none;
+        width: 200px;
+        background: #888;
+      }
+      .box {
+        flex: 1;
+        height: 600px;
+        align-self: flex-start;
+        overflow-y: auto;
+      }
+      .sticky {
+        position: sticky;
+        top: 0;
+        height: 40px;
+        background: #123456;
+      }
+      .composer {
+        position: sticky;
+        bottom: 0;
+        height: 100px;
+        background: #654321;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="top"></div>
+      <div class="row">
+        <div class="side"></div>
+        <div class="box" id="box">
+          <div class="sticky"></div>
+          <div class="band" style="height: 400px; background: #e6194b"></div>
+          <div class="band" style="height: 400px; background: #3cb44b"></div>
+          <div class="band" style="height: 400px; background: #ffe119"></div>
+          <div class="band" style="height: 400px; background: #4363d8"></div>
+          <div class="band" style="height: 400px; background: #f58231"></div>
+          <div class="band" style="height: 400px; background: #911eb4"></div>
+          <div class="band" style="height: 400px; background: #42d4f4"></div>
+          <div class="band" style="height: 400px; background: #f032e6"></div>
+          <div class="band" style="height: 400px; background: #bfef45"></div>
+          <div class="band" style="height: 400px; background: #fabed4"></div>
+          <div class="band" style="height: 400px; background: #469990"></div>
+          <div class="band" style="height: 400px; background: #dcbeff"></div>
+          <div class="composer"></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

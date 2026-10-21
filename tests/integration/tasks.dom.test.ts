@@ -35,6 +35,7 @@ function actionFeature(id: string, name: string): ActionFeature {
     content: null,
     permissions: [],
     task: { timeoutMs: 60_000 },
+    actions: [{ id: 'run', name }],
   });
 }
 
@@ -57,13 +58,13 @@ const features = [subtitleSize, save, copy];
 // 시험이 끝을 정하는 일. 불린 차례대로 끝낸다.
 function controlled(feature: ActionFeature) {
   const pending: ((outcome: TaskOutcome) => void)[] = [];
-  const part: TaskPart = defineTaskPart(
-    feature,
-    () =>
+  const part: TaskPart = defineTaskPart(feature, () => ({
+    run: () =>
       new Promise<TaskOutcome>((resolve) => {
         pending.push(resolve);
       }),
-  );
+    interrupted: () => Promise.resolve(),
+  }));
   return {
     part,
     finish: async (outcome: TaskOutcome) => {
@@ -193,7 +194,13 @@ async function leaveUnseenResult(extension: ReturnType<typeof startExtension>) {
   await first.run('save');
   first.close();
   await extension.saving.finish(ok({ summary: '영상.txt' }));
-  const unseen = { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '영상.txt' };
+  const unseen = {
+    id: 'task-1',
+    featureId: 'save',
+    action: 'run',
+    status: 'succeeded',
+    summary: '영상.txt',
+  };
   await vi.waitFor(() => {
     expect(records(extension.session)).toEqual({ '1': unseen });
   });
@@ -214,7 +221,13 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
     // 팝업이 닫힌 동안 끝난 결과는 기록에 남아 있다(아직 보지 않음).
     await vi.waitFor(() => {
       expect(records(extension.session)).toEqual({
-        '1': { id: 'task-1', featureId: 'save', status: 'succeeded', summary: '영상.txt' },
+        '1': {
+          id: 'task-1',
+          featureId: 'save',
+          action: 'run',
+          status: 'succeeded',
+          summary: '영상.txt',
+        },
       });
     });
 
@@ -346,7 +359,11 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
       expect(popup.reason('copy')).toBe('쓸 수 없음: 이 탭에서 자막 저장 진행 중');
     });
     expect(popup.button('copy').getAttribute('aria-disabled')).toBe('true');
-    const direct = await extension.request(taskStart, { featureId: 'copy', tabId: 1 });
+    const direct = await extension.request(taskStart, {
+      featureId: 'copy',
+      action: 'run',
+      tabId: 1,
+    });
     expect(direct).toEqual(
       err({
         ...appError('unavailable', '이 탭에서 자막 저장 진행 중이다. 끝난 뒤 다시 한다.'),
@@ -354,7 +371,7 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
       }),
     );
     expect(records(extension.session)).toEqual({
-      '1': { id: 'task-1', featureId: 'save', status: 'running' },
+      '1': { id: 'task-1', featureId: 'save', action: 'run', status: 'running' },
     });
   });
 
@@ -380,7 +397,7 @@ describe('COM-10 작업 결과 알림(실제 팝업과 서비스 워커)', () =>
     await first.run('copy');
     await vi.waitFor(() => {
       expect(records(extension.session)).toEqual({
-        '1': { id: 'task-2', featureId: 'copy', status: 'running' },
+        '1': { id: 'task-2', featureId: 'copy', action: 'run', status: 'running' },
       });
     });
     releaseSeen();

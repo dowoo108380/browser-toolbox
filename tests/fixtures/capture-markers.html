@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 표식</title>
+    <!--
+      전체·영역 캡처(PAGE-1) 시험 페이지. 높이 5000px에 500px마다 색이 다른 띠(표식)가 있고, 화면 위에 고정 헤더(60px,
+      검정)가 있다. 띠의 색은 tests/e2e/support/capture.ts의 bandColors와 같은 차례다.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      header {
+        position: fixed;
+        inset: 0 0 auto;
+        height: 60px;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <header></header>
+    <div class="band" style="height: 500px; background: #e6194b"></div>
+    <div class="band" style="height: 500px; background: #3cb44b"></div>
+    <div class="band" style="height: 500px; background: #ffe119"></div>
+    <div class="band" style="height: 500px; background: #4363d8"></div>
+    <div class="band" style="height: 500px; background: #f58231"></div>
+    <div class="band" style="height: 500px; background: #911eb4"></div>
+    <div class="band" style="height: 500px; background: #42d4f4"></div>
+    <div class="band" style="height: 500px; background: #f032e6"></div>
+    <div class="band" style="height: 500px; background: #bfef45"></div>
+    <div class="band" style="height: 500px; background: #fabed4"></div>
+  </body>
+</html>

@@ -167,6 +167,46 @@ describe('자원 범위', () => {
     });
   });
 
+  describe('화면 그리기 예약(결정 0048)', () => {
+    const nextFrame = () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+
+    it('다음 화면 그리기 전에 한 번 부르고, 먼저 취소하거나 범위를 닫으면 부르지 않는다', async () => {
+      const { scope } = setup();
+      const fired = vi.fn();
+      const cancelled = vi.fn();
+      const closed = vi.fn();
+      scope.animationFrame(fired);
+      const cancel = scope.animationFrame(cancelled);
+      const inner = scope.child();
+      inner.animationFrame(closed);
+      cancel();
+      inner.close();
+      await nextFrame();
+      expect(fired).toHaveBeenCalledTimes(1);
+      expect(cancelled).not.toHaveBeenCalled();
+      expect(closed).not.toHaveBeenCalled();
+    });
+
+    it('부른 뒤에는 범위의 정리에 남지 않고, 콜백의 예외는 알린다', async () => {
+      const { scope, errors } = setup();
+      const cancel = vi.spyOn(window, 'cancelAnimationFrame');
+      scope.animationFrame(() => {
+        throw new Error('그리기 콜백 실패');
+      });
+      await nextFrame();
+      expect(errors).toHaveLength(1);
+      const before = cancel.mock.calls.length;
+      scope.close();
+      expect(cancel.mock.calls.length).toBe(before);
+      cancel.mockRestore();
+    });
+  });
+
   describe('닫힌 범위에서는 관찰을 새로 시작하지 않는다', () => {
     // 닫힌 뒤에는 콜백이 불리지 않으므로 콜백으로는 구별되지 않는다. 브라우저에 관찰이 등록되는지를 본다.
     afterEach(() => {

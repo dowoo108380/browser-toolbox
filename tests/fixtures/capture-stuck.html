@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>캡처 시험: 끝나지 않는 이미지</title>
+    <!--
+      불러오기가 끝나지 않는 이미지(PAGE-1.11) 시험 페이지. 화면 안의 이미지 주소에 서버가 답하지 않는다(tests/server.ts의 /stall/).
+      높이 2000px이라 전체 캡처가 문서를 늘렸다 되돌린다.
+    -->
+    <style>
+      body {
+        margin: 0;
+      }
+      main {
+        height: 2000px;
+        background: #3cb44b;
+      }
+      img {
+        display: block;
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+  </head>
+  <body>
+    <main><img alt="" src="/stall/never.png" /></main>
+  </body>
+</html>

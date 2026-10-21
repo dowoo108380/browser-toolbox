@@ -30,6 +30,9 @@ export interface Scope {
   ) => ScopedMutationObserver;
   // 정한 시간(ms) 뒤에 콜백을 한 번 부른다. 돌려준 함수는 부르기 전이면 취소한다.
   readonly timeout: (delayMs: number, callback: () => void | Promise<void>) => () => void;
+  // 다음 화면 그리기 직전에 콜백을 한 번 부른다(requestAnimationFrame. 캡처의 영역 고르기가 처음 씀, 결정 0048). 돌려준 함수는
+  // 부르기 전이면 취소한다. 숨겨진 문서에서는 Chrome이 부르지 않는다.
+  readonly animationFrame: (callback: () => void | Promise<void>) => () => void;
 }
 
 interface ScopedMutationObserver {
@@ -144,6 +147,18 @@ function makeScope(context: ScopeOptions, detachFromParent: (() => void) | null)
       }, delayMs);
       release = defer(() => {
         window.clearTimeout(timer);
+      });
+      return release;
+    },
+    animationFrame: (callback) => {
+      const guarded = guard(callback);
+      let release = (): void => undefined;
+      const frame = window.requestAnimationFrame(() => {
+        release();
+        guarded();
+      });
+      release = defer(() => {
+        window.cancelAnimationFrame(frame);
       });
       return release;
     },

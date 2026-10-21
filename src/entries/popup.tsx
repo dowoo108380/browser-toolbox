@@ -57,7 +57,7 @@ render(
     rememberCategory={(category) => request(popupRemember, { category })}
     currentTab={currentTabId}
     tabStatus={(tabId) => request(tabStatus, { tabId })}
-    startTask={(featureId, tabId) => request(taskStart, { featureId, tabId })}
+    startTask={(featureId, action, tabId) => request(taskStart, { featureId, action, tabId })}
     watchTask={(tabId, handlers) => watchTask(session, tabId, handlers)}
     taskSeen={(tabId, taskId) => request(taskSeen, { tabId, taskId })}
     announceTab={announcePopup}

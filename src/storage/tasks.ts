@@ -9,12 +9,19 @@ import { type AppError, type Result, appError, err, errorKinds, ok } from '../sh
 
 export const tasksKey = 'tasks';
 
-// 단계마다 그 단계의 값만 둔다(quality 055). 취소는 실패의 한 종류(오류 종류 cancelled)다.
+// 단계마다 그 단계의 값만 둔다(quality 055). 취소는 실패의 한 종류(오류 종류 cancelled)다. action은 그 기능의 작업 종류의
+// id다(결정 0046). 화면은 그 종류의 이름으로 작업을 부른다.
 export type TaskRecord =
-  | { readonly id: string; readonly featureId: string; readonly status: 'running' }
   | {
       readonly id: string;
       readonly featureId: string;
+      readonly action: string;
+      readonly status: 'running';
+    }
+  | {
+      readonly id: string;
+      readonly featureId: string;
+      readonly action: string;
       readonly status: 'succeeded';
       // 짧은 결과(예: 저장한 파일 이름). 페이지 주소, 쿠키, 자막 본문은 넣지 않는다(COM-10 기대 동작 2).
       readonly summary: string | null;
@@ -22,6 +29,7 @@ export type TaskRecord =
   | {
       readonly id: string;
       readonly featureId: string;
+      readonly action: string;
       readonly status: 'failed';
       readonly error: AppError;
     };
@@ -34,16 +42,23 @@ export type TaskOutcome = Result<{ readonly summary: string | null }, AppError>;
 const errorSchema = v.object({ kind: v.picklist(errorKinds), message: v.string() });
 
 const recordSchema: v.Schema<TaskRecord> = v.union([
-  v.object({ id: v.string(), featureId: v.string(), status: v.literal('running') }),
   v.object({
     id: v.string(),
     featureId: v.string(),
+    action: v.string(),
+    status: v.literal('running'),
+  }),
+  v.object({
+    id: v.string(),
+    featureId: v.string(),
+    action: v.string(),
     status: v.literal('succeeded'),
     summary: v.nullable(v.string()),
   }),
   v.object({
     id: v.string(),
     featureId: v.string(),
+    action: v.string(),
     status: v.literal('failed'),
     error: errorSchema,
   }),
@@ -70,7 +85,7 @@ export function taskOf(records: TaskRecords, tabId: number): TaskRecord | null {
 export function startTask(
   records: TaskRecords,
   tabId: number,
-  task: { readonly id: string; readonly featureId: string },
+  task: { readonly id: string; readonly featureId: string; readonly action: string },
 ): Result<TaskRecords, TaskRecord> {
   const current = taskOf(records, tabId);
   if (current?.status === 'running') return err(current);
@@ -87,10 +102,10 @@ export function finishTask(
 ): TaskRecords | null {
   const current = taskOf(records, tabId);
   if (current?.status !== 'running' || current.id !== id) return null;
-  const { featureId } = current;
+  const { featureId, action } = current;
   const finished: TaskRecord = outcome.ok
-    ? { id, featureId, status: 'succeeded', summary: outcome.value.summary }
-    : { id, featureId, status: 'failed', error: outcome.error };
+    ? { id, featureId, action, status: 'succeeded', summary: outcome.value.summary }
+    : { id, featureId, action, status: 'failed', error: outcome.error };
   return { ...records, [keyOf(tabId)]: finished };
 }
 
@@ -115,6 +130,7 @@ export function recoveredTasks(
       const failed: TaskRecord = {
         id: task.id,
         featureId: task.featureId,
+        action: task.action,
         status: 'failed',
         error,
       };

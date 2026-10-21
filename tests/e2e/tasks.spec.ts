@@ -165,7 +165,7 @@ test('COM-10.7 작업이 진행 중인 탭의 팝업은 다른 작업 기능에 
 
   const direct: unknown = await opened.popup.evaluate(
     ({ type, payload }) => chrome.runtime.sendMessage({ type, payload }),
-    { type: taskStart.type, payload: { featureId: fixtureOther.id, tabId } },
+    { type: taskStart.type, payload: { featureId: fixtureOther.id, action: 'run', tabId } },
   );
   expect(direct).toEqual({
     ok: false,
@@ -190,14 +190,16 @@ test('COM-10.8 결과를 본 확인이 다음 작업을 시작한 뒤에 닿아�
 
   const first = v.safeParse(
     responseSchema(taskStart.value),
-    await send(taskStart.type, { featureId: fixtureTask.id, tabId }),
+    await send(taskStart.type, { featureId: fixtureTask.id, action: 'run', tabId }),
   );
   if (!first.success || !first.output.ok) throw new Error('첫 작업을 시작하지 못했다.');
   const { taskId } = first.output.value;
   await release(worker, fixtureTask.id, 'succeed');
   await expect.poll(() => badgeOf(worker, tabId)).toMatchObject({ text: '✓' });
   // 결과를 본 팝업이 확인을 보내기 전에 같은 탭에서 다음 작업이 시작되었다.
-  expect(await send(taskStart.type, { featureId: fixtureOther.id, tabId })).toMatchObject({
+  expect(
+    await send(taskStart.type, { featureId: fixtureOther.id, action: 'run', tabId }),
+  ).toMatchObject({
     ok: true,
   });
   await expect.poll(() => badgeOf(worker, tabId)).toEqual({ text: '', title: defaultTitle });
