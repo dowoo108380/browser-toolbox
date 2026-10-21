@@ -91,6 +91,18 @@ describe('페이지 활성 상태 유지의 페이지 쪽', () => {
     ]);
   });
 
+  it('TAB-2.18 숨은 채 시작한 최상위 프레임은 듣기를 건 뒤 지금의 숨김을 한 번 알린다(켜는 순간 이미 가려진 창). 보이는 채 시작하면 알리지 않는다', async () => {
+    visibility = 'hidden';
+    const hidden = start(true);
+    await Promise.resolve();
+    expect(hidden.sent).toEqual([{ name: hiddenCommand.name, payload: { hidden: true } }]);
+    hidden.scope.close();
+    visibility = 'visible';
+    const shown = start(true);
+    await Promise.resolve();
+    expect(shown.sent).toEqual([]);
+  });
+
   it('TAB-2.11 최상위 프레임은 가짜 입력을 보낼 안전한 두 점으로 답한다. 지난번 두 점이 안전하면 그대로다', () => {
     const top = start(true);
     const answer = top.answers.get(pointCommand.name);
@@ -103,9 +115,9 @@ describe('페이지 활성 상태 유지의 페이지 쪽', () => {
     expect(answer({ keep })).toEqual(ok({ pair: keep }));
   });
 
-  it('iframe에서는 방패만 켜고 숨김을 넘기거나 점에 답하지 않는다', async () => {
-    const inner = start(false);
+  it('iframe에서는 방패만 켜고 숨김을 넘기거나(숨은 채 시작해도) 점에 답하지 않는다', async () => {
     visibility = 'hidden';
+    const inner = start(false);
     document.dispatchEvent(new Event(visibilityNoticeEventName));
     await Promise.resolve();
     expect(inner.sent).toEqual([]);

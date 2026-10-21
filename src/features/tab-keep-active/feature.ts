@@ -36,7 +36,8 @@ const pairSchema = v.object({ first: pointSchema, second: pointSchema });
 
 export type SafePair = v.InferOutput<typeof pairSchema>;
 
-// 최상위 프레임의 페이지 쪽이 서비스 워커 쪽에 알린다: 켜진 이 탭의 문서가 실제로 숨김이 되었다(hidden) 또는 다시 보인다.
+// 최상위 프레임의 페이지 쪽이 서비스 워커 쪽에 알린다: 켜진 이 탭의 문서가 실제로 숨김이 되었거나 숨은 채 켜졌다(hidden), 또는
+// 다시 보인다.
 // 페이지 쪽 방패가 페이지에는 숨기지만, 보는 탭인데 숨김이면 창이 가려진 것이라 디버거를 붙인다(결정 0041).
 export const hiddenCommand = defineCommand({
   featureId: tabKeepActive.id,
