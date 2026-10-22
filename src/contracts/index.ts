@@ -30,6 +30,7 @@ export {
   type TabState,
   type TabStatus,
   type UnmetReason,
+  appErrorSchema,
   elementRefSchema,
   featureCommand,
   noticeTextLimit,

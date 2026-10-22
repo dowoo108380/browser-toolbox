@@ -1,6 +1,6 @@
-import { v } from '../contracts/index.ts';
+import { appErrorSchema, v } from '../contracts/index.ts';
 import type { KeyValueStore } from '../platform/index.ts';
-import { type AppError, type Result, appError, err, errorKinds, ok } from '../shared/index.ts';
+import { type AppError, type Result, appError, err, ok } from '../shared/index.ts';
 
 // 탭마다 작업 하나의 기록(COM-10, 결정 0012, 0024). storage.session의 tasks 키 하나에 탭 id(문자열) → 그 탭의 작업으로
 // 둔다. 쓰는 곳은 서비스 워커 하나다. storage.session은 확장을 다시 불러오거나 갱신하거나 브라우저를 다시 시작하면 비므로
@@ -39,8 +39,6 @@ export type TaskRecords = Readonly<Record<string, TaskRecord>>;
 // 작업의 일이 돌려준 끝.
 export type TaskOutcome = Result<{ readonly summary: string | null }, AppError>;
 
-const errorSchema = v.object({ kind: v.picklist(errorKinds), message: v.string() });
-
 const recordSchema: v.Schema<TaskRecord> = v.union([
   v.object({
     id: v.string(),
@@ -60,7 +58,7 @@ const recordSchema: v.Schema<TaskRecord> = v.union([
     featureId: v.string(),
     action: v.string(),
     status: v.literal('failed'),
-    error: errorSchema,
+    error: appErrorSchema,
   }),
 ]);
 

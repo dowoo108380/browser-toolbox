@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeStore } from '../platform/fake.ts';
-import { type AppError, appError, err, ok } from '../shared/index.ts';
+import { type AppError, appError, err, errorKinds, ok } from '../shared/index.ts';
 import {
   type TaskRecord,
   type TaskRecords,
@@ -54,6 +54,20 @@ describe('작업 기록 읽기', () => {
     expect(parseTasks(records)).toEqual(records);
   });
 
+  // 실패의 오류는 요청의 응답과 같은 정의(contracts의 appErrorSchema)로 읽는다. 그 정의가 바뀌어도 작업 기록의 저장 형식은
+  // 그대로인지 본다: 오류는 오류 종류 하나와 글이고, 그 밖의 필드는 읽지 않는다.
+  it.each(errorKinds)('실패 기록의 오류는 종류(%s)와 글을 저장된 JSON 그대로 읽는다', (kind) => {
+    const raw: unknown = JSON.parse(
+      `{"1":{"id":"a","featureId":"save","action":"run","status":"failed","error":{"kind":"${kind}","message":"까닭"}}}`,
+    );
+    expect(parseTasks(raw)).toEqual({ '1': { ...failed, error: { kind, message: '까닭' } } });
+  });
+
+  it('실패 기록의 오류에 모르는 필드가 있으면 종류와 글만 읽는다', () => {
+    const raw = { '1': { ...failed, error: { ...failed.error, at: 1 } } };
+    expect(parseTasks(raw)).toEqual({ '1': failed });
+  });
+
   it.each([
     ['객체가 아님', 'x'],
     ['배열', [running]],
@@ -63,6 +77,8 @@ describe('작업 기록 읽기', () => {
     ['성공인데 짧은 결과가 없음', { '1': { id: 'a', featureId: 'save', status: 'succeeded' } }],
     ['실패인데 오류가 없음', { '1': { id: 'a', featureId: 'save', status: 'failed' } }],
     ['모르는 오류 종류', { '1': { ...failed, error: { kind: 'oops', message: '' } } }],
+    ['오류의 글이 없음', { '1': { ...failed, error: { kind: 'unavailable' } } }],
+    ['오류의 글이 글자가 아님', { '1': { ...failed, error: { kind: 'unavailable', message: 1 } } }],
   ])('모양이 틀리면(%s) null이다', (_name, raw) => {
     expect(parseTasks(raw)).toBeNull();
   });

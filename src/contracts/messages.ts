@@ -1,5 +1,5 @@
 import * as v from './schema.ts';
-import { type ErrorKind, errorKinds } from '../shared/index.ts';
+import { type AppError, type ErrorKind, errorKinds } from '../shared/index.ts';
 import { pageBundles } from './events.ts';
 import { categories } from './feature.ts';
 
@@ -18,7 +18,8 @@ function defineRequest<Type extends string, Payload, Value>(
   return definition;
 }
 
-const errorSchema = v.object({
+// 실패의 오류(shared의 AppError): 오류 종류와 사람이 읽을 글. 요청의 응답과 작업 기록(storage의 tasks)이 이 정의를 함께 쓴다.
+export const appErrorSchema: v.Schema<AppError> = v.object({
   kind: v.picklist(errorKinds),
   message: v.string(),
 });
@@ -27,7 +28,7 @@ const errorSchema = v.object({
 export function responseSchema<Value>(value: v.Schema<Value>) {
   return v.union([
     v.object({ ok: v.literal(true), value }),
-    v.object({ ok: v.literal(false), error: errorSchema }),
+    v.object({ ok: v.literal(false), error: appErrorSchema }),
   ]);
 }
 
