@@ -13,7 +13,7 @@ import {
   type Plan,
   initialCapture,
   maxExpansions,
-  samePage,
+  sameAddress,
   transition,
 } from './capture.ts';
 import type { Rect } from './geometry.ts';
@@ -74,7 +74,9 @@ interface Script {
   readonly plan?: Plan;
   readonly picked?: Picked;
   readonly measure?: (what: Measured, count: number) => Measure;
+  // 찍은 뒤 처음 물었을 때의 문서와, 견주는 주소로 돌아오기를 기다린 뒤의 문서(없으면 처음 것).
   readonly verified?: PageRef;
+  readonly returned?: PageRef;
   readonly copied?: boolean;
   readonly size?: { width: number; height: number };
   // 그 할 일에서 답하지 않고 멈춘다(그 뒤의 사건은 시험이 넣는다).
@@ -145,7 +147,14 @@ function drive(mode: Mode, script: Script = {}) {
       case 'restore':
         return { type: 'restored', step };
       case 'verify':
-        return { type: 'verified', step, page: script.verified ?? page };
+        return {
+          type: 'verified',
+          step,
+          page:
+            effect.until === null
+              ? (script.verified ?? page)
+              : (script.returned ?? script.verified ?? page),
+        };
       case 'compose':
         return {
           type: 'composed',
@@ -458,15 +467,6 @@ describe('저장과 복사의 끝', () => {
 
   it('복사하지 못해도 저장한 것으로 끝내고 그 까닭을 남긴다', () => {
     expect(drive('full', { copied: false }).ending()).toMatchObject({ ok: true, copy: 'failed' });
-  });
-
-  it('PAGE-1.5 찍기 전과 찍은 뒤의 문서가 다르면 저장도 복사도 하지 않는다', () => {
-    const otherDocument = drive('full', { verified: { ...page, documentId: 'doc-2' } });
-    expect(otherDocument.types().slice(-4)).toEqual(['restore', 'verify', 'release', 'finish']);
-    expect(otherDocument.ending()).toEqual({ ok: false, failure: { kind: 'page-changed' } });
-    const otherAddress = drive('area', { verified: { ...page, href: 'https://example.test/b' } });
-    expect(otherAddress.types().slice(-2)).toEqual(['verify', 'finish']);
-    expect(otherAddress.ending()).toEqual({ ok: false, failure: { kind: 'page-changed' } });
   });
 
   it('PAGE-1.4 다시 잰 문서가 한도보다 크면(기다리는 사이에 길어짐) 찍지 않고 되돌린다', () => {
@@ -811,14 +811,68 @@ describe('찍은 뒤의 끊김과 그 밖의 차례', () => {
   });
 });
 
-describe('같은 페이지', () => {
-  it('문서 id가 같고 주소가 # 뒤만 다르면 같은 페이지다', () => {
-    expect(samePage(page, { ...page, href: `${page.href}#part` })).toBe(true);
-    expect(samePage({ ...page, href: '#a' }, { ...page, href: '#b' })).toBe(true);
-    expect(samePage({ ...page, href: `${page.href}#a` }, { ...page, href: `${page.href}#b` })).toBe(
-      true,
-    );
-    expect(samePage(page, { ...page, href: `${page.href}?q=1` })).toBe(false);
-    expect(samePage(page, { ...page, documentId: 'doc-2' })).toBe(false);
+describe('찍은 뒤의 문서(기대 동작 10)', () => {
+  const other = 'https://example.test/b';
+  const verifies = (run: ReturnType<typeof drive>) =>
+    run.effects.flatMap((effect) => (effect.type === 'verify' ? [effect.until] : []));
+
+  it('PAGE-1.5 찍은 뒤 문서와 주소가 찍기 전과 같으면 기다리지 않고 한 번 물은 뒤 곧 잇는다', () => {
+    for (const run of [drive('full'), drive('area'), drive('area', { picked: beyond })]) {
+      expect(verifies(run)).toEqual([null]);
+      expect(run.ending()).toMatchObject({ ok: true });
+    }
+  });
+
+  it('PAGE-1.5 찍은 뒤 문서가 다르면 주소를 기다리지 않고 곧 저장도 복사도 하지 않는다', () => {
+    const run = drive('full', { verified: { ...page, documentId: 'doc-2' } });
+    expect(verifies(run)).toEqual([null]);
+    expect(run.types().slice(-4)).toEqual(['restore', 'verify', 'release', 'finish']);
+    expect(run.ending()).toEqual({ ok: false, failure: { kind: 'page-changed' } });
+  });
+
+  it('PAGE-1.5 찍은 뒤 같은 문서에서 주소만 다르면 견주는 주소(전체는 시작한 때, 영역은 놓은 때)로 돌아오기를 한 번 기다리고, 돌아오면 잇고 저장한다', () => {
+    for (const run of [
+      drive('full', { verified: { ...page, href: other }, returned: page }),
+      drive('area', { verified: { ...page, href: other }, returned: page }),
+      drive('area', { picked: beyond, verified: { ...page, href: other }, returned: page }),
+    ]) {
+      expect(verifies(run)).toEqual([null, page.href]);
+      expect(run.ending()).toMatchObject({ ok: true, copy: 'copied' });
+    }
+  });
+
+  it('PAGE-1.5 기다려도 주소가 돌아오지 않으면 저장도 복사도 하지 않는다', () => {
+    const run = drive('full', { verified: { ...page, href: other } });
+    expect(verifies(run)).toEqual([null, page.href]);
+    expect(run.types().slice(-5)).toEqual(['restore', 'verify', 'verify', 'release', 'finish']);
+    expect(run.ending()).toEqual({ ok: false, failure: { kind: 'page-changed' } });
+    const area = drive('area', { verified: { ...page, href: other } });
+    expect(area.types().slice(-3)).toEqual(['verify', 'verify', 'finish']);
+    expect(area.ending()).toEqual({ ok: false, failure: { kind: 'page-changed' } });
+  });
+
+  it('PAGE-1.5 주소를 기다리는 사이 다른 문서가 되면 저장도 복사도 하지 않는다', () => {
+    const run = drive('full', {
+      verified: { ...page, href: other },
+      returned: { documentId: 'doc-2', href: page.href },
+    });
+    expect(verifies(run)).toEqual([null, page.href]);
+    expect(run.ending()).toEqual({ ok: false, failure: { kind: 'page-changed' } });
+  });
+
+  it('주소의 # 뒤만 다르면 같은 주소로 보아 기다리지 않는다', () => {
+    const run = drive('full', { verified: { ...page, href: `${page.href}#part` } });
+    expect(verifies(run)).toEqual([null]);
+    expect(run.ending()).toMatchObject({ ok: true });
+  });
+});
+
+describe('같은 주소', () => {
+  it('주소의 # 뒤만 다르면 같은 주소다', () => {
+    expect(sameAddress(page.href, `${page.href}#part`)).toBe(true);
+    expect(sameAddress('#a', '#b')).toBe(true);
+    expect(sameAddress(`${page.href}#a`, `${page.href}#b`)).toBe(true);
+    expect(sameAddress(page.href, `${page.href}?q=1`)).toBe(false);
+    expect(sameAddress(page.href, 'https://example.test/b')).toBe(false);
   });
 });

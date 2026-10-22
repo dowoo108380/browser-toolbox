@@ -73,8 +73,9 @@ interface PageScript {
   readonly plan?: Plan;
   readonly measure?: Measure;
   readonly picked?: Picked;
-  // 그 일의 답한 문서(없으면 doc-1).
+  // 그 일의 답한 문서(없으면 doc-1)와 그 문서의 주소(없으면 href).
   readonly documentOf?: (method: string) => string;
+  readonly hrefOf?: (method: string) => string;
   // 그 일의 답을 시험이 풀 때까지 붙잡는다.
   readonly hold?: string;
   // 그 일을 부를 때 그 문서가 사라져 있다(platform의 callInjected가 unavailable로 답한다).
@@ -86,6 +87,8 @@ interface PageScript {
 // 페이지에 넣은 스크립트, 보이는 화면, 오프스크린 문서와 다운로드의 가짜.
 function captureWorld(script: PageScript = {}) {
   const calls: string[] = [];
+  // 부른 일과 그 인자.
+  const asked: { readonly method: string; readonly args: readonly unknown[] }[] = [];
   const saved: { readonly path: string; readonly blob: Blob }[] = [];
   const copied: Blob[] = [];
   const blobs = new Map<string, Blob>();
@@ -129,8 +132,9 @@ function captureWorld(script: PageScript = {}) {
   };
   const deps: CaptureDeps = {
     injectScript: () => Promise.resolve(ok(null)),
-    callInjected: async (_tabId, _key, method): Promise<Result<InjectedAnswer, AppError>> => {
+    callInjected: async (_tabId, _key, method, args): Promise<Result<InjectedAnswer, AppError>> => {
       calls.push(method);
+      asked.push({ method, args });
       if (script.goneAt === method) return err(appError('unavailable', '페이지가 바뀌었다.'));
       if (script.hold === method) {
         await new Promise<void>((resolve) => {
@@ -138,7 +142,7 @@ function captureWorld(script: PageScript = {}) {
         });
       }
       const documentId = script.documentOf?.(method) ?? 'doc-1';
-      return ok({ documentId, href, value: answer(method) });
+      return ok({ documentId, href: script.hrefOf?.(method) ?? href, value: answer(method) });
     },
     captureVisibleTab: async () => ok(await png(1200, 900, '#00ff00')),
     openOffscreen: () => Promise.resolve(ok(null)),
@@ -156,6 +160,7 @@ function captureWorld(script: PageScript = {}) {
   return {
     deps,
     calls,
+    asked,
     saved,
     copied,
     release: () => {
@@ -382,6 +387,45 @@ describe('PAGE-1 전체 캡처의 연결', () => {
     expect(capture.saved).toEqual([]);
     expect(capture.copied).toEqual([]);
     expect(browser.attached()).toEqual([]);
+    // 다른 문서가 되었으면 주소가 돌아오기를 기다리지 않는다.
+    expect(capture.calls).not.toContain('awaitAddress');
+  });
+
+  it('PAGE-1.5 찍은 뒤 같은 문서에서 주소만 다르면 시작한 때의 주소로 돌아오기를 1초까지 기다리고, 돌아오면 저장·복사한다', async () => {
+    const browser = createFakeBrowser();
+    browser.open({ id: 1, active: true, url: href });
+    answerShots(browser);
+    // 찍으려고 맨 위로 옮긴 스크롤에 맞춰 페이지가 주소를 바꿨다가, 되돌린 스크롤에 맞춰 돌려놓는다.
+    const capture = captureWorld({
+      hrefOf: (method) => (method === 'ping' ? `${href}?top` : href),
+    });
+    const { popup, session } = await start(browser, capture);
+    await popup(taskStart, { featureId: 'page-capture', action: 'full', tabId: 1 });
+    expect((await ended(session, 1))?.status).toBe('succeeded');
+    expect(capture.calls.slice(-3)).toEqual(['restore', 'ping', 'awaitAddress']);
+    expect(capture.asked.at(-1)).toEqual({ method: 'awaitAddress', args: [href, 1000] });
+    expect(capture.saved).toHaveLength(1);
+    expect(capture.copied).toHaveLength(1);
+    expect(browser.attached()).toEqual([]);
+  });
+
+  it('PAGE-1.5 찍은 뒤 같은 문서에서 주소가 달라져 1초 안에 돌아오지 않으면 저장도 복사도 하지 않고 디버거를 뗀다', async () => {
+    const browser = createFakeBrowser();
+    browser.open({ id: 1, active: true, url: href });
+    answerShots(browser);
+    const capture = captureWorld({
+      hrefOf: (method) => (method === 'ping' || method === 'awaitAddress' ? `${href}?b` : href),
+    });
+    const { popup, session } = await start(browser, capture);
+    await popup(taskStart, { featureId: 'page-capture', action: 'full', tabId: 1 });
+    expect(await ended(session, 1)).toMatchObject({
+      status: 'failed',
+      error: appError('unavailable', '찍는 동안 페이지가 바뀌어 저장하지 않았다.'),
+    });
+    expect(capture.calls.slice(-2)).toEqual(['ping', 'awaitAddress']);
+    expect(capture.saved).toEqual([]);
+    expect(capture.copied).toEqual([]);
+    expect(browser.attached()).toEqual([]);
   });
 
   it('PAGE-1.5 이미지를 기다리는 동안 다른 페이지로 옮겨 넣은 스크립트가 사라지면 페이지가 바뀌었다고 실패하고, 저장도 복사도 하지 않는다', async () => {
@@ -484,7 +528,30 @@ describe('PAGE-1 영역 캡처의 연결', () => {
     expect(await sizeOf(file.blob)).toEqual({ width: 300, height: 150 });
     expect(await colorAt(file.blob, 150, 75)).toBe('#00ff00');
     expect(browser.commands).toEqual([]);
+    // 놓은 때의 주소 그대로라 기다리지 않는다.
     expect(capture.calls).toEqual(['select', 'ping']);
+  });
+
+  it('PAGE-1.5 고르는 동안 주소가 바뀌었으면 놓은 때(고르기의 답)의 주소와 견주어, 그대로면 기다리지 않고 저장한다', async () => {
+    const browser = createFakeBrowser();
+    browser.open({ id: 1, active: true, url: href });
+    // 시작할 때의 주소는 href였고, 고르는 동안 한 페이지 앱이 주소를 바꿨다.
+    const moved = `${href}?moved`;
+    const capture = captureWorld({
+      picked: {
+        kind: 'picked',
+        rect: { x: 100, y: 700, width: 200, height: 100 },
+        view: { x: 0, y: 600, width: 800, height: 600 },
+        start: { x: 0, y: 600 },
+        dpr: 1,
+      },
+      hrefOf: () => moved,
+    });
+    const { popup, session } = await start(browser, capture);
+    await popup(taskStart, { featureId: 'page-capture', action: 'area', tabId: 1 });
+    expect((await ended(session, 1))?.status).toBe('succeeded');
+    expect(capture.calls).toEqual(['select', 'ping']);
+    expect(capture.saved).toHaveLength(1);
   });
 
   it('PAGE-1.6 고르기를 끝내면 그 까닭으로 취소하고 저장하지 않는다', async () => {

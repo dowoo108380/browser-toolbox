@@ -11,8 +11,10 @@ import {
   countAttaches,
   debuggerAttached,
   finished,
+  followScrollWithAddress,
   grantActiveTab,
   pngInfo,
+  recordPageCalls,
   savedFiles,
   startCapture,
   taskOf,
@@ -555,6 +557,177 @@ test.describe('고르는 동안 떠남', () => {
       expect(await page.locator(selectionHost).count()).toBe(0);
       expect(await page.evaluate(() => document.body.outerHTML)).toBe(before);
     });
+  });
+});
+
+// 찍는 동안 페이지의 주소가 바뀜(기대 동작 10, 사용자 2026-10-22). 견주는 주소는 영역이면 놓은 때, 전체면 시작한 때의 것이다.
+// 찍은 뒤 문서가 다르면 곧, 같은 문서에서 주소만 다르면 그 주소로 돌아오기를 1초까지 기다린 뒤 저장하지 않는다. 찍으려고 확장이
+// 옮긴 스크롤 때문에 잠깐 바뀐 주소는 바뀜으로 보지 않는다.
+test.describe('찍는 동안 바뀐 주소', () => {
+  test.use({ browserDebugging: true });
+
+  test('PAGE-1.5 고르는 동안 같은 문서 안에서 주소가 바뀌면(pushState) 놓은 때의 화면을 찍어 저장하고 복사한다', async ({
+    context,
+    extensionId,
+    profileDirectory,
+  }) => {
+    const { worker, page, tabId } = await setup(context, 'capture-markers.html');
+    await startArea(context, extensionId, profileDirectory, page);
+    await page.mouse.move(100, 100);
+    await page.mouse.down();
+    await page.mouse.move(250, 200, { steps: 4 });
+    // 한 페이지 앱이 길을 바꾸며 화면을 바꾼다: 첫째 띠(고르는 곳)의 색을 넷째 띠의 색으로.
+    await page.evaluate((color) => {
+      history.pushState(null, '', '/capture-markers.html?moved');
+      const band = document.querySelector('.band');
+      if (band instanceof HTMLElement) band.style.background = color;
+    }, bandColors[3]);
+    await page.mouse.move(400, 300, { steps: 4 });
+    await page.mouse.up();
+    expect(await finished(worker, tabId)).toMatchObject({
+      status: 'succeeded',
+    });
+    const points: [number, number][] = [
+      [device(10), device(10)],
+      [device(290), device(190)],
+    ];
+    const info = await pngInfo(page, await onlyFile(worker), points);
+    expect(info).toEqual({
+      width: device(300),
+      height: device(200),
+      colors: [bandColors[3], bandColors[3]],
+    });
+    const copied = await clipboardPng(page);
+    if (copied === null) throw new Error('클립보드에 그림이 없다.');
+    expect(await pngInfo(page, copied, points)).toEqual(info);
+    expect(page.url()).toBe(`${fixtureOrigin}/capture-markers.html?moved`);
+  });
+
+  test('PAGE-1.5 놓은 뒤 찍는 동안 같은 문서 안에서 주소가 바뀌고 돌아오지 않으면(pushState) 파일이 생기지 않고 클립보드가 바뀌지 않으며 디버거가 떨어진다', async ({
+    context,
+    extensionId,
+    profileDirectory,
+  }) => {
+    const { worker, page, tabId } = await setup(context, 'capture-markers.html');
+    // 고를 영역 안에 끝나지 않는 이미지를 두어, 놓은 뒤 이미지를 기다리는 동안(5초) 주소를 바꾼다.
+    await page.evaluate(() => {
+      const image = document.createElement('img');
+      image.src = '/stall/never.png';
+      image.style.cssText = 'position:absolute;left:250px;top:900px;width:50px;height:50px';
+      document.body.append(image);
+    });
+    await writeClipboardText(page, '캡처 전');
+    const height = await page.evaluate(() => innerHeight);
+    await startArea(context, extensionId, profileDirectory, page);
+    await page.mouse.move(200, 200);
+    await page.mouse.down();
+    await page.mouse.move(400, height - 2, { steps: 4 });
+    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(height);
+    await page.mouse.up();
+    await expect.poll(() => debuggerAttached(worker, tabId)).toBe(true);
+    await page.evaluate(() => {
+      history.pushState(null, '', '/capture-markers.html?after');
+    });
+    expect(await finished(worker, tabId)).toMatchObject({
+      status: 'failed',
+      error: { kind: 'unavailable', message: strings.pageChanged },
+    });
+    expect(await savedFiles(worker)).toEqual([]);
+    expect(await clipboardText(page)).toBe('캡처 전');
+    expect(await debuggerAttached(worker, tabId)).toBe(false);
+  });
+
+  test('PAGE-1.5 스크롤에 맞춰 곧바로 주소를 바꾸는 페이지에서 화면 밖까지 고른 영역은, 찍으려고 옮긴 스크롤 때문에 잠깐 바뀐 주소를 바뀜으로 보지 않고 저장한다', async ({
+    context,
+    extensionId,
+    profileDirectory,
+  }) => {
+    const { worker, page, tabId } = await setup(context, 'capture-markers.html');
+    await followScrollWithAddress(page, 'band');
+    const viewport = await page.evaluate(() => ({
+      width: innerWidth,
+      height: innerHeight,
+    }));
+    await startArea(context, extensionId, profileDirectory, page);
+    await page.mouse.move(200, 200);
+    await page.mouse.down();
+    await page.mouse.move(400, viewport.height - 2, { steps: 4 });
+    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(viewport.height);
+    await page.mouse.up();
+    const end = await page.evaluate(() => scrollY);
+    const released = page.url();
+    expect(released).toMatch(/\?band=[1-9]$/);
+    expect(await finished(worker, tabId)).toMatchObject({
+      status: 'succeeded',
+    });
+    const height = end + viewport.height - 2 - 200;
+    const info = await pngInfo(page, await onlyFile(worker), [
+      [device(100), device(150)],
+      [device(100), device(height - 50)],
+    ]);
+    expect({ width: info.width, height: info.height }).toEqual({
+      width: device(200),
+      height: device(height),
+    });
+    expect(info.colors).toEqual([bandColors[0], bandColors[Math.floor((200 + height - 50) / 500)]]);
+    expect(page.url()).toBe(released);
+    expect(await page.evaluate(() => scrollY)).toBe(end);
+  });
+
+  test('PAGE-1.5 스크롤에 맞춰 곧바로 주소를 바꾸는 페이지를 중간까지 스크롤한 채 전체 캡처하면, 맨 위로 옮긴 스크롤 때문에 잠깐 바뀐 주소를 바뀜으로 보지 않고 저장한다', async ({
+    context,
+    extensionId,
+  }) => {
+    const { worker, page, tabId } = await setup(context, 'capture-markers.html');
+    await followScrollWithAddress(page, 'band');
+    await page.evaluate(() => {
+      window.scrollTo(0, 2200);
+    });
+    await expect.poll(() => page.url()).toBe(`${fixtureOrigin}/capture-markers.html?band=4`);
+    await run(context, extensionId, page, '전체 캡처');
+    expect(await finished(worker, tabId)).toMatchObject({
+      status: 'succeeded',
+    });
+    const info = await pngInfo(page, await onlyFile(worker), [[device(10), device(4900)]]);
+    expect(info).toMatchObject({
+      height: device(5000),
+      colors: [bandColors[9]],
+    });
+    expect(page.url()).toBe(`${fixtureOrigin}/capture-markers.html?band=4`);
+    expect(await page.evaluate(() => scrollY)).toBe(2200);
+  });
+
+  test('PAGE-1.5 되돌린 스크롤에 맞춰 주소를 돌려놓지 않는 페이지는 시작한 때의 주소로 돌아오기를 1초 기다린 뒤 저장도 복사도 하지 않는다', async ({
+    context,
+    extensionId,
+  }) => {
+    const { worker, page, tabId } = await setup(context, 'capture-markers.html');
+    await followScrollWithAddress(page, 'drift');
+    await page.evaluate(() => {
+      window.scrollTo(0, 2200);
+    });
+    await expect.poll(() => page.url()).toContain('?drift=');
+    const started = page.url();
+    await writeClipboardText(page, '캡처 전');
+    const calls = await recordPageCalls(worker);
+    await run(context, extensionId, page, '전체 캡처');
+    expect(await finished(worker, tabId)).toMatchObject({
+      status: 'failed',
+      error: { kind: 'unavailable', message: strings.pageChanged },
+    });
+    expect(await savedFiles(worker)).toEqual([]);
+    expect(await clipboardText(page)).toBe('캡처 전');
+    expect(await debuggerAttached(worker, tabId)).toBe(false);
+    expect(page.url()).not.toBe(started);
+    // 찍은 뒤 지금 문서를 한 번 묻고(ping), 같은 문서에서 주소만 달라 그 주소로 돌아오기를 1초 기다렸다.
+    const asked = (await calls()).filter(
+      ({ method }) => method === 'ping' || method === 'awaitAddress',
+    );
+    expect(asked.map(({ method, args }) => [method, args])).toEqual([
+      ['ping', []],
+      ['awaitAddress', [started, 1000]],
+    ]);
+    expect(asked[1]?.ms).toBeGreaterThanOrEqual(1000);
   });
 });
 

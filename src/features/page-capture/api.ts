@@ -13,6 +13,10 @@ export const imageWaitMs = 5000;
 // 영역을 고르기를 기다리는 한도(기대 동작 5).
 export const selectionLimitMs = 120_000;
 
+// 찍은 뒤 같은 문서에서 주소만 다르면 그 주소가 견주는 주소로 돌아오기를 기다리는 한도(기대 동작 10, 사용자 2026-10-22). 스크롤에
+// 맞춰 주소를 바꾸는 페이지는 되돌린 스크롤에 맞춰 화면을 한 번 그릴 때 돌려놓았다(2026-10-22 실험).
+export const addressWaitMs = 1000;
+
 export interface PageApi {
   // 영역을 고른다. 고르는 화면은 끝나면 지우고, 화면을 두 번 그린 뒤 답한다(찍을 때 남지 않게).
   readonly select: () => Promise<Picked>;
@@ -32,6 +36,8 @@ export interface PageApi {
   readonly restore: () => null;
   // 아무것도 하지 않는다. 지금 그 탭의 최상위에 있는 문서(답과 함께 오는 문서 id와 주소)를 알려고 부른다.
   readonly ping: () => null;
+  // 이 문서의 주소가 href(# 뒤는 보지 않는다)가 되기를 limitMs까지 기다린다. 이미 같으면 곧 답한다. 답과 함께 그때의 주소가 온다.
+  readonly awaitAddress: (href: string, limitMs: number) => Promise<null>;
 }
 
 export type PageMethod = keyof PageApi;

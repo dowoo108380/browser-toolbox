@@ -25,7 +25,8 @@ import {
 
 export type Mode = 'full' | 'area';
 
-// 찍는 문서(Chrome이 문서마다 붙이는 id와 그 문서의 주소). 찍기 전과 찍은 뒤에 같아야 저장한다(기대 동작 10).
+// 찍는 문서(Chrome이 문서마다 붙이는 id와 그 문서의 주소). 찍은 뒤에도 같은 문서이고 주소가 같아야 저장한다(기대 동작 10). 견주는
+// 주소는 전체 캡처면 시작한 때(대상을 고른 답), 영역 캡처면 놓은 때(고르기의 답)의 것이다.
 export interface PageRef {
   readonly documentId: string;
   readonly href: string;
@@ -124,8 +125,9 @@ export type CaptureEffect<T, I> =
   | { readonly type: 'shootVisible'; readonly step: number }
   // 페이지 쪽이 바꾼 것(스크롤, 상자의 스크롤, 고르는 화면)을 되돌린다.
   | { readonly type: 'restore'; readonly step: number }
-  // 지금 문서를 묻는다(찍기 전의 문서와 견준다).
-  | { readonly type: 'verify'; readonly step: number }
+  // 지금 문서를 묻는다(찍기 전의 문서와 견준다). until이 있으면 그 문서의 주소가 until(# 뒤는 보지 않는다)로 돌아오기를 잠깐
+  // 기다린 뒤 묻는다.
+  | { readonly type: 'verify'; readonly step: number; readonly until: string | null }
   | {
       readonly type: 'compose';
       readonly step: number;
@@ -233,7 +235,8 @@ type Stage<T, I> =
   | { readonly at: 'shoot'; readonly shooting: Shooting<T>; readonly shrinkAfter: boolean }
   | { readonly at: 'shootVisible'; readonly shooting: Shooting<T>; readonly view: Rect }
   | { readonly at: 'restore'; readonly shooting: Shooting<T> }
-  | { readonly at: 'verify'; readonly shooting: Shooting<T> }
+  // waited: 주소가 돌아오기를 이미 한 번 기다렸다.
+  | { readonly at: 'verify'; readonly shooting: Shooting<T>; readonly waited: boolean }
   | { readonly at: 'compose'; readonly size: Size; readonly partial: PartialReason | null }
   | {
       readonly at: 'save';
@@ -288,11 +291,9 @@ const withoutFragment = (href: string) => {
   return at < 0 ? href : href.slice(0, at);
 };
 
-export function samePage(before: PageRef, after: PageRef): boolean {
-  return (
-    before.documentId === after.documentId &&
-    withoutFragment(before.href) === withoutFragment(after.href)
-  );
+// 두 주소가 같은 페이지인지. 페이지 쪽(inject.ts)도 이것으로 주소가 돌아왔는지 본다.
+export function sameAddress(before: string, after: string): boolean {
+  return withoutFragment(before) === withoutFragment(after);
 }
 
 // 다음 할 일을 내보낸다. 차례 번호를 늘리고, 붙잡는 할 일이면 붙잡은 것으로 친다.
@@ -592,7 +593,11 @@ function advance<T, I>(state: Running<T, I>, event: CaptureEvent<T, I>): Step<T,
           ...stage.shooting,
           shots: [{ rect: stage.view, data: event.data }],
         };
-        return issue(state, { at: 'verify', shooting }, (step) => ({ type: 'verify', step }));
+        return issue(state, { at: 'verify', shooting, waited: false }, (step) => ({
+          type: 'verify',
+          step,
+          until: null,
+        }));
       }
       if (stage.at !== 'shoot') break;
       const [tile, ...rest] = stage.shooting.tiles;
@@ -608,14 +613,27 @@ function advance<T, I>(state: Running<T, I>, event: CaptureEvent<T, I>): Step<T,
       if (stage.at !== 'restore') break;
       return issue(
         state,
-        { at: 'verify', shooting: stage.shooting },
-        (step) => ({ type: 'verify', step }),
+        { at: 'verify', shooting: stage.shooting, waited: false },
+        (step) => ({ type: 'verify', step, until: null }),
         { ...state.held, page: false },
       );
     case 'verified': {
       if (stage.at !== 'verify') break;
-      if (state.page === null || !samePage(state.page, event.page)) {
+      const before = state.page;
+      // 다른 문서가 되었으면 기다리지 않는다(기대 동작 10). 찍기 전의 문서는 늘 안다(대상을 고르거나 영역을 고른 답).
+      if (before?.documentId !== event.page.documentId) {
         return fail(state, { kind: 'page-changed' });
+      }
+      if (!sameAddress(before.href, event.page.href)) {
+        // 같은 문서에서 주소만 다르다. 스크롤에 맞춰 주소를 바꾸는 페이지는 찍으려고 옮긴 스크롤에 맞춰 주소를 바꿨다가, 되돌린
+        // 스크롤에 맞춰 돌려놓는다(2026-10-22 실험: 되돌린 뒤 화면을 한 번 그릴 때). 견주는 주소로 돌아오기를 한 번 기다리고, 그래도
+        // 다르면 페이지가 바뀐 것이다(사용자, 2026-10-22).
+        if (stage.waited) return fail(state, { kind: 'page-changed' });
+        return issue(state, { ...stage, waited: true }, (step) => ({
+          type: 'verify',
+          step,
+          until: before.href,
+        }));
       }
       const { target, dpr, shots, partial } = stage.shooting;
       return issue(state, { at: 'compose', size: deviceSize(target, dpr), partial }, (step) => ({

@@ -60,6 +60,20 @@ export async function addScriptLazyLoading(context: BrowserContext): Promise<voi
   });
 }
 
+// 스크롤에 맞춰 주소를 바꾸는 사이트(긴 글을 내리면 주소가 그 부분으로 바뀌는 곳)를 본뜬다(PAGE-1 기대 동작 10). 그 페이지의
+// 스크롤 이벤트마다 곧바로 주소를 지금 띠(capture-markers.html의 500px)의 번호로 바꾼다(?band=N, history.replaceState). drift면
+// 스크롤할 때마다 새 주소(?drift=N)로 바꾸고 돌려놓지 않는다(되돌린 스크롤에 맞춰 주소를 돌려놓지 않는 사이트).
+export function followScrollWithAddress(page: Page, mode: 'band' | 'drift'): Promise<void> {
+  return page.evaluate((drift) => {
+    let moves = 0;
+    addEventListener('scroll', () => {
+      moves += 1;
+      const next = drift ? `?drift=${String(moves)}` : `?band=${String(Math.floor(scrollY / 500))}`;
+      history.replaceState(null, '', next);
+    });
+  }, mode === 'drift');
+}
+
 // 그 탭의 작업 기록(없으면 null).
 export function taskOf(worker: Worker, tabId: number): Promise<unknown> {
   return worker.evaluate(async (id) => {
@@ -375,6 +389,48 @@ export async function countAttaches(worker: Worker): Promise<() => Promise<numbe
     };
   });
   return () => worker.evaluate(() => Number(Reflect.get(globalThis, '__attaches')));
+}
+
+// 서비스 워커가 페이지에 넣은 스크립트의 일을 부르는 것(platform의 callInjected: chrome.scripting.executeScript에 일의 이름과
+// 인자를 넘긴다)을 적는다. 그 뒤의 부르기마다 일의 이름, 인자, 답이 오기까지 걸린 시간(ms)이다. 확장의 platform이 부를 때마다 이
+// 전역을 읽는다.
+export async function recordPageCalls(
+  worker: Worker,
+): Promise<
+  () => Promise<
+    { readonly method: string; readonly args: readonly unknown[]; readonly ms: number }[]
+  >
+> {
+  await worker.evaluate(() => {
+    const original = chrome.scripting.executeScript.bind(chrome.scripting);
+    const calls: unknown[] = [];
+    Reflect.set(globalThis, '__pageCalls', calls);
+    const wrapped = async (injection: Parameters<typeof original>[0]) => {
+      const started = performance.now();
+      const result = await original(injection);
+      const args: unknown = Reflect.get(Object(injection), 'args');
+      if (Array.isArray(args)) {
+        const list: readonly unknown[] = args;
+        calls.push({ method: list[1], args: list[2], ms: performance.now() - started });
+      }
+      return result;
+    };
+    Reflect.set(chrome.scripting, 'executeScript', wrapped);
+  });
+  return () =>
+    worker.evaluate(() => {
+      const calls: unknown = Reflect.get(globalThis, '__pageCalls');
+      return Array.isArray(calls)
+        ? calls.map((call: unknown) => {
+            const args: unknown = Reflect.get(Object(call), 'args');
+            return {
+              method: String(Reflect.get(Object(call), 'method')),
+              args: Array.isArray(args) ? args.map((arg: unknown) => arg) : [],
+              ms: Number(Reflect.get(Object(call), 'ms')),
+            };
+          })
+        : [];
+    });
 }
 
 // 그 탭에 이 확장의 디버거가 붙어 있는지. 대상의 attached는 Playwright의 연결도 세므로 쓰지 않고, 이 확장의 연결로 명령을

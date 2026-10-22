@@ -11,7 +11,7 @@ import {
   withTimeout,
 } from '../../shared/index.ts';
 import type { TaskOutcome } from '../../storage/index.ts';
-import { type PageMethod, answers, imageWaitMs, selectionLimitMs } from './api.ts';
+import { type PageMethod, addressWaitMs, answers, imageWaitMs, selectionLimitMs } from './api.ts';
 import {
   type CaptureEffect,
   type CaptureEvent,
@@ -364,9 +364,18 @@ function capture(
           return;
         }
         case 'verify': {
-          const { step } = effect;
+          const { step, until } = effect;
           later(step, async () => {
-            const now = await call('ping', [], answers.done);
+            // 보통은 곧 묻는다. 같은 문서에서 주소만 달랐으면 그 주소로 돌아오기를 기다린 뒤 묻는다(상태 기계가 정한다).
+            const now =
+              until === null
+                ? await call('ping', [], answers.done)
+                : await call(
+                    'awaitAddress',
+                    [until, addressWaitMs],
+                    answers.done,
+                    addressWaitMs + slack,
+                  );
             return now.ok ? ok({ type: 'verified', step, page: now.value.page }) : now;
           });
           return;

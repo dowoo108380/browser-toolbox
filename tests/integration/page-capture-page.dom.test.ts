@@ -240,6 +240,42 @@ describe('PAGE-1.10 PAGE-1.11 이미지 기다리기', () => {
   });
 });
 
+describe('PAGE-1.5 주소가 돌아오기를 기다리기(awaitAddress)', () => {
+  // 시험 문서의 주소를 잠시 바꾼다(같은 문서 안, replaceState). 끝나면 돌려놓는다.
+  const original = location.href;
+  const moved = `${location.pathname}?moved`;
+  afterEach(() => {
+    history.replaceState(history.state, '', original);
+  });
+
+  it('주소가 이미 같으면(# 뒤만 다른 것 포함) 곧 답한다', async () => {
+    const started = performance.now();
+    expect(await page().awaitAddress(`${original}#part`, 2000)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('주소가 다르면 돌아올 때 답한다(한도를 기다리지 않는다)', async () => {
+    history.replaceState(history.state, '', moved);
+    setTimeout(() => {
+      history.replaceState(history.state, '', original);
+    }, 200);
+    const started = performance.now();
+    expect(await page().awaitAddress(original, 2000)).toBeNull();
+    const waited = performance.now() - started;
+    expect(waited).toBeGreaterThanOrEqual(190);
+    expect(waited).toBeLessThan(1500);
+    expect(location.href).toBe(original);
+  });
+
+  it('주소가 돌아오지 않으면 한도까지 기다려 답한다', async () => {
+    history.replaceState(history.state, '', moved);
+    const started = performance.now();
+    expect(await page().awaitAddress(original, 300)).toBeNull();
+    expect(performance.now() - started).toBeGreaterThanOrEqual(290);
+    expect(location.href).not.toBe(original);
+  });
+});
+
 describe('PAGE-1 영역 고르기(select)', () => {
   it('PAGE-1.3 PAGE-1.18 끌어서 고른 네모를 문서 좌표로 주고, 고르는 화면은 남지 않는다', async () => {
     tallDocument(3000);

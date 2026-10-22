@@ -2,7 +2,13 @@ import { injectedApiKey, retireEventName } from '../../contracts/index.ts';
 import { type Scope, createIsolatedHost, createScope } from '../../dom/index.ts';
 import { isExtensionConnected } from '../../platform/index.ts';
 import { type PageApi, selectionLimitMs } from './api.ts';
-import type { Measure, Measured, Picked, Plan } from './core/capture.ts';
+import {
+  type Measure,
+  type Measured,
+  type Picked,
+  type Plan,
+  sameAddress,
+} from './core/capture.ts';
 import type { Point, Rect } from './core/geometry.ts';
 import { rectBetween, scrollStep, tooSmall } from './core/selection.ts';
 import { pageCapture } from './feature.ts';
@@ -21,6 +27,9 @@ const settleLimitMs = 300;
 
 // 이미지를 다시 보는 간격.
 const imagePollMs = 100;
+
+// 주소를 다시 보는 간격. 페이지가 주소를 돌려놓는 것은 화면을 한 번 그릴 때쯤이다(api.ts의 addressWaitMs).
+const addressPollMs = 50;
 
 const css = `
 :host {
@@ -506,6 +515,23 @@ function createPageApi(): PageApi {
       return null;
     },
     ping: () => null,
+    awaitAddress: (href, limitMs) =>
+      new Promise((resolve) => {
+        const started = performance.now();
+        const scope = scopeFor(() => {
+          scope.close();
+          resolve(null);
+        });
+        const check = () => {
+          if (sameAddress(href, location.href) || performance.now() - started >= limitMs) {
+            scope.close();
+            resolve(null);
+            return;
+          }
+          scope.timeout(addressPollMs, check);
+        };
+        check();
+      }),
   };
 }
 
