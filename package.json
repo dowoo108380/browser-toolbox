@@ -48,8 +48,8 @@
     "@playwright/test": "1.64.0",
     "@stryker-mutator/core": "10.0.0",
     "@types/node": "24.19.2",
-    "@vitest/browser-playwright": "5.0.3",
-    "@vitest/coverage-v8": "5.0.3",
+    "@vitest/browser-playwright": "5.0.5",
+    "@vitest/coverage-v8": "5.0.5",
     "chrome-types": "0.1.454",
     "dependency-cruiser": "18.5.0",
     "esbuild": "0.28.2",
@@ -59,6 +59,6 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1",
     "vite": "8.3.4",
-    "vitest": "5.0.3"
+    "vitest": "5.0.5"
   }
 }
