@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { deflateSync } from 'node:zlib';
+import { crc32, deflateSync } from 'node:zlib';
 
 // 확장 전체 테스트의 시험 페이지(tests/fixtures/)를 보내는 서버. 콘텐츠 스크립트는 http·https 페이지에만 실린다.
 // 포트를 둘 열어 출처가 다른 iframe을 만든다.
@@ -22,18 +22,6 @@ const types: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
 };
-
-const crcTable = Array.from({ length: 256 }, (_unused, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  return value >>> 0;
-});
-
-function crc32(bytes: Buffer): number {
-  let value = 0xffffffff;
-  for (const byte of bytes) value = (crcTable[(value ^ byte) & 0xff] ?? 0) ^ (value >>> 8);
-  return (value ^ 0xffffffff) >>> 0;
-}
 
 function chunk(type: string, data: Buffer): Buffer {
   const length = Buffer.alloc(4);
