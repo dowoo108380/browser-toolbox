@@ -34,6 +34,7 @@ export {
   seenTask,
   startTask,
   taskOf,
+  taskText,
   tasksKey,
   watchTask,
   withoutTab,

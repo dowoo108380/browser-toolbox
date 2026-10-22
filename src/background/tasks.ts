@@ -25,6 +25,7 @@ import {
   seenTask,
   startTask,
   taskOf,
+  taskText,
   tasksKey,
   withoutTab,
 } from '../storage/index.ts';
@@ -263,11 +264,7 @@ export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
       return;
     }
     if (!active) return;
-    const name = nameOf(task);
-    const text =
-      task.status === 'succeeded'
-        ? strings.notice.succeeded(name, task.summary)
-        : strings.notice.failed(name, task.error);
+    const text = taskText(task, nameOf(task));
     const delivery = await deps.notify(tabId, text.slice(0, noticeTextLimit));
     if (delivery === 'timeout' || delivery === 'failed') {
       deps.record({

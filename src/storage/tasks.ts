@@ -6,6 +6,7 @@ import { type AppError, type Result, appError, err, ok } from '../shared/index.t
 // 둔다. 쓰는 곳은 서비스 워커 하나다. storage.session은 확장을 다시 불러오거나 갱신하거나 브라우저를 다시 시작하면 비므로
 // 이 모양은 판 사이에 이어지지 않는다(형식 버전이 없다).
 // 기록을 바꾸는 함수는 기록을 받아 새 기록을 만드는 순수 함수다. 받은 기록을 고치지 않는다. watchTask는 확장 화면이 읽는 도우미다.
+// taskText는 기록을 사용자에게 알리는 문장이다.
 
 export const tasksKey = 'tasks';
 
@@ -144,6 +145,22 @@ export function seenTask(records: TaskRecords, tabId: number, id: string): TaskR
   const current = taskOf(records, tabId);
   if (current?.id !== id || current.status === 'running') return null;
   return withoutTab(records, tabId);
+}
+
+// 작업 하나를 알리는 문장(COM-10 기대 동작 3·4, 결정 0024). 팝업의 작업 칸과 페이지 위 알림이 이것을 함께 써 모든 화면에서 같은
+// 말이다(quality 018). 두 화면의 층(ui, background)은 서로 가져오지 않으므로 둘이 함께 쓰는 층 가운데 작업 기록을 아는 여기에
+// 둔다. name은 그 작업 종류의 이름이다(결정 0046). 짧은 결과와 실패 이유는 서비스 워커와 기능이 만든 글이다.
+export function taskText(task: TaskRecord, name: string): string {
+  switch (task.status) {
+    case 'running':
+      return `${name}: 진행 중이다.`;
+    case 'succeeded':
+      return task.summary === null ? `${name}: 끝났다.` : `${name}: 끝났다. ${task.summary}`;
+    case 'failed':
+      return task.error.kind === 'cancelled'
+        ? `${name}: 취소했다. ${task.error.message}`
+        : `${name}: 실패했다. ${task.error.message}`;
+  }
 }
 
 export interface TaskWatchHandlers {

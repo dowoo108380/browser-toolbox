@@ -10,6 +10,7 @@ import {
   seenTask,
   startTask,
   taskOf,
+  taskText,
   tasksKey,
   watchTask,
   withoutTab,
@@ -133,6 +134,22 @@ describe('작업 끝남', () => {
     ['같은 id가 이미 끝남', { '1': succeeded }],
   ])('%s이면 늦게 온 결과를 버린다(null)', (_name, records: TaskRecords) => {
     expect(finishTask(records, 1, 'a', ok({ summary: null }))).toBeNull();
+  });
+});
+
+describe('작업을 알리는 문장(팝업의 작업 칸과 페이지 위 알림, quality 018)', () => {
+  it.each([
+    ['진행 중', running, '저장: 진행 중이다.'],
+    ['끝남', succeeded, '저장: 끝났다. 파일.txt'],
+    ['끝남(짧은 결과 없음)', { ...succeeded, summary: null }, '저장: 끝났다.'],
+    ['실패', failed, '저장: 실패했다. 자막이 없는 영상이다.'],
+    [
+      '취소(실패의 cancelled)',
+      { ...failed, error: appError('cancelled', 'Esc를 눌러 멈췄다.') },
+      '저장: 취소했다. Esc를 눌러 멈췄다.',
+    ],
+  ])('%s', (_name, task: TaskRecord, text) => {
+    expect(taskText(task, '저장')).toBe(text);
   });
 });
 
