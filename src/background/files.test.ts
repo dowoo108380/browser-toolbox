@@ -228,10 +228,10 @@ describe('결정 0047 저장', () => {
 describe('결정 0047 클립보드', () => {
   it('문서에 그림 복사를 맡기고, 문서가 클립보드 쓰기를 끝내기를 기다리지 않고 답한 뒤 끝나면 닫는다', async () => {
     const { files, log, requests, isOpen, settles, answerSettle } = setup({ holdSettle: true });
-    expect(await files.copyImage(blob, 'a.png')).toEqual(ok(null));
+    expect(await files.copyImage(blob)).toEqual(ok(null));
     expect(requests[0]).toEqual({
       kind: offscreenCopyImage.kind,
-      payload: { blob, title: 'a.png' },
+      payload: { blob },
       timeoutMs: 30_000,
     });
     await vitestWait(() => settles.length === 1);
@@ -243,9 +243,9 @@ describe('결정 0047 클립보드', () => {
 
   it('클립보드 쓰기를 기다리는 동안 새 일이 오면 닫지 않고 그 일이 문서를 쓴다', async () => {
     const { files, log, isOpen, settles, answerSettle } = setup({ holdSettle: true });
-    await files.copyImage(blob, 'a.png');
+    await files.copyImage(blob);
     await vitestWait(() => settles.length === 1);
-    const second = files.copyImage(blob, 'b.png');
+    const second = files.copyImage(blob);
     answerSettle();
     expect(await second).toEqual(ok(null));
     await vitestWait(() => settles.length === 1);
@@ -268,7 +268,7 @@ describe('결정 0047 클립보드', () => {
     const { files, isOpen, problems } = setup({
       settle: err(appError('timeout', '답하지 않는다.')),
     });
-    await files.copyImage(blob, 'a.png');
+    await files.copyImage(blob);
     await vitestWait(() => !isOpen());
     expect(problems).toEqual([{ featureId: null, kind: 'timeout' }]);
   });
@@ -276,19 +276,19 @@ describe('결정 0047 클립보드', () => {
   it('문서가 복사에 답하지 않으면 그 까닭이다', async () => {
     const failed = appError('timeout', '답하지 않는다.');
     const { files } = setup({ fail: { [offscreenCopyImage.kind]: failed } });
-    expect(await files.copyImage(blob, 'a.png')).toEqual(err(failed));
+    expect(await files.copyImage(blob)).toEqual(err(failed));
   });
 
   it('닫기가 던지면(일어나면 안 됨) 기록한다', async () => {
     const { files, problems } = setup({ closeThrows: true });
-    await files.copyImage(blob, 'a.png');
+    await files.copyImage(blob);
     await vitestWait(() => problems.length > 0);
     expect(problems).toEqual([{ featureId: null, kind: 'unexpected' }]);
   });
 
   it('Chrome이 허락하지 않으면 permission이다', async () => {
     const { files } = setup({ copied: false });
-    const copied = await files.copyImage(blob, 'a.png');
+    const copied = await files.copyImage(blob);
     expect(copied.ok ? null : copied.error.kind).toBe('permission');
   });
 });

@@ -30,8 +30,8 @@ export interface FileService {
   // 그 Blob을 다운로드 폴더 안의 path(하위 폴더/이름)로 묻지 않고 저장한다. 같은 이름이 있으면 Chrome이 번호를 붙인다. 저장한
   // 파일(이름, 그 하위 폴더에 저장했는지)을 준다.
   readonly save: (blob: Blob, path: string) => Promise<Result<SavedFile, AppError>>;
-  // PNG Blob을 클립보드에 그림으로 복사한다. title은 클립보드의 HTML에 들어가는 대체 글이다.
-  readonly copyImage: (blob: Blob, title: string) => Promise<Result<null, AppError>>;
+  // PNG Blob을 클립보드에 그림으로 복사한다. 클립보드에는 그 그림만 들고 HTML이나 글은 들지 않는다(결정 0049).
+  readonly copyImage: (blob: Blob) => Promise<Result<null, AppError>>;
   // 서비스 워커가 시작할 때 앞 서비스 워커가 연 채 남긴 오프스크린 문서를 닫는다.
   readonly recover: () => Promise<void>;
 }
@@ -113,9 +113,9 @@ export function createFileService(deps: FileDeps): FileService {
         if (!revoked.ok) deps.record({ featureId: null, kind: revoked.error.kind });
         return saved;
       }),
-    copyImage: (blob, title) =>
+    copyImage: (blob) =>
       withDocument(async () => {
-        const copied = await deps.request(offscreenCopyImage, { blob, title }, copyTimeoutMs);
+        const copied = await deps.request(offscreenCopyImage, { blob }, copyTimeoutMs);
         if (!copied.ok) return copied;
         return copied.value.copied ? ok(null) : err(appError('permission', strings.copyRefused));
       }),

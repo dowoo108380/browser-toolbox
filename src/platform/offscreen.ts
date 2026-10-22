@@ -156,7 +156,7 @@ async function imageDocumentOf(frame: HTMLIFrameElement, url: string): Promise<D
 // 뺀다(빈 값이 아니라 속성이 없어야 주소가 없다). clipboardWrite 권한이 없으면 복사가 거짓이다. 그림 문서의 img에 decode()를
 // 부르면 Chromium 156의 렌더러가 죽었다(0047 실험). 부르지 않는다. 복사한 그림 문서는 곧 거두지 않고 clipboardSettleMs 뒤에
 // 거둔다(contracts/offscreen.ts). 답은 곧 한다.
-async function copyImageInDocument(blob: Blob, title: string): Promise<boolean> {
+async function copyImageInDocument(blob: Blob): Promise<boolean> {
   const url = URL.createObjectURL(blob);
   const frame = document.createElement('iframe');
   let copied = false;
@@ -164,7 +164,6 @@ async function copyImageInDocument(blob: Blob, title: string): Promise<boolean> 
     const opened = await withTimeout(imageDocumentTimeoutMs, () => imageDocumentOf(frame, url));
     const image = opened.done ? opened.value : null;
     if (image === null) return false;
-    image.title = title;
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- 초점 없는 확장 문서가 클립보드에 그림을 쓰는 길이 이것뿐이다(결정 0047).
     copied = image.execCommand('copy');
     return copied;
@@ -217,7 +216,7 @@ export function serveOffscreen(): void {
     }
     const request = v.safeParse(offscreenCopyImage.payload, payload);
     if (!request.success) return err(appError('invalid-input', '요청 모양이 틀리다.'));
-    return ok({ copied: await copyImageInDocument(request.output.blob, request.output.title) });
+    return ok({ copied: await copyImageInDocument(request.output.blob) });
   };
   channel.addEventListener('message', (event) => {
     const envelope = v.safeParse(offscreenEnvelopeSchema, event.data);

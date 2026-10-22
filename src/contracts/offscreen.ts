@@ -33,11 +33,11 @@ export const offscreenRevoke = defineOffscreenRequest({
   value: v.null(),
 });
 
-// PNG 그림을 클립보드에 복사한다. title은 클립보드의 HTML에 들어가는 그림의 대체 글이다. Chrome이 허락하지 않으면(clipboardWrite
+// PNG 그림을 클립보드에 그 그림만 복사한다(HTML이나 글은 넣지 않는다, 결정 0049). Chrome이 허락하지 않으면(clipboardWrite
 // 권한이 없음 등) copied가 거짓이다.
 export const offscreenCopyImage = defineOffscreenRequest({
   kind: 'copyImage',
-  payload: v.object({ blob: v.blob(), title: v.pipe(v.string(), v.maxLength(200)) }),
+  payload: v.object({ blob: v.blob() }),
   value: v.object({ copied: v.boolean() }),
 });
 

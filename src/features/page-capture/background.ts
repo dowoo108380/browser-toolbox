@@ -400,7 +400,7 @@ function capture(
         case 'copy': {
           const { step, image } = effect;
           later(step, async () => {
-            const copied = await services.files.copyImage(image, path.slice(path.indexOf('/') + 1));
+            const copied = await services.files.copyImage(image);
             // 복사하지 못해도 저장은 했다. 결과에 알리고, 까닭은 기록한다(quality 067).
             if (!copied.ok) services.record({ featureId: user, kind: copied.error.kind });
             return ok({ type: 'copied', step, copied: copied.ok });
