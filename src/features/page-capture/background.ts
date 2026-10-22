@@ -46,7 +46,7 @@ const user = pageCapture.id;
 const apiKey = injectedApiKey(user);
 const scriptFile = injectedScriptFile(user);
 
-// 페이지 쪽 일을 기다리는 한도. 그 일들은 곧 끝난다(이미지 기다리기와 영역 고르기는 자기 한도에 여유를 더한다).
+// 페이지 쪽 일을 기다리는 한도. 그 일들은 곧 끝난다(이미지 기다리기, 영역 고르기, 주소 기다리기는 자기 한도에 여유를 더한다).
 const callTimeoutMs = 5000;
 const slack = 5000;
 

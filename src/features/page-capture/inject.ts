@@ -257,7 +257,7 @@ function scopeFor(onError: (error: unknown) => void): Scope {
 }
 
 // 정한 수만큼 화면을 그리거나, 한도가 지나면 끝난다. 기다리기만 하고 페이지를 바꾸지 않으므로 확장과의 연결이 끊긴 뒤에도 끝난다
-// (고르기를 끝낸 뒤 답하기 전에 기다린다).
+// (고른 영역을 답하기 전에도 기다린다. 취소는 기다리지 않는다).
 function frames(count: number): Promise<null> {
   return new Promise((resolve) => {
     const scope = createScope({

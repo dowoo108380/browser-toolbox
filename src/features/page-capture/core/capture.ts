@@ -63,7 +63,8 @@ export type Measured = 'document' | 'box' | 'viewport';
 // 보이는 화면만 찍은 까닭(기대 동작 4). no-box: 화면 대부분인 스크롤 상자가 없음, box-stuck: 늘려도 상자가 펼쳐지지 않음.
 type PartialReason = 'no-box' | 'box-stuck';
 
-// 영역 고르기를 끝낸 까닭(기대 동작 5). error는 고르는 화면의 일이 던진 것이다.
+// 영역 고르기를 끝낸 까닭(기대 동작 5). error는 고르는 화면의 일이 던졌거나, 고르기를 끝까지 하지 않고 멈춘 것이다(되돌리기,
+// 다시 고르기, 확장의 물러남. inject.ts).
 export type SelectionEnd = 'escape' | 'right-click' | 'left' | 'timeout' | 'error';
 
 // 페이지 쪽의 영역 고르기의 끝(inject.ts의 select). rect는 고른 영역, view는 놓은 때의 보이는 화면, start는 끌기 시작한 때의

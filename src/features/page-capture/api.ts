@@ -18,7 +18,8 @@ export const selectionLimitMs = 120_000;
 export const addressWaitMs = 1000;
 
 export interface PageApi {
-  // 영역을 고른다. 고르는 화면은 끝나면 지우고, 화면을 두 번 그린 뒤 답한다(찍을 때 남지 않게).
+  // 영역을 고른다. 고르는 화면은 끝나면 곧 지운다. 고른 영역은 화면을 두 번 그린 뒤 답하고(찍을 때 고르는 화면이 남지 않게),
+  // 취소(ended)는 찍지 않으므로 곧 답한다(떠나는 문서도 답하게, inject.ts의 end).
   readonly select: () => Promise<Picked>;
   // 전체 캡처의 대상을 고르고, 지금 스크롤을 기억한다. 문서를 찍으면 맨 위로 옮긴다.
   readonly prepare: () => Plan;
