@@ -499,6 +499,21 @@ describe('PAGE-1 영역 캡처의 연결', () => {
     });
     expect(capture.saved).toEqual([]);
   });
+
+  it('PAGE-1.5 고르는 동안 그 문서가 사라지면(다른 문서로 떠남) "찍는 동안 페이지가 바뀜"이 아니라 페이지를 떠나 취소한 것으로 끝내고, 사라진 문서를 되돌리지 않는다', async () => {
+    const browser = createFakeBrowser();
+    browser.open({ id: 1, active: true, url: href });
+    const capture = captureWorld({ goneAt: 'select' });
+    const { popup, session } = await start(browser, capture);
+    await popup(taskStart, { featureId: 'page-capture', action: 'area', tabId: 1 });
+    expect(await ended(session, 1)).toMatchObject({
+      status: 'failed',
+      error: appError('cancelled', '페이지를 떠나 영역 고르기를 멈췄다.'),
+    });
+    expect(capture.saved).toEqual([]);
+    expect(capture.copied).toEqual([]);
+    expect(capture.calls).toEqual(['select']);
+  });
 });
 
 describe('PAGE-1.25 결정 0038 서비스 워커가 찍는 도중 멈춤', () => {

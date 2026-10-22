@@ -79,11 +79,14 @@ interface Script {
   readonly size?: { width: number; height: number };
   // 그 할 일에서 답하지 않고 멈춘다(그 뒤의 사건은 시험이 넣는다).
   readonly holdAt?: Effect['type'];
-  // 그 할 일들은 실패로 답한다.
+  // 그 할 일들은 실패로 답한다. 그 실패(없으면 platform)다.
   readonly failAt?: readonly Effect['type'][];
+  readonly failWith?: AppError;
 }
 
 const failure: AppError = appError('platform', '실패');
+// 그 문서가 사라졌거나 넣은 스크립트가 없다(platform의 callInjected).
+const gone: AppError = appError('unavailable', '페이지가 바뀌었다.');
 
 // 할 일에 답을 주며 끝까지 돌린다. 내보낸 할 일과 끝, 마지막 상태를 돌려준다.
 function drive(mode: Mode, script: Script = {}) {
@@ -105,7 +108,7 @@ function drive(mode: Mode, script: Script = {}) {
     }
     const { step } = effect;
     if (script.failAt?.includes(effect.type) === true) {
-      return { type: 'failed', step, error: failure };
+      return { type: 'failed', step, error: script.failWith ?? failure };
     }
     switch (effect.type) {
       case 'inject':
@@ -416,6 +419,24 @@ describe('영역 캡처의 차례', () => {
       expect(run.ending()).toEqual({ ok: false, failure: { kind: 'ended', reason } });
     },
   );
+
+  it('PAGE-1.5 고르기를 기다리는 동안 그 문서가 사라지거나 넣은 스크립트가 없어지면(unavailable) 페이지를 떠난 것으로 취소하고, 사라진 고르는 화면을 되돌리지 않는다', () => {
+    const run = drive('area', { failAt: ['select'], failWith: gone });
+    expect(run.types()).toEqual(['inject', 'select', 'finish']);
+    expect(run.ending()).toEqual({ ok: false, failure: { kind: 'ended', reason: 'left' } });
+  });
+
+  it('PAGE-1.5 찍는 단계에서 문서가 사라지면(unavailable) 떠남이 아니라 그 실패로 끝내고 붙잡은 것을 되돌린다', () => {
+    const run = drive('area', { picked: beyond, failAt: ['waitImages'], failWith: gone });
+    expect(run.types().slice(-3)).toEqual(['restore', 'release', 'finish']);
+    expect(run.ending()).toEqual({ ok: false, failure: { kind: 'error', error: gone } });
+  });
+
+  it('고르기를 기다리다 그 밖의 까닭으로 실패하면 떠남이 아니라 그 실패로 끝내고 고르는 화면을 되돌린다', () => {
+    const run = drive('area', { failAt: ['select'] });
+    expect(run.types()).toEqual(['inject', 'select', 'restore', 'finish']);
+    expect(run.ending()).toEqual({ ok: false, failure: { kind: 'error', error: failure } });
+  });
 
   it('PAGE-1.4 고른 영역이 한도보다 크면 찍지 않는다', () => {
     const huge: Picked = { ...beyond, rect: { x: 0, y: 0, width: 1000, height: 70_000 } };

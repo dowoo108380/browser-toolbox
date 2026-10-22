@@ -459,12 +459,17 @@ function measured<T, I>(state: Running<T, I>, scene: MeasuredScene, measure: Mea
   }
 }
 
+// 영역 고르기가 끝났다. 고르는 화면은 페이지 쪽이 이미 지웠으므로(문서가 사라졌으면 그 화면도 함께 사라졌다) 되돌리지 않고
+// 끝낸다.
+function selectionEnded<T, I>(state: Running<T, I>, reason: SelectionEnd): Step<T, I> {
+  return finish(state.held, { ok: false, failure: { kind: 'ended', reason } });
+}
+
 // 영역을 골랐다.
 function picked<T, I>(state: Running<T, I>, page: PageRef, choice: Picked): Step<T, I> {
-  // 고르는 화면은 끝나면 페이지 쪽이 지운다.
+  if (choice.kind === 'ended') return selectionEnded(state, choice.reason);
+  // 고르는 화면은 고르기가 끝나면 페이지 쪽이 지운다.
   const held: Held = { ...state.held, page: false };
-  if (choice.kind === 'ended')
-    return finish(held, { ok: false, failure: { kind: 'ended', reason: choice.reason } });
   const size = deviceSize(choice.rect, choice.dpr);
   if (tooLarge(size)) return finish(held, { ok: false, failure: { kind: 'too-large', size } });
   const withPage: Running<T, I> = { ...state, held, page };
@@ -655,6 +660,12 @@ function advance<T, I>(state: Running<T, I>, event: CaptureEvent<T, I>): Step<T,
         partial: stage.partial,
       });
     case 'failed':
+      // 고르기를 기다리는 동안 그 문서가 사라지거나 넣은 스크립트가 없어졌다(unavailable): 사용자가 다른 문서로 떠났다(기대 동작
+      // 5). 떠나는 문서는 pagehide에 곧 답하지만(inject.ts), 그 답이 닿기 전에 문서가 사라지면 이 길로 온다. 찍는 단계의
+      // unavailable은 찍는 동안 페이지가 바뀐 것이다(기대 동작 10).
+      if (stage.at === 'select' && event.error.kind === 'unavailable') {
+        return selectionEnded(state, 'left');
+      }
       return fail(state, { kind: 'error', error: event.error });
     case 'start':
     case 'abort':

@@ -70,6 +70,20 @@ async function run(
   await popup.close();
 }
 
+// 그 페이지에서 영역 캡처를 시작하고 팝업을 닫는다(사용자가 페이지를 누르면 팝업이 닫힌다). 고르는 화면이 뜰 때까지 기다린다.
+// 디버거 없이 보이는 화면을 찍으려면 그 탭에 activeTab이 있어야 해 실제 팝업을 열어 받는다(grantActiveTab, browserDebugging).
+async function startArea(
+  context: BrowserContext,
+  extensionId: string,
+  profileDirectory: string,
+  page: Page,
+) {
+  await grantActiveTab(profileDirectory, extensionId, page);
+  await run(context, extensionId, page, '영역 캡처');
+  await page.bringToFront();
+  await expect(page.locator(selectionHost)).toHaveCount(1);
+}
+
 const summaryOf = (record: unknown) => String(Reflect.get(Object(record), 'summary'));
 const messageOf = (record: unknown) =>
   String(Reflect.get(Object(Reflect.get(Object(record), 'error')), 'message'));
@@ -287,19 +301,6 @@ test.describe('영역 캡처', () => {
   // 디버거 없이 보이는 화면을 찍으려면 그 탭에 activeTab이 있어야 한다. 실제 팝업을 열어 받는다(grantActiveTab).
   test.use({ browserDebugging: true });
 
-  // 그 페이지에서 영역 캡처를 시작하고 팝업을 닫는다(사용자가 페이지를 누르면 팝업이 닫힌다). 고르는 화면이 뜰 때까지 기다린다.
-  async function startArea(
-    context: BrowserContext,
-    extensionId: string,
-    profileDirectory: string,
-    page: Page,
-  ) {
-    await grantActiveTab(profileDirectory, extensionId, page);
-    await run(context, extensionId, page, '영역 캡처');
-    await page.bringToFront();
-    await expect(page.locator(selectionHost)).toHaveCount(1);
-  }
-
   const bodyOf = (page: Page) => page.evaluate(() => document.body.outerHTML);
 
   test('PAGE-1.3 PAGE-1.14 PAGE-1.18 PAGE-1.20 보이는 화면 안에서 끌어 고르면 디버거 없이 그 영역만 저장하고 HTML 없이 그림만 복사하며, 페이지 위에 결과가 보이며 고르는 화면은 남지 않는다', async ({
@@ -470,6 +471,90 @@ test.describe('영역 캡처', () => {
     await reloadExtension(profileDirectory, extensionId);
     await expect(page.locator(selectionHost)).toHaveCount(0);
     expect(await page.evaluate(() => document.body.outerHTML)).toBe(before);
+  });
+});
+
+// 고르는 동안 다른 문서로 떠나면 취소다(기대 동작 5, 사용자 2026-10-22).
+test.describe('고르는 동안 떠남', () => {
+  test.use({ browserDebugging: true });
+
+  // 고르는 동안 그 탭이 다른 문서로 간다: 끄는 도중 사용자가 다른 주소를 엶, 페이지의 스크립트가 옮김, 끌기 전에 뒤로 가기.
+  const leaves: readonly (readonly [string, (page: Page) => Promise<unknown>])[] = [
+    [
+      '끄는 도중 다른 주소를 엶',
+      async (page) => {
+        await page.mouse.move(100, 100);
+        await page.mouse.down();
+        await page.mouse.move(250, 200, { steps: 4 });
+        await page.goto(`${fixtureOrigin}/blank.html`);
+      },
+    ],
+    [
+      '페이지의 스크립트가 옮김',
+      async (page) => {
+        await page.evaluate(() => {
+          location.assign('/blank.html');
+        });
+        await page.waitForURL('**/blank.html');
+      },
+    ],
+    ['뒤로 가기', (page) => page.goBack()],
+  ];
+  for (const [how, leave] of leaves) {
+    test(`PAGE-1.5 고르는 동안 다른 문서로 가면(${how}) 페이지를 떠나 취소한 것으로 끝나고 파일이 생기지 않으며 클립보드가 바뀌지 않는다`, async ({
+      context,
+      extensionId,
+      profileDirectory,
+    }) => {
+      const { worker, page, tabId } = await setup(context, 'blank.html');
+      await page.goto(`${fixtureOrigin}/capture-markers.html`);
+      await writeClipboardText(page, '캡처 전');
+      await startArea(context, extensionId, profileDirectory, page);
+      await leave(page);
+      expect(page.url()).toBe(`${fixtureOrigin}/blank.html`);
+      expect(await finished(worker, tabId)).toMatchObject({
+        status: 'failed',
+        error: { kind: 'cancelled', message: strings.ended.left },
+      });
+      expect(await savedFiles(worker)).toEqual([]);
+      expect(await clipboardText(page)).toBe('캡처 전');
+      // 사용자가 보는 것(수동 절차 21단계): 옮겨 간 페이지 위의 알림과 확장 아이콘의 배지.
+      await expect
+        .poll(() => indicatorTexts(page))
+        .toEqual([`영역 캡처: 취소했다. ${strings.ended.left}`]);
+      expect(await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId)).toBe(
+        '!',
+      );
+    });
+  }
+
+  // 정식 Chrome은 뒤로·앞으로 캐시를 쓴다: 뒤로 가면 떠나는 문서가 사라지지 않고 멈춘 채 캐시에 들고, 앞으로 가면 그 문서가
+  // 되살아난다. 떠난 문서의 고르기를 기다리는 일이 붙잡히지 않고 취소로 끝나는지, 되살아난 문서에 고르는 화면이 남지 않는지 본다.
+  test.describe('뒤로·앞으로 캐시', () => {
+    test.use({ backForwardCache: true });
+
+    test('PAGE-1.5 고르는 동안 뒤로 가면 떠난 문서가 캐시에 들어도 곧 취소로 끝나고, 앞으로 돌아와 되살아난 그 문서에는 고르는 화면이 남아 있지 않으며 DOM이 캡처 전과 같다', async ({
+      context,
+      extensionId,
+      profileDirectory,
+    }) => {
+      const { worker, page, tabId } = await setup(context, 'blank.html');
+      await page.goto(`${fixtureOrigin}/capture-markers.html`);
+      const before = await page.evaluate(() => document.body.outerHTML);
+      // 앞으로 돌아온 것이 새로 실은 문서가 아니라 캐시에서 되살아난 그 문서인지 보는 표식.
+      await page.evaluate(() => Reflect.set(window, '__sameDocument', true));
+      await startArea(context, extensionId, profileDirectory, page);
+      await page.goBack({ waitUntil: 'commit' });
+      expect(await finished(worker, tabId, 10_000)).toMatchObject({
+        status: 'failed',
+        error: { kind: 'cancelled', message: strings.ended.left },
+      });
+      expect(await savedFiles(worker)).toEqual([]);
+      await page.goForward({ waitUntil: 'commit' });
+      expect(await page.evaluate(() => Reflect.get(window, '__sameDocument') === true)).toBe(true);
+      expect(await page.locator(selectionHost).count()).toBe(0);
+      expect(await page.evaluate(() => document.body.outerHTML)).toBe(before);
+    });
   });
 });
 

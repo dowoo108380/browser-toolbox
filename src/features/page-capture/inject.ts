@@ -267,7 +267,13 @@ function startSelection(resolve: (picked: Picked) => void): { readonly cancel: (
     if (ended) return;
     ended = true;
     scope.close();
-    // 고르는 화면이 찍히지 않게 지운 뒤 화면을 두 번 그리고 답한다.
+    // 고르기를 끝낸 것(취소)은 찍지 않으므로 곧 답한다. 떠나는 문서(pagehide)는 화면을 그리지 않아 기다리면 답하지 못하고, 뒤로·앞으로
+    // 캐시에 드는 문서는 멈춘 채 남아 서비스 워커가 고르기의 한도(2분)까지 기다렸다(2026-10-22 실험).
+    if (picked.kind === 'ended') {
+      resolve(picked);
+      return;
+    }
+    // 고른 영역은 고르는 화면이 찍히지 않게 지운 뒤 화면을 두 번 그리고 답한다.
     void frames(2).then(() => {
       resolve(picked);
     });
