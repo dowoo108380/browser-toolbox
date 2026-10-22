@@ -10,12 +10,16 @@ import {
   clipboardTypes,
   countAttaches,
   debuggerAttached,
+  drawBands,
   finished,
   followScrollWithAddress,
   grantActiveTab,
+  pngColors,
   pngInfo,
   recordPageCalls,
+  type SelectionPart,
   savedFiles,
+  selectionParts,
   startCapture,
   taskOf,
   writeClipboardText,
@@ -460,6 +464,149 @@ test.describe('영역 캡처', () => {
     );
     await page.mouse.up();
     expect(await finished(worker, tabId)).toMatchObject({ status: 'succeeded' });
+  });
+
+  test.describe('고르는 화면의 모양', () => {
+    // 고르는 화면의 색(inject.ts, 옛 기능): 페이지 전체에 남색 12%, 끄는 동안 네모 바깥에 남색 38%를 더하고 안에 흰색 4%, 크기
+    // 표시의 바탕은 남색 92%. 찍은 화면의 색은 그 덮개를 차례로 섞은 색에서 3 넘게 다르지 않다.
+    type Rgb = readonly [number, number, number];
+    const navy: Rgb = [15, 23, 42];
+    const white: Rgb = [255, 255, 255];
+    const rgbOf = (hex: string): Rgb => [
+      Number.parseInt(hex.slice(1, 3), 16),
+      Number.parseInt(hex.slice(3, 5), 16),
+      Number.parseInt(hex.slice(5, 7), 16),
+    ];
+    const cover = ([r, g, b]: Rgb, [toR, toG, toB]: Rgb, alpha: number): Rgb => [
+      r + (toR - r) * alpha,
+      g + (toG - g) * alpha,
+      b + (toB - b) * alpha,
+    ];
+    const apart = (hex: string | undefined, expected: Rgb) =>
+      Math.max(
+        ...rgbOf(hex ?? '#000000').map((value, at) => Math.abs(value - (expected[at] ?? 0))),
+      );
+    const boxOf = (parts: readonly SelectionPart[], className: string) => {
+      const box = parts.find((part) => part.className === className)?.box;
+      if (box === undefined || box === null) throw new Error(`${className}이 보이지 않는다.`);
+      return box;
+    };
+    const edgesShown = async (page: Page) =>
+      (await selectionParts(page))
+        .filter((part) => part.className.startsWith('edge') && part.box !== null)
+        .map((part) => part.className);
+
+    test('PAGE-1.27 고르기를 시작하면 페이지가 살짝 어두워지고, 끄는 동안 고른 네모의 바깥은 더 어둡고 안은 밝으며 저장될 그림의 화소 크기가 보이고, 저장한 그림에는 어두운 색도 크기 표시도 테두리도 없다', async ({
+      context,
+      extensionId,
+      profileDirectory,
+    }) => {
+      const { worker, page, tabId } = await setup(context, 'capture-tiles.html');
+      // 문서가 화면에 다 들어가 저절로 스크롤할 곳이 없다. 200px마다 띠의 색이 다르다. 배율 1.25에서 화면 높이는 소수라
+      // (innerHeight는 반올림한 값) 그보다 낮게 그린다.
+      const view = await page.evaluate(() => ({
+        width: innerWidth,
+        height: Math.floor(visualViewport?.height ?? innerHeight),
+      }));
+      await drawBands(page, { height: view.height });
+      const scrolled = await page.evaluate(() => {
+        window.scrollTo(0, 50);
+        return scrollY;
+      });
+      expect(scrolled).toBe(0);
+      const colorAt = (y: number) => bandColors[Math.floor(y / 200) % bandColors.length] ?? '';
+      await startArea(context, extensionId, profileDirectory, page);
+      const started = await pngInfo(page, await page.screenshot(), [[device(700), device(300)]]);
+      expect(apart(started.colors[0], cover(rgbOf(colorAt(300)), navy, 0.12))).toBeLessThanOrEqual(
+        3,
+      );
+      // 화면 위아래 끝 가까이까지 끌어, 크기 표시가 네모 밑에도 위에도 들어가지 않아 네모 안의 아래에 오게 한다(그림에 들 자리).
+      // 포인터의 자리는 기기 픽셀로 반올림되므로 배율 1.25에서 꼭 맞는 4의 배수로 둔다.
+      const bottom = Math.floor((view.height - 8) / 4) * 4;
+      const height = bottom - 8;
+      await page.mouse.move(100, 8);
+      await page.mouse.down();
+      await page.mouse.move(500, bottom, { steps: 4 });
+      const parts = await selectionParts(page);
+      const sizeText = parts.find((part) => part.className === 'size')?.text;
+      const label = boxOf(parts, 'size');
+      expect(label.x).toBe(100);
+      expect(label.y).toBeGreaterThan(8);
+      expect(label.y + label.height).toBeLessThanOrEqual(bottom);
+      // 화면 가장자리 가까이에 있어도 문서가 움직이지 않으므로 가장자리 띠가 없다.
+      expect(await edgesShown(page)).toEqual([]);
+      const labelY = label.y + label.height / 2;
+      const inside = cover(cover(rgbOf(colorAt(300)), navy, 0.12), white, 0.04);
+      const during = await pngInfo(page, await page.screenshot(), [
+        [device(700), device(300)],
+        [device(300), device(300)],
+        [device(label.x + 3), device(labelY)],
+      ]);
+      expect(
+        apart(during.colors[0], cover(cover(rgbOf(colorAt(300)), navy, 0.12), navy, 0.38)),
+      ).toBeLessThanOrEqual(3);
+      expect(apart(during.colors[1], inside)).toBeLessThanOrEqual(3);
+      expect(
+        apart(
+          during.colors[2],
+          cover(cover(cover(rgbOf(colorAt(labelY)), navy, 0.12), white, 0.04), navy, 0.92),
+        ),
+      ).toBeLessThanOrEqual(3);
+      await page.mouse.up();
+      expect(await finished(worker, tabId)).toMatchObject({ status: 'succeeded' });
+      // 그림의 왼쪽 위는 문서의 (100, 8)이다. 네모 안, 크기 표시가 있던 자리, 파란 테두리가 있던 왼쪽 끝이 덮이지 않은 띠
+      // 색이고, 그림 어디에도 띠 색이 아닌 색(덮개, 글자)이 없다.
+      const file = await onlyFile(worker);
+      const saved = await pngInfo(page, file, [
+        [device(200), device(300 - 8)],
+        [device(label.x - 100 + 3), device(labelY - 8)],
+        [device(1), device(300 - 8)],
+      ]);
+      expect(saved).toEqual({
+        width: device(400),
+        height: device(height),
+        colors: [colorAt(300), colorAt(labelY), colorAt(300)],
+      });
+      expect(bandColors).toEqual(expect.arrayContaining(await pngColors(page, file)));
+      // 크기 표시는 저장한 그림의 화소 크기였다.
+      expect(sizeText).toBe(strings.selectionSize({ width: saved.width, height: saved.height }));
+    });
+
+    test('PAGE-1.27 가장자리로 끌어 저절로 스크롤하는 동안 그쪽 가장자리에 띠가 보이고 멈추면 사라지며, 저장한 그림에는 띠도 크기 표시도 없다', async ({
+      context,
+      extensionId,
+      profileDirectory,
+    }) => {
+      const { worker, page, tabId } = await setup(context, 'capture-markers.html');
+      const view = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+      await startArea(context, extensionId, profileDirectory, page);
+      await page.mouse.move(200, 200);
+      await page.mouse.down();
+      await page.mouse.move(400, view.height - 2, { steps: 4 });
+      await expect.poll(() => edgesShown(page)).toEqual(['edge bottom']);
+      // 화면 가운데로 오면 저절로 스크롤이 멈추고 띠가 사라진다.
+      await page.mouse.move(400, view.height / 2, { steps: 2 });
+      await expect.poll(() => edgesShown(page)).toEqual([]);
+      await page.mouse.move(400, view.height - 2, { steps: 2 });
+      // 네모의 위가 화면 밖으로 나가 크기 표시가 네모 위에도 들어가지 않을 때까지 스크롤한다.
+      await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(view.height);
+      expect(await edgesShown(page)).toEqual(['edge bottom']);
+      // 놓기 바로 전: 띠는 화면 아래 24px, 크기 표시는 네모 안의 아래(화면 안의 자리는 스크롤해도 같다).
+      const parts = await selectionParts(page);
+      const surface = boxOf(parts, 'surface');
+      const band = boxOf(parts, 'edge bottom');
+      expect(band).toEqual({ x: 0, y: surface.height - 24, width: surface.width, height: 24 });
+      const label = boxOf(parts, 'size');
+      expect(label.x).toBe(200);
+      expect(label.y + label.height).toBeGreaterThan(band.y);
+      await page.mouse.up();
+      expect(await finished(worker, tabId)).toMatchObject({ status: 'succeeded' });
+      // 디버거로 찍은 그림(끌기 시작한 자리에서 화면을 늘려 찍음) 어디에도 띠 색이 아닌 색(덮개, 띠, 글자)이 없다. 고정 헤더는
+      // 고른 영역 밖이다.
+      expect(bandColors).toEqual(
+        expect.arrayContaining(await pngColors(page, await onlyFile(worker))),
+      );
+    });
   });
 
   test('PAGE-1.25 영역을 고르는 도중 확장을 다시 불러오면 고르는 화면이 페이지에서 사라진다', async ({

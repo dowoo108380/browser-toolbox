@@ -9,8 +9,8 @@ import {
   type Plan,
   sameAddress,
 } from './core/capture.ts';
-import type { Point, Rect } from './core/geometry.ts';
-import { rectBetween, scrollStep, tooSmall } from './core/selection.ts';
+import { type Point, type Rect, deviceSize } from './core/geometry.ts';
+import { rectBetween, scrollStep, sizeLabelAt, tooSmall } from './core/selection.ts';
 import { pageCapture } from './feature.ts';
 import { strings } from './strings.ts';
 
@@ -51,14 +51,58 @@ const css = `
 .surface {
   position: absolute;
   inset: 0;
+  background: rgb(15 23 42 / 0.12);
 }
 .box {
   position: absolute;
   display: none;
   box-sizing: border-box;
   border: 2px solid #1a73e8;
-  background: rgb(26 115 232 / 0.15);
+  background: rgb(255 255 255 / 0.04);
+  box-shadow: 0 0 0 100vmax rgb(15 23 42 / 0.38);
   pointer-events: none;
+}
+.edge {
+  position: absolute;
+  display: none;
+  background: rgb(26 115 232 / 0.18);
+  pointer-events: none;
+}
+.edge.top,
+.edge.bottom {
+  left: 0;
+  right: 0;
+  height: 24px;
+}
+.edge.left,
+.edge.right {
+  top: 0;
+  bottom: 0;
+  width: 24px;
+}
+.edge.top {
+  top: 0;
+}
+.edge.bottom {
+  bottom: 0;
+}
+.edge.left {
+  left: 0;
+}
+.edge.right {
+  right: 0;
+}
+.size {
+  position: absolute;
+  display: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgb(15 23 42 / 0.92);
+  color: #fff;
+  font: 12px/1.4 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
 }
 .hint {
   position: absolute;
@@ -243,9 +287,11 @@ function frames(count: number): Promise<null> {
 }
 
 // 영역을 고르는 화면(기대 동작 5). 닫힌 shadow root 안에 두고(페이지 스타일과 서로 영향을 주지 않는다) 최상위 층에 띄운다(페이지의
-// 대화 상자나 전체 화면 요소보다 위). 끄는 동안 화면 가장자리에 가까우면 문서를 저절로 스크롤한다. 안쪽 상자는 스크롤하지 않는다.
-// 사용자의 입력(신뢰된 이벤트)만 받는다. 웹 페이지가 만든 이벤트로 영역을 고르거나 끝내지 못하게 하기 위해서다(quality 081).
-// cancel은 고르기를 끝까지 하지 않고 그 까닭으로 끝낸다(되돌리기, 물러남).
+// 대화 상자나 전체 화면 요소보다 위). 페이지 전체를 살짝 어둡게 하고, 끄는 동안 고른 네모의 바깥을 더 어둡게 하며 네모 곁에
+// 저장될 그림의 화소 크기를 보인다(자리는 sizeLabelAt). 끄는 동안 화면 가장자리에 가까우면 문서를 저절로 스크롤하고 그동안 그쪽 가장자리에 띠를
+// 보인다. 안쪽 상자는 스크롤하지 않는다. 모양과 색은 옛 기능이고 크기의 단위는 그림의 화소다. 사용자의 입력(신뢰된 이벤트)만 받는다.
+// 웹 페이지가 만든 이벤트로 영역을 고르거나 끝내지 못하게 하기 위해서다(quality 081). cancel은 고르기를 끝까지 하지 않고 그
+// 까닭으로 끝낸다(되돌리기, 물러남).
 function startSelection(resolve: (picked: Picked) => void): { readonly cancel: () => void } {
   let ended = false;
   const scope = scopeFor(() => {
@@ -262,15 +308,39 @@ function startSelection(resolve: (picked: Picked) => void): { readonly cancel: (
   surface.className = 'surface';
   const box = document.createElement('div');
   box.className = 'box';
+  const edge = (side: string) => {
+    const element = document.createElement('div');
+    element.className = `edge ${side}`;
+    return element;
+  };
+  const edges = {
+    top: edge('top'),
+    bottom: edge('bottom'),
+    left: edge('left'),
+    right: edge('right'),
+  };
   const hint = document.createElement('div');
   hint.className = 'hint';
   hint.setAttribute('role', 'status');
   hint.textContent = strings.hint;
-  root.append(surface, box, hint);
+  const size = document.createElement('div');
+  size.className = 'size';
+  root.append(surface, box, edges.top, edges.bottom, edges.left, edges.right, hint, size);
 
   // 끄는 중이면 시작한 점과 그때의 스크롤, 지금 포인터의 화면 좌표.
   let drag: { readonly start: Point; readonly startScroll: Point; pointer: Point } | null = null;
   let scrolling = false;
+
+  // 저절로 스크롤해 문서가 움직인 쪽의 가장자리 띠만 보인다(문서 끝이라 움직이지 않으면 보이지 않는다).
+  const showEdges = (moved: Point) => {
+    const show = (element: HTMLElement, on: boolean) => {
+      element.style.display = on ? 'block' : 'none';
+    };
+    show(edges.top, moved.y < 0);
+    show(edges.bottom, moved.y > 0);
+    show(edges.left, moved.x < 0);
+    show(edges.right, moved.x > 0);
+  };
 
   function end(picked: Picked) {
     if (ended) return;
@@ -297,27 +367,46 @@ function startSelection(resolve: (picked: Picked) => void): { readonly cancel: (
     const at = current();
     if (drag === null || at === null) {
       box.style.display = 'none';
+      size.style.display = 'none';
+      showEdges({ x: 0, y: 0 });
       return;
     }
     const rect = rectBetween(drag.start, at);
+    const onScreen = { ...rect, x: rect.x - window.scrollX, y: rect.y - window.scrollY };
     box.style.display = 'block';
-    box.style.left = `${String(rect.x - window.scrollX)}px`;
-    box.style.top = `${String(rect.y - window.scrollY)}px`;
+    box.style.left = `${String(onScreen.x)}px`;
+    box.style.top = `${String(onScreen.y)}px`;
     box.style.width = `${String(rect.width)}px`;
     box.style.height = `${String(rect.height)}px`;
+    // 놓으면 찍을 배율(picked의 dpr)로 잰다. 페이지를 확대하면 그 배율도 곱한다.
+    size.textContent = strings.selectionSize(deviceSize(rect, window.devicePixelRatio));
+    size.style.display = 'block';
+    const place = sizeLabelAt(
+      onScreen,
+      { width: size.offsetWidth, height: size.offsetHeight },
+      { width: surface.clientWidth, height: surface.clientHeight },
+    );
+    size.style.left = `${String(place.x)}px`;
+    size.style.top = `${String(place.y)}px`;
   };
 
   // 끄는 동안 포인터가 가장자리에 있으면 화면을 그릴 때마다 문서를 조금씩 스크롤한다.
   const autoScroll = () => {
     if (scrolling || drag === null) return;
     const step = scrollStep(drag.pointer, viewportSize());
-    if (step.x === 0 && step.y === 0) return;
+    if (step.x === 0 && step.y === 0) {
+      showEdges(step);
+      return;
+    }
     scrolling = true;
     scope.animationFrame(() => {
       scrolling = false;
       if (drag === null) return;
       const next = scrollStep(drag.pointer, viewportSize());
+      const before = scrollPoint();
       window.scrollBy({ left: next.x, top: next.y, behavior: 'instant' });
+      const after = scrollPoint();
+      showEdges({ x: after.x - before.x, y: after.y - before.y });
       draw();
       autoScroll();
     });

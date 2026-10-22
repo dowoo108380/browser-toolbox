@@ -45,4 +45,6 @@ export const strings = {
   // 영역을 고르는 화면의 안내(페이지 위).
   hint: '끌어서 찍을 영역을 고른다. Esc나 오른쪽 클릭은 취소.',
   hintTooSmall: '영역이 너무 작다. 더 크게 끌어서 고른다.',
+  // 끄는 동안 고른 네모 밑의 크기 표시. 저장될 그림의 화소 크기라 결과와 "…화소" 안내와 같은 단위다(사용자, 2026-10-22).
+  selectionSize: (size: Size) => `${count(size.width)} × ${count(size.height)}`,
 };

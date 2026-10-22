@@ -125,6 +125,26 @@ export function pngInfo(page: Page, png: Buffer, points: readonly (readonly [num
   );
 }
 
+// 그 PNG에 든 색(#rrggbb)을 모두 준다(차례대로, 한 번씩). 그림 어디에도 시험 페이지에 없는 색(덮개, 글자)이 없는지 본다.
+export function pngColors(page: Page, png: Buffer): Promise<string[]> {
+  return page.evaluate(async (base64) => {
+    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (context === null) throw new Error('캔버스가 없다.');
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    const colors = new Set<number>();
+    for (let at = 0; at < data.length; at += 4) {
+      colors.add(((data[at] ?? 0) << 16) | ((data[at + 1] ?? 0) << 8) | (data[at + 2] ?? 0));
+    }
+    return [...colors]
+      .sort((a, b) => a - b)
+      .map((color) => `#${color.toString(16).padStart(6, '0')}`);
+  }, png.toString('base64'));
+}
+
 // capture-tiles.html에 200 CSS 픽셀마다 색이 다른 띠(bandColors를 되풀이)를 height만큼 넣는다. width가 있으면 띠가 그
 // 너비다(없으면 창 너비). box가 있으면 띠는 화면 높이의 스크롤 상자 안에 있고 문서는 스크롤되지 않는다(안쪽 상자를 펼쳐 찍는 길).
 // box가 'fixed'면 상자의 높이를 지금 화면 높이(px)로 정해 늘려도 펼쳐지지 않는다(보이는 화면만 찍는 길).
@@ -431,6 +451,61 @@ export async function recordPageCalls(
           })
         : [];
     });
+}
+
+// 영역을 고르는 화면의 조각 하나: 클래스, 글, 화면에서의 네모(CSS 픽셀. 보이지 않으면 null).
+export interface SelectionPart {
+  readonly className: string;
+  readonly text: string;
+  readonly box: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  } | null;
+}
+
+// 영역을 고르는 화면(inject.ts) 안의 조각들을 그린 차례로 준다. 닫힌 shadow root 안이라 페이지에서는 볼 수 없어 CDP로 펼쳐
+// 읽는다(indicatorTexts와 같다).
+export async function selectionParts(page: Page): Promise<SelectionPart[]> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const { root } = await session.send('DOM.getDocument', { depth: -1, pierce: true });
+    type Node = typeof root;
+    const attribute = (node: Node, name: string) => {
+      const list = node.attributes ?? [];
+      const at = list.findIndex((value, index) => index % 2 === 0 && value === name);
+      return at === -1 ? undefined : list[at + 1];
+    };
+    const hostIn = (node: Node): Node | undefined => {
+      if (attribute(node, 'data-browser-toolbox') === 'page-capture-selection') return node;
+      for (const child of node.children ?? []) {
+        const found = hostIn(child);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const parts: SelectionPart[] = [];
+    for (const node of hostIn(root)?.shadowRoots?.[0]?.children ?? []) {
+      if (node.nodeName !== 'DIV') continue;
+      let box: SelectionPart['box'] = null;
+      try {
+        const { model } = await session.send('DOM.getBoxModel', { nodeId: node.nodeId });
+        const [left = 0, top = 0, , , right = 0, bottom = 0] = model.border;
+        box = { x: left, y: top, width: right - left, height: bottom - top };
+      } catch (error) {
+        // 보이지 않는(display: none) 조각은 네모가 없다.
+        if (!(error instanceof Error) || !error.message.includes('Could not compute box model')) {
+          throw error;
+        }
+      }
+      const text = (node.children ?? []).map((child) => child.nodeValue).join('');
+      parts.push({ className: attribute(node, 'class') ?? '', text, box });
+    }
+    return parts;
+  } finally {
+    await session.detach();
+  }
 }
 
 // 그 탭에 이 확장의 디버거가 붙어 있는지. 대상의 attached는 Playwright의 연결도 세므로 쓰지 않고, 이 확장의 연결로 명령을

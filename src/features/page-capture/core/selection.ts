@@ -39,3 +39,21 @@ function stepAlong(at: number, length: number): number {
 export function scrollStep(pointer: Point, viewport: Size): Point {
   return { x: stepAlong(pointer.x, viewport.width), y: stepAlong(pointer.y, viewport.height) };
 }
+
+// 크기 표시와 고른 네모 사이, 크기 표시와 화면 가장자리 사이의 틈(CSS 픽셀. 제안).
+export const labelGapPx = 4;
+
+// 끄는 동안 크기 표시를 둘 자리(화면 좌표의 왼쪽 위). rect는 고른 네모의 화면 좌표, label은 크기 표시의 크기, view는 고르는
+// 화면의 크기다. 네모의 왼쪽 아래 바로 밑에 두고, 화면 아래 끝에 가까워 들어가지 않으면 네모 위에 둔다(옛 기능). 저절로 스크롤해
+// 네모가 화면 높이를 넘어 둘 다 들어가지 않으면 네모의 왼쪽 아래 모서리에 가장 가까운 화면 안에 둔다(제안). 가로도 화면 안에 둔다.
+export function sizeLabelAt(rect: Rect, label: Size, view: Size): Point {
+  const inside = (at: number, length: number, limit: number) =>
+    Math.max(labelGapPx, Math.min(at, limit - length - labelGapPx));
+  const x = inside(rect.x, label.width, view.width);
+  const bottom = rect.y + rect.height;
+  const below = bottom + labelGapPx;
+  if (below + label.height <= view.height - labelGapPx) return { x, y: below };
+  const above = rect.y - labelGapPx - label.height;
+  if (above >= labelGapPx) return { x, y: above };
+  return { x, y: inside(bottom - labelGapPx - label.height, label.height, view.height) };
+}
