@@ -106,6 +106,9 @@ const commandKey = (featureId: string, name: string) => `${featureId}/${name}`;
 // 물러남 이벤트를 받았는데 아직 연결되어 있을 때 다시 확인하는 때(ms). 끝없이 확인하지 않는다(quality 069).
 const retireRecheckDelaysMs = [200, 1000, 5000];
 
+// 물러남 이벤트의 내용: 새 판의 서비스 워커가 탭마다 만든 토큰(결정 0008). 웹 페이지도 같은 이벤트를 보낸다(quality 064).
+const retireTokenSchema = v.string();
+
 export function startPageRuntime(deps: PageRuntimeDeps): void {
   if (Reflect.get(globalThis, runtimeMarker) !== undefined) return;
   Reflect.set(globalThis, runtimeMarker, deps.bundle);
@@ -333,8 +336,9 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
       retire();
       return;
     }
-    if (event instanceof CustomEvent && typeof event.detail === 'string') {
-      claimOwnedElements(event.detail);
+    if (event instanceof CustomEvent) {
+      const token = v.safeParse(retireTokenSchema, event.detail);
+      if (token.success) claimOwnedElements(token.output);
     }
     if (recheckTimers.size > 0) return;
     for (const delay of retireRecheckDelaysMs) {

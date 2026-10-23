@@ -429,6 +429,18 @@ describe('결정 0008 새 판의 정리(retireInFrame)', () => {
     document.dispatchEvent(new CustomEvent(retireEventName, { detail: 'page-token' }));
     expect(document.querySelectorAll(hostTagName)).toHaveLength(1);
   });
+
+  it('quality 064 연결된 채 받은 물러남 이벤트의 토큰이 글이 아니면 자기 요소에 적지 않는다', () => {
+    const runtime = setup([hostPart], true);
+    runtime.apply(snapshot({ host: { enabled: true } }));
+    const host = document.querySelector(hostTagName);
+    for (const detail of [1, null, { token: 'x' }, ['x']]) {
+      document.dispatchEvent(new CustomEvent(retireEventName, { detail }));
+    }
+    expect(host?.getAttribute(claimAttribute)).toBeNull();
+    document.dispatchEvent(new CustomEvent(retireEventName, { detail: 'token' }));
+    expect(host?.getAttribute(claimAttribute)).toBe('token');
+  });
 });
 
 describe('결정 0014 기능의 자원 범위와 실패 격리', () => {
