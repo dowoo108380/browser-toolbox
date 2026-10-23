@@ -214,25 +214,29 @@ describe('PAGE-1.10 PAGE-1.11 이미지 기다리기', () => {
 
   it('그려질 이미지가 다 불렸으면 곧 끝낸다', async () => {
     const started = performance.now();
-    expect(await page().waitImages(null, 2000)).toEqual({ pending: 0 });
+    await page().waitImages(null, 2000);
     expect(performance.now() - started).toBeLessThan(500);
   });
 
-  it('다 불리지 않은 이미지가 있으면 한도까지 기다리고 그 수를 준다', async () => {
+  it('다 불리지 않은 이미지가 있으면 한도까지 기다린다', async () => {
     tallDocument(20_000);
-    farLazyImage(15_000);
+    const image = farLazyImage(15_000);
     const started = performance.now();
-    expect(await page().waitImages(null, 300)).toEqual({ pending: 1 });
+    await page().waitImages(null, 300);
     expect(performance.now() - started).toBeGreaterThanOrEqual(290);
+    expect(image.complete).toBe(false);
   });
 
   it('영역 밖의 이미지와 그려지지 않는 이미지는 기다리지 않는다', async () => {
     tallDocument(20_000);
-    farLazyImage(15_000);
-    farLazyImage(16_000).style.display = 'none';
-    expect(await page().waitImages({ x: 0, y: 0, width: 300, height: 300 }, 2000)).toEqual({
-      pending: 0,
-    });
+    const outside = farLazyImage(15_000);
+    const hidden = farLazyImage(16_000);
+    hidden.style.display = 'none';
+    const started = performance.now();
+    await page().waitImages({ x: 0, y: 0, width: 300, height: 300 }, 2000);
+    expect(performance.now() - started).toBeLessThan(500);
+    // 두 이미지는 아직 다 불리지 않았다(다 불려서 곧 끝난 것이 아니다).
+    expect([outside.complete, hidden.complete]).toEqual([false, false]);
   });
 
   it('화면을 두 번 그리기를 기다린다', async () => {

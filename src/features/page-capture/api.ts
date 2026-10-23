@@ -25,11 +25,8 @@ export interface PageApi {
   readonly prepare: () => Plan;
   // 화면을 두 번 그리기를 기다린다(숨은 문서에서도 끝나게 시간 한도가 있다).
   readonly settle: () => Promise<null>;
-  // rect(없으면 문서 전체)에 그려질 이미지를 다 불러오기를 limitMs까지 기다리고, 그때 아직 불러오는 수를 준다.
-  readonly waitImages: (
-    rect: Rect | null,
-    limitMs: number,
-  ) => Promise<{ readonly pending: number }>;
+  // rect(없으면 문서 전체)에 그려질 이미지를 다 불러오기를 limitMs까지 기다린다.
+  readonly waitImages: (rect: Rect | null, limitMs: number) => Promise<null>;
   readonly measure: (what: Measured) => Measure;
   // 문서를 그 스크롤 자리로 옮긴다. 옮기기 전의 자리를 기억한다.
   readonly position: (point: Point) => null;
@@ -90,5 +87,4 @@ export const answers = {
     dpr: dprSchema,
   }) satisfies v.Schema<Measure>,
   done: v.null(),
-  waited: v.object({ pending: v.number() }),
 };

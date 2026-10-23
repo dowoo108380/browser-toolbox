@@ -101,8 +101,6 @@ function captureWorld(script: PageScript = {}) {
         return (
           script.measure ?? { rect: { x: 0, y: 0, ...docSize }, overflow: 0, viewport, dpr: 1 }
         );
-      case 'waitImages':
-        return { pending: 0 };
       case 'select':
         return script.picked ?? null;
       default:

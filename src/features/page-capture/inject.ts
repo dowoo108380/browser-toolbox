@@ -231,8 +231,7 @@ function findBox(): { readonly box: Element | null; readonly any: boolean } {
 }
 
 // 화면에 그려지고 주소가 있는데 아직 다 불러오지 않은 이미지가 rect(없으면 어디든)와 겹치는지.
-function pendingImages(rect: Rect | null): number {
-  let count = 0;
+function imagesPending(rect: Rect | null): boolean {
   for (const image of document.images) {
     const source =
       image.currentSrc !== '' || image.getAttribute('src') !== null || image.srcset !== '';
@@ -246,9 +245,9 @@ function pendingImages(rect: Rect | null): number {
         box.y > rect.y + rect.height;
       if (apart) continue;
     }
-    count += 1;
+    return true;
   }
-  return count;
+  return false;
 }
 
 // 일 하나의 자원 범위. 확장과의 연결이 끊기면(다시 불러옴) 콜백을 부르지 않는다. 범위의 예외는 onError로 받는다.
@@ -571,13 +570,12 @@ function createPageApi(): PageApi {
         const started = performance.now();
         const scope = scopeFor(() => {
           scope.close();
-          resolve({ pending: pendingImages(rect) });
+          resolve(null);
         });
         const check = () => {
-          const pending = pendingImages(rect);
-          if (pending === 0 || performance.now() - started >= limitMs) {
+          if (!imagesPending(rect) || performance.now() - started >= limitMs) {
             scope.close();
-            resolve({ pending });
+            resolve(null);
             return;
           }
           scope.timeout(imagePollMs, check);

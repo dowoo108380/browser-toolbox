@@ -293,7 +293,7 @@ function capture(
             const waited = await call(
               'waitImages',
               [rect, imageWaitMs],
-              answers.waited,
+              answers.done,
               imageWaitMs + slack,
             );
             return waited.ok ? ok({ type: 'waited', step }) : waited;
