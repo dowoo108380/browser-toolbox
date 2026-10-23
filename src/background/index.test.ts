@@ -9,12 +9,18 @@ import {
   tabRuntimes,
   tabStatus,
   taskStart,
+  v,
 } from '../contracts/index.ts';
 import { createFakeStore } from '../platform/fake.ts';
 import type { KeyValueStore, PageProbe, TabEventHandlers, TabResponse } from '../platform/index.ts';
 import { type AppError, appError, err, ok } from '../shared/index.ts';
 import { settingsFormat, settingsKey, tasksKey } from '../storage/index.ts';
-import { defineTaskPart, startBackground } from './index.ts';
+import {
+  type TabTogglePart,
+  defineTabTogglePart,
+  defineTaskPart,
+  startBackground,
+} from './index.ts';
 
 // 서비스 워커가 시작할 때 하는 일(결정 0011 "형식 이전과 고쳐 쓰기", quality 067).
 
@@ -438,6 +444,43 @@ describe('결정 0024 실행 기능의 작업(task.start)', () => {
         startTime: 1_790_000_000_000,
       }),
     ).toThrow('실행 기능 save의 일이 0개다.');
+  });
+});
+
+describe('결정 0043 탭마다 켜고 끄는 기능의 일', () => {
+  const toggle = defineFeature({
+    id: 'keep',
+    requirements: [],
+    name: '탭마다',
+    description: '시험용',
+    category: 'tabs',
+    kind: 'tab-toggle',
+    content: null,
+    permissions: [],
+    settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
+    notices: {},
+  });
+  // 일을 맞춰 보는 것은 일을 시작하기 전이라 이 시험의 일은 시작하지 않는다.
+  const part = defineTabTogglePart(toggle, () => {
+    throw new Error('시험에서 시작하지 않는다.');
+  });
+  const start = (parts: readonly TabTogglePart[]) => () =>
+    startTestBackground({
+      store: createFakeStore(),
+      features: [...specs, toggle],
+      startTime: 1_790_000_000_000,
+      tabToggleParts: parts,
+    });
+
+  it('quality 066 탭마다 켜고 끄는 기능의 일이 없거나 둘이면 서비스 워커가 시작하지 않고 던진다', () => {
+    expect(start([])).toThrow('탭마다 켜고 끄는 기능 keep의 일이 0개다.');
+    expect(start([part, part])).toThrow('탭마다 켜고 끄는 기능 keep의 일이 2개다.');
+  });
+
+  it('quality 066 일에 맞는 탭마다 켜고 끄는 기능이 없으면(켜고 끄기 기능 포함) 시작할 때 던진다', () => {
+    expect(start([part, { ...part, featureId: 'sample' }])).toThrow(
+      '탭마다 켜고 끄는 일 sample에 맞는 기능이 없다.',
+    );
   });
 });
 
