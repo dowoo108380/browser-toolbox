@@ -1,5 +1,6 @@
 // 확장을 설치·갱신·다시 로드한 뒤, 열린 탭의 모든 프레임에서 옛 스크립트를 정리한다(결정 0008).
 
+import { v } from '../contracts/index.ts';
 import { type AppError, type Result, appError, err, ok, withTimeout } from '../shared/index.ts';
 
 interface RetireMarkers {
@@ -243,6 +244,11 @@ function callInjectedInFrame(key?: string, method?: string, args?: readonly unkn
   }
 }
 
+// callInjectedInFrame이 돌려주는 봉투. 그 문서에서 온 값이라 들어올 때 검증한다(quality 064). 함수 안에서는 contracts를 쓸 수
+// 없어 봉투를 손으로 만든다(아키텍처 7장 "경계에서 받은 값"의 예외). 값(value)은 부르는 쪽이 그 일의 스키마로 검증한다.
+const answeredSchema = v.object({ href: v.string(), value: v.unknown() });
+const thrownSchema = v.object({ thrown: v.literal(true) });
+
 // 넣은 스크립트의 답. documentId는 그 답을 낸 문서다(Chrome이 문서마다 붙임). 같은 탭이라도 다른 문서를 실으면 달라진다. href는
 // 답할 때의 그 문서의 주소다(같은 문서 안에서도 바뀐다).
 export interface InjectedAnswer {
@@ -267,15 +273,14 @@ export async function callInjected(
       args: [key, method, [...args]],
       injectImmediately: true,
     });
-    // 결과가 없거나 null이면 그 문서가 기다리는 사이에 사라진 것이다(R-27).
-    const result: unknown = frame?.result;
-    if (frame === undefined || typeof result !== 'object' || result === null) return err(changed);
-    const href: unknown = Reflect.get(result, 'href');
-    if (Reflect.has(result, 'value') && typeof href === 'string') {
-      const value: unknown = Reflect.get(result, 'value');
+    // 결과가 없거나 null이면 그 문서가 기다리는 사이에 사라진 것이다(R-27). 일이 없다는 봉투({ missing: true })도 같다.
+    if (frame === undefined) return err(changed);
+    const answered = v.safeParse(answeredSchema, frame.result);
+    if (answered.success) {
+      const { href, value } = answered.output;
       return ok({ documentId: frame.documentId, href, value });
     }
-    if (Reflect.has(result, 'thrown')) {
+    if (v.safeParse(thrownSchema, frame.result).success) {
       return err(appError('unexpected', '페이지에 넣은 스크립트가 일을 끝내지 못했다.'));
     }
     return err(changed);

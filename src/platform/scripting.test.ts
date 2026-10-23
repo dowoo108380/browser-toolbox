@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppError } from '../shared/index.ts';
+import { type AppError, ok } from '../shared/index.ts';
 import {
+  callInjected,
   pageRuntimeMarker,
   probePageRuntime,
   retireInAllFrames,
@@ -291,5 +292,69 @@ describe('결정 0023 지금 탭의 탐침', () => {
     } finally {
       Reflect.deleteProperty(globalThis, Symbol.for(key));
     }
+  });
+});
+
+describe('결정 0046 넣은 스크립트의 일 부르기', () => {
+  function fakeCall(answer: () => Promise<readonly FrameResult[]>) {
+    const executeScript = vi.fn(() => answer());
+    vi.stubGlobal('chrome', { scripting: { executeScript } });
+    return executeScript;
+  }
+  const answered = (result: unknown) => () => Promise.resolve([{ documentId: 'doc', result }]);
+  const kindOf = async () => {
+    const result = await callInjected(7, 'key', 'method', [1]);
+    return result.ok ? null : result.error.kind;
+  };
+
+  it('그 탭의 최상위 문서에 바로 넣고, 답의 값과 그때의 주소, 그 문서의 id를 돌려준다', async () => {
+    const executeScript = fakeCall(answered({ value: { n: 1 }, href: 'https://a.test/' }));
+    expect(await callInjected(7, 'key', 'method', [1])).toEqual(
+      ok({ documentId: 'doc', href: 'https://a.test/', value: { n: 1 } }),
+    );
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 7, frameIds: [0] },
+        args: ['key', 'method', [1]],
+        injectImmediately: true,
+      }),
+    );
+    // 값이 null이어도 답이다(값의 검증은 부르는 쪽이 한다).
+    fakeCall(answered({ value: null, href: 'https://a.test/' }));
+    expect(await callInjected(7, 'key', 'method', [])).toEqual(
+      ok({ documentId: 'doc', href: 'https://a.test/', value: null }),
+    );
+  });
+
+  it('일이 던지면 unexpected다', async () => {
+    fakeCall(answered({ thrown: true }));
+    expect(await kindOf()).toBe('unexpected');
+  });
+
+  it('일이 없거나 문서가 사라졌거나 봉투의 모양이 틀리면 unavailable이다(페이지가 바뀜)', async () => {
+    const results: unknown[] = [
+      { missing: true },
+      null,
+      undefined,
+      'text',
+      [],
+      { value: 1 },
+      { value: 1, href: 3 },
+      { href: 'https://a.test/' },
+      { thrown: false },
+    ];
+    for (const result of results) {
+      fakeCall(answered(result));
+      expect(await kindOf(), JSON.stringify(result)).toBe('unavailable');
+    }
+    fakeCall(() => Promise.resolve([]));
+    expect(await kindOf()).toBe('unavailable');
+  });
+
+  it('Chrome이 넣을 수 없는 페이지라고 거절하면 unavailable, 그 밖의 거절은 platform이다', async () => {
+    fakeCall(() => Promise.reject(new Error('No document with id 5EB6D7B4 in tab with id 7')));
+    expect(await kindOf()).toBe('unavailable');
+    fakeCall(() => Promise.reject(new Error('Something new')));
+    expect(await kindOf()).toBe('platform');
   });
 });
