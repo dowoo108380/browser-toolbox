@@ -455,7 +455,7 @@ describe('결정 0043 탭마다 켜고 끄는 기능의 일', () => {
     description: '시험용',
     category: 'tabs',
     kind: 'tab-toggle',
-    content: null,
+    content: { sites: 'all', frames: 'all' },
     permissions: [],
     settings: { schema: v.object({ enabled: v.boolean() }), defaults: { enabled: false } },
     notices: {},
