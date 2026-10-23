@@ -48,7 +48,8 @@ export interface PageStart extends PageContext {
     payload: Payload,
   ) => Promise<Result<Value, AppError>>;
   // 서비스 워커 쪽이 이 프레임에 보낸 이 기능의 명령에 답한다. 내용은 명령의 payload로 검증해 넘긴다. 이번 실행이 끝나면(scope가
-  // 닫히면) 그만 답한다. 다른 기능의 명령에는 답하지 못한다(던진다).
+  // 닫히면) 그만 답한다. handle이 던지면 scope가 감싼 콜백의 예외처럼 이 기능을 멈추고 기록하며, 묻는 쪽에는 unexpected로
+  // 답한다. 다른 기능의 명령에는 답하지 못한다(던진다).
   readonly answer: <Payload, Value>(
     command: FeatureCommand<Payload, Value>,
     handle: (payload: Payload) => Result<Value, AppError>,

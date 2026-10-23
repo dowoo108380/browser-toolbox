@@ -94,6 +94,7 @@ const runtimeMarker = Symbol.for(pageRuntimeKey);
 
 // 실행 틀이 기능 명령에 답하는 실패의 문구.
 const strings = {
+  answerFailed: '그 명령에 답하던 기능이 실패해 멈췄다.',
   badAnswer: '서비스 워커의 답이 명령의 형식에 맞지 않는다.',
   badCommand: '명령의 내용이 맞지 않는다.',
   noAnswerer: '이 프레임에서 그 명령에 답하는 기능이 돌고 있지 않다.',
@@ -220,14 +221,20 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
           const value = v.safeParse(command.value, sent.value);
           return value.success ? ok(value.output) : err(appError('unexpected', strings.badAnswer));
         };
+        // 답하는 함수는 범위가 감싼 콜백처럼 격리한다(결정 0014): 던지면 이 실행의 실패로 멈추고 정리하며, 묻는 쪽에는
+        // unexpected로 답한다. 멈추면 범위가 닫혀 이 답하는 함수도 지워진다.
         const answer: PageStart['answer'] = (command, handle) => {
           own(command);
           const key = commandKey(command.featureId, command.name);
           const answerer = (payload: unknown): Result<unknown, AppError> => {
             const parsed = v.safeParse(command.payload, payload);
-            return parsed.success
-              ? handle(parsed.output)
-              : err(appError('invalid-input', strings.badCommand));
+            if (!parsed.success) return err(appError('invalid-input', strings.badCommand));
+            try {
+              return handle(parsed.output);
+            } catch {
+              dispatch({ type: 'fail', featureId, run });
+              return err(appError('unexpected', strings.answerFailed));
+            }
           };
           answerers.set(key, answerer);
           scope.defer(() => {

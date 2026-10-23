@@ -1364,8 +1364,8 @@ describe('결정 0043 탭마다 켜고 끄는 기능과 기능 명령', () => {
     value: v.null(),
   });
 
-  // 시작과 정리를 세고, 서비스 워커가 보낸 ping에 n + 1로 답한다.
-  function tabPart(options: { readonly misuse?: boolean } = {}) {
+  // 시작과 정리를 세고, 서비스 워커가 보낸 ping에 n + 1로 답한다. failing이면 ping에 답하다 던진다.
+  function tabPart(options: { readonly misuse?: boolean; readonly failing?: boolean } = {}) {
     const counts: { started: number; disposed: number; topFrames: boolean[] } = {
       started: 0,
       disposed: 0,
@@ -1381,7 +1381,10 @@ describe('결정 0043 탭마다 켜고 끄는 기능과 기능 명령', () => {
         answer(otherCommand, () => ok(null));
         return;
       }
-      answer(ping, ({ n }) => ok({ n: n + 1 }));
+      answer(ping, ({ n }) => {
+        if (options.failing === true) throw new Error('답하다 고장');
+        return ok({ n: n + 1 });
+      });
       scope.listen(document, 'test-send', async () => {
         sentResults.push(await send(ping, { n: 1 }));
       });
@@ -1486,6 +1489,26 @@ describe('결정 0043 탭마다 켜고 끄는 기능과 기능 명령', () => {
     runtime.tab(['per-tab']);
     expect(counts).toMatchObject({ started: 1, disposed: 1 });
     expect(runtime.reports).toEqual([{ featureId: 'per-tab', kind: 'unexpected' }]);
+  });
+
+  it('quality 010 명령에 답하다 던지면 그 기능만 멈추고 정리한 뒤 기록하며, 묻는 쪽에는 unexpected로 답한다', () => {
+    const { part, counts } = tabPart({ failing: true });
+    const good = countingPart('good');
+    const runtime = setup([part, good.part]);
+    runtime.apply(snapshot({ good: { enabled: true } }));
+    runtime.tab(['per-tab']);
+    let answered: Result<unknown, AppError> | undefined;
+    expect(() => {
+      answered = runtime.command('per-tab', 'ping', { n: 1 });
+    }).not.toThrow();
+    expect(answered?.ok === false ? answered.error.kind : null).toBe('unexpected');
+    expect(counts).toMatchObject({ started: 1, disposed: 1 });
+    expect(runtime.reports).toEqual([{ featureId: 'per-tab', kind: 'unexpected' }]);
+    // 멈춘 실행은 더 답하지 않는다. 다른 기능은 그대로 돈다.
+    const again = runtime.command('per-tab', 'ping', { n: 1 });
+    expect(again?.ok === false ? again.error.kind : null).toBe('unavailable');
+    document.dispatchEvent(new Event('test-ping'));
+    expect(good.counts).toMatchObject({ started: 1, disposed: 0, pings: 1 });
   });
 
   it('탭의 상태를 받지 못하면 기록하고, 확장이 끊겼다고 하면 물러난다', () => {
