@@ -25,8 +25,12 @@ export interface CheckedItems {
   readonly corruptSites: readonly SiteItem[];
 }
 
+// 사이트 값(기능 id → 값)의 모양. 값은 기능마다의 사이트 스키마로 본다. 모르는 키를 거절하지 않고 키를 하나씩 보지도 않는다.
+const siteValueSchema = v.object({});
+
+// 사이트 값이 객체인지. 스키마가 낸 값은 빈 객체라 쓰지 않고, 저장된 값을 그대로 읽고 남긴다(모르는 기능의 항목, 결정 0022).
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return v.safeParse(siteValueSchema, value).success;
 }
 
 // 모르는 기능 id의 항목은 손상이 아니다. 같은 형식 버전에서 기능을 더한 새 릴리스를 쓰다가 되돌린 경우일 수 있으므로,
