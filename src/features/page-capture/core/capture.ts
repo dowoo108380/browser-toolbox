@@ -238,7 +238,7 @@ type Stage<T, I> =
   | { readonly at: 'restore'; readonly shooting: Shooting<T> }
   // waited: 주소가 돌아오기를 이미 한 번 기다렸다.
   | { readonly at: 'verify'; readonly shooting: Shooting<T>; readonly waited: boolean }
-  | { readonly at: 'compose'; readonly size: Size; readonly partial: PartialReason | null }
+  | { readonly at: 'compose'; readonly partial: PartialReason | null }
   | {
       readonly at: 'save';
       readonly image: I;
@@ -637,7 +637,7 @@ function advance<T, I>(state: Running<T, I>, event: CaptureEvent<T, I>): Step<T,
         }));
       }
       const { target, dpr, shots, partial } = stage.shooting;
-      return issue(state, { at: 'compose', size: deviceSize(target, dpr), partial }, (step) => ({
+      return issue(state, { at: 'compose', partial }, (step) => ({
         type: 'compose',
         step,
         target,

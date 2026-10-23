@@ -28,6 +28,7 @@ import { capturePath } from './core/filename.ts';
 import {
   type Rect,
   type Size,
+  deviceSize,
   maxAreaDevicePx,
   maxCopyDevicePx,
   maxSideDevicePx,
@@ -383,10 +384,7 @@ function capture(
         case 'compose': {
           const { step, target, dpr, shots } = effect;
           later(step, async () => {
-            const size = {
-              width: Math.round(target.width * dpr),
-              height: Math.round(target.height * dpr),
-            };
+            const size = deviceSize(target, dpr);
             try {
               const image = await compose(target, dpr, size, shots);
               return ok({ type: 'composed', step, image, size });

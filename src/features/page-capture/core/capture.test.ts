@@ -462,7 +462,12 @@ describe('저장과 복사의 끝', () => {
   it('PAGE-1.21 복사 한도보다 큰 그림은 복사하지 않고 그 까닭을 남긴다', () => {
     const run = drive('full', { size: { width: 5000, height: 10_001 } });
     expect(run.types().slice(-3)).toEqual(['save', 'release', 'finish']);
-    expect(run.ending()).toMatchObject({ ok: true, copy: 'too-big' });
+    // 복사 여부와 끝의 크기는 이어 붙인 그림의 크기(composed)로 정한다.
+    expect(run.ending()).toMatchObject({
+      ok: true,
+      copy: 'too-big',
+      size: { width: 5000, height: 10_001 },
+    });
   });
 
   it('복사하지 못해도 저장한 것으로 끝내고 그 까닭을 남긴다', () => {
