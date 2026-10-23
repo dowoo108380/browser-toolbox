@@ -29,6 +29,7 @@ import {
   tasksKey,
   withoutTab,
 } from '../storage/index.ts';
+import { partsByFeature } from './parts.ts';
 import type { Problem } from './problems.ts';
 import { strings } from './strings.ts';
 import type { TaskPart, TaskServices, TaskWork } from './task-part.ts';
@@ -100,32 +101,30 @@ const hasTasks = (records: TaskRecords) => Object.keys(records).length > 0;
 // 않을 수 있다(R-27). 넘기면 그 상태는 그대로 두고 기록을 끝낸다.
 const interruptTimeoutMs = 5000;
 
-// 실행 기능마다 일이 꼭 하나 있어야 한다. 빠지거나 겹치면 결함이므로 시작할 때 드러낸다(quality 066). 일은 서비스를 받아 시작한다.
-function partsByFeature(
+// 실행 기능마다 일이 꼭 하나 있어야 한다(parts.ts). 일은 서비스를 받아 시작한다.
+function worksByFeature(
   features: readonly FeatureDefinition[],
   parts: readonly TaskPart[],
   services: TaskServices,
 ): ReadonlyMap<string, { readonly feature: ActionFeature; readonly work: TaskWork }> {
-  const actions = features.filter((feature) => feature.kind === 'action');
-  for (const part of parts) {
-    if (!actions.some((feature) => feature.id === part.featureId)) {
-      throw new Error(`작업의 일 ${part.featureId}에 맞는 실행 기능이 없다.`);
-    }
-  }
+  const matched = partsByFeature(
+    features.filter((feature) => feature.kind === 'action'),
+    parts,
+    {
+      orphan: (featureId) => `작업의 일 ${featureId}에 맞는 실행 기능이 없다.`,
+      count: (featureId, count) => `실행 기능 ${featureId}의 일이 ${String(count)}개다.`,
+    },
+  );
   return new Map(
-    actions.map((feature) => {
-      const matched = parts.filter((part) => part.featureId === feature.id);
-      const [part] = matched;
-      if (part === undefined || matched.length > 1) {
-        throw new Error(`실행 기능 ${feature.id}의 일이 ${String(matched.length)}개다.`);
-      }
-      return [feature.id, { feature, work: part.start(services) }];
-    }),
+    [...matched].map(([featureId, { feature, part }]) => [
+      featureId,
+      { feature, work: part.start(services) },
+    ]),
   );
 }
 
 export function createTaskRunner(deps: TaskRunnerDeps): TaskRunner {
-  const actions = partsByFeature(deps.features, deps.parts, deps.services);
+  const actions = worksByFeature(deps.features, deps.parts, deps.services);
   const enqueue = createSerialQueue();
   // 이 서비스 워커에서 도는 일. 작업 id → 그 탭과 멈춤 단추. 탭이 닫히면 멈춘다.
   const running = new Map<string, { readonly tabId: number; readonly stop: AbortController }>();

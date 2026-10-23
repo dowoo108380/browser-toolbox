@@ -30,6 +30,7 @@ import {
   withTurnedOff,
   withoutTabToggles,
 } from '../storage/index.ts';
+import { partsByFeature } from './parts.ts';
 import type { Problem } from './problems.ts';
 import { strings } from './strings.ts';
 import type {
@@ -80,32 +81,12 @@ export interface TabToggles {
   readonly events: TabActivityHandlers;
 }
 
-// 탭마다 켜고 끄는 기능마다 서비스 워커 쪽 일이 꼭 하나 있어야 한다. 빠지거나 겹치면 결함이므로 시작할 때 드러낸다(quality 066).
-function partsByFeature(
-  features: readonly TabToggleFeature[],
-  parts: readonly TabTogglePart[],
-): ReadonlyMap<string, TabTogglePart> {
-  for (const part of parts) {
-    if (!features.some((feature) => feature.id === part.featureId)) {
-      throw new Error(`탭마다 켜고 끄는 일 ${part.featureId}에 맞는 기능이 없다.`);
-    }
-  }
-  return new Map(
-    features.map((feature) => {
-      const matched = parts.filter((part) => part.featureId === feature.id);
-      const [part] = matched;
-      if (part === undefined || matched.length > 1) {
-        throw new Error(
-          `탭마다 켜고 끄는 기능 ${feature.id}의 일이 ${String(matched.length)}개다.`,
-        );
-      }
-      return [feature.id, part];
-    }),
-  );
-}
-
 export function createTabToggles(deps: TabTogglesDeps): TabToggles {
-  const parts = partsByFeature(deps.features, deps.parts);
+  // 탭마다 켜고 끄는 기능마다 서비스 워커 쪽 일이 꼭 하나 있어야 한다(parts.ts).
+  const parts = partsByFeature(deps.features, deps.parts, {
+    orphan: (featureId) => `탭마다 켜고 끄는 일 ${featureId}에 맞는 기능이 없다.`,
+    count: (featureId, count) => `탭마다 켜고 끄는 기능 ${featureId}의 일이 ${String(count)}개다.`,
+  });
   const enqueue = createSerialQueue();
   // 읽은 기록과 받은 스위치. 둘 다 처음 설정을 받은 줄에서 채운다. 그 전의 요청은 ready를 기다린다.
   let records: TabToggleRecords = {};
@@ -219,7 +200,7 @@ export function createTabToggles(deps: TabTogglesDeps): TabToggles {
   });
 
   const runners = new Map(
-    [...parts].map(([featureId, part]) => [
+    [...parts].map(([featureId, { part }]) => [
       featureId,
       part.start(hostFor(featureId), deps.services),
     ]),
