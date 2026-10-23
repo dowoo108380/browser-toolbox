@@ -1407,6 +1407,22 @@ describe('결정 0043 탭마다 켜고 끄는 기능과 기능 명령', () => {
     expect(counts).toMatchObject({ started: 1, disposed: 1 });
   });
 
+  it('결정 0011 더 새 형식의 설정을 본 뒤에는 탭의 켜짐이 바뀌어도 옛 설정으로 다시 시작하지 않고, 지금 형식의 설정을 다시 받으면 시작한다', () => {
+    const tab = tabPart();
+    const a = countingPart('a');
+    const runtime = setup([tab.part, a.part]);
+    runtime.apply(snapshot({ a: { enabled: true } }));
+    runtime.tab(['per-tab']);
+    expect([tab.counts.started, a.counts.started]).toEqual([1, 1]);
+    runtime.newer(2);
+    expect([tab.counts.disposed, a.counts.disposed]).toEqual([1, 1]);
+    runtime.tab([]);
+    runtime.tab(['per-tab']);
+    expect([tab.counts.started, a.counts.started]).toEqual([1, 1]);
+    runtime.apply(snapshot({ a: { enabled: true } }));
+    expect([tab.counts.started, a.counts.started]).toEqual([2, 2]);
+  });
+
   it('설정을 받기 전에는 탭이 켜졌어도 시작하지 않고, 받으면 시작한다', () => {
     const { part, counts } = tabPart();
     const runtime = setup([part]);

@@ -401,8 +401,12 @@ export function startPageRuntime(deps: PageRuntimeDeps): void {
     apply,
     // 손상은 서비스 워커가 고쳐 쓰면서 한 번 기록한다. 프레임마다 기록하지 않는다.
     corrupt: () => undefined,
-    // 더 새 형식의 설정이면 기능을 멈춘다(결정 0011).
-    newer: stopAll,
+    // 더 새 형식의 설정이면 기능을 멈춘다(결정 0011). 받은 설정도 잊어, 탭의 켜짐이 바뀌어도 옛 설정으로 다시 시작하지
+    // 않는다. 지금 형식의 설정을 받아야 시작한다(읽는 쪽은 더 새 형식을 본 뒤로 아무것도 받아들이지 않는다, storage의 reader).
+    newer: () => {
+      latest = null;
+      stopAll();
+    },
     problem: (error) => {
       if (!checkConnection()) return;
       if (error.kind === 'disconnected') retire();
