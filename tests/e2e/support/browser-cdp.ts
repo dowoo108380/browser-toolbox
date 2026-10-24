@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 // 브라우저 수준 CDP에 붙는다. Playwright의 지속 컨텍스트는 브라우저 객체를 주지 않으므로,
@@ -10,16 +10,48 @@ export interface BrowserCdp {
   readonly close: () => void;
 }
 
-export async function connectBrowserCdp(profileDirectory: string): Promise<BrowserCdp> {
+export interface DevToolsAddress {
+  readonly port: string;
+  readonly browserPath: string;
+}
+
+// 파일의 줄. 아직 없거나(ENOENT) 막 생겨 Windows가 잠근 순간이면(EBUSY, 이슈 #22) 아직 없는 것으로 본다. 그 밖의 오류는 던진다.
+function readLines(file: string): string[] | undefined {
+  try {
+    return readFileSync(file, 'utf8').trim().split('\n');
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      ['ENOENT', 'EBUSY'].includes(String(error.code))
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+// Chromium이 DevToolsActivePort(포트와 브라우저의 경로 두 줄)를 다 쓸 때까지 기다려 읽는다(시간 한도).
+export async function readDevToolsActivePort(
+  profileDirectory: string,
+  ms: number,
+): Promise<DevToolsAddress> {
   const file = path.join(profileDirectory, 'DevToolsActivePort');
-  for (let waited = 0; !existsSync(file); waited += 50) {
-    if (waited > 10_000) throw new Error('DevToolsActivePort 파일이 생기지 않았다.');
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const [port, browserPath, ...rest] = readLines(file) ?? [];
+    if (port !== undefined && browserPath !== undefined && rest.length === 0) {
+      return { port, browserPath };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`DevToolsActivePort를 ${String(ms)}ms 안에 읽지 못했다.`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const [port, browserPath] = readFileSync(file, 'utf8').trim().split('\n');
-  if (port === undefined || browserPath === undefined) {
-    throw new Error('DevToolsActivePort 파일을 읽지 못했다.');
-  }
+}
+
+export async function connectBrowserCdp(profileDirectory: string): Promise<BrowserCdp> {
+  const { port, browserPath } = await readDevToolsActivePort(profileDirectory, 10_000);
   const socket = new WebSocket(`ws://127.0.0.1:${port}${browserPath}`);
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener('open', () => {

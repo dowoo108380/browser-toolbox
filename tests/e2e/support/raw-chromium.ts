@@ -1,7 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
+import { readDevToolsActivePort } from './browser-cdp.ts';
 import { distPath, insecureFixtureOrigin } from './extension.ts';
 
 // 보임과 초점을 보는 확장 전체 시험(TAB-2)의 Chromium. Playwright는 조종하는 페이지마다 초점을 흉내 내므로(R-02) 탭을 떠나도
@@ -156,16 +157,8 @@ export async function launchRawChromium(
       resolve();
     });
   });
-  const [port, browserPath] = await until(
-    () => {
-      if (!existsSync(portFile)) return Promise.resolve(undefined);
-      const lines = readFileSync(portFile, 'utf8').trim().split('\n');
-      return Promise.resolve(lines.length === 2 ? lines : undefined);
-    },
-    15_000,
-    'CDP 주소(DevToolsActivePort)',
-  );
-  const socket = new WebSocket(`ws://127.0.0.1:${port ?? ''}${browserPath ?? ''}`);
+  const { port, browserPath } = await readDevToolsActivePort(profileDirectory, 15_000);
+  const socket = new WebSocket(`ws://127.0.0.1:${port}${browserPath}`);
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener('open', () => {
       resolve();

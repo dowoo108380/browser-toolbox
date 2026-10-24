@@ -14,11 +14,13 @@ export default defineConfig({
           environment: 'node',
           // tests/integration은 실제 모듈끼리 연결한 시험이다. 가짜는 Chrome 경계(저장소, 메시지 통로 등)뿐이다.
           // 서비스 워커 쪽만 연결한 것은 여기서, 화면이나 페이지가 들어간 것(.dom.test)은 아래에서 돈다.
+          // tests/e2e/support의 .test.ts는 확장 전체 시험의 도우미를 Node에서 보는 시험이다(Playwright는 .spec.ts만 돈다).
           include: [
             'src/**/*.test.ts',
             'scripts/**/*.test.ts',
             'tests/lint/**/*.test.ts',
             'tests/integration/**/*.test.ts',
+            'tests/e2e/support/**/*.test.ts',
           ],
           exclude: ['**/*.dom.test.{ts,tsx}'],
         },

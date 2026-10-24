@@ -6,6 +6,8 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   outputDir: 'test-results',
+  // 시험 도우미 곁의 .test.ts는 Vitest가 돈다(vitest.config.ts).
+  testMatch: '**/*.spec.ts',
   timeout: 30_000,
   forbidOnly: process.env['CI'] !== undefined,
   retries: 0,
